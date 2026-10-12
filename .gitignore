@@ -1,0 +1,22 @@
+# Binaries
+/golem
+/golem-tui
+/bin/
+/dist/
+
+# Test
+*.out
+coverage.*
+*.test
+
+# Runtime data (local dev)
+*.jsonl
+*.sock
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
