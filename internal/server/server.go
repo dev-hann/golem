@@ -14,12 +14,12 @@ import (
 
 	"github.com/oklog/ulid/v2"
 
-	"github.com/golem-agent/golem/internal/agent"
-	"github.com/golem-agent/golem/internal/approval"
-	"github.com/golem-agent/golem/internal/llm"
-	"github.com/golem-agent/golem/internal/session"
-	"github.com/golem-agent/golem/internal/tools"
-	"github.com/golem-agent/golem/pkg/golemclient"
+	"github.com/dev-hann/golem/internal/agent"
+	"github.com/dev-hann/golem/internal/approval"
+	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/session"
+	"github.com/dev-hann/golem/internal/tools"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // defaultApprovalTimeout matches docs/CONFIG.md [approval].timeout_secs.

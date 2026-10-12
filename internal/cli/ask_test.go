@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/golem-agent/golem/internal/cli"
-	"github.com/golem-agent/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/cli"
+	"github.com/dev-hann/golem/internal/llm"
 )
 
 // stubProvider is a minimal scripted provider for CLI tests.

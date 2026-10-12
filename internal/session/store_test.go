@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golem-agent/golem/internal/llm"
-	"github.com/golem-agent/golem/internal/session"
+	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/session"
 )
 
 // newStore opens a store in a temp dir for tests.

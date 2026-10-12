@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golem-agent/golem/internal/llm"
-	anthropicgo "github.com/golem-agent/golem/internal/llm/anthropic"
+	"github.com/dev-hann/golem/internal/llm"
+	anthropicgo "github.com/dev-hann/golem/internal/llm/anthropic"
 )
 
 // sseWriter emits Anthropic-style SSE events.

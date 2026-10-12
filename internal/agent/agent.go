@@ -8,9 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/golem-agent/golem/internal/approval"
-	"github.com/golem-agent/golem/internal/llm"
-	"github.com/golem-agent/golem/internal/tools"
+	"github.com/dev-hann/golem/internal/approval"
+	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/tools"
 )
 
 // maxRounds bounds tool rounds per turn so a confused model cannot loop

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golem-agent/golem/internal/cli"
-	"github.com/golem-agent/golem/internal/llm"
-	"github.com/golem-agent/golem/internal/session"
+	"github.com/dev-hann/golem/internal/cli"
+	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/session"
 )
 
 // bashProvider requests a bash call once, then finishes with text.

@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golem-agent/golem/pkg/golemclient"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 func TestClient_ReceiveAfterCloseErrors(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/golem-agent/golem/internal/cli"
-	"github.com/golem-agent/golem/internal/tui"
+	"github.com/dev-hann/golem/internal/cli"
+	"github.com/dev-hann/golem/internal/tui"
 )
 
 func main() {

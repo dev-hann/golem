@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golem-agent/golem/internal/llm"
-	"github.com/golem-agent/golem/internal/server"
-	"github.com/golem-agent/golem/internal/session"
-	"github.com/golem-agent/golem/pkg/golemclient"
+	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/server"
+	"github.com/dev-hann/golem/internal/session"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // scriptedProvider streams queued rounds; streamFn overrides per-round

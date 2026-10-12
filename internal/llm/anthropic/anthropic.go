@@ -11,7 +11,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
 
-	"github.com/golem-agent/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/llm"
 )
 
 // DefaultMaxTokens is the per-request output cap. Made a constant so behavior

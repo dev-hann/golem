@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golem-agent/golem/internal/cli"
-	"github.com/golem-agent/golem/internal/llm"
-	"github.com/golem-agent/golem/internal/session"
+	"github.com/dev-hann/golem/internal/cli"
+	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/session"
 )
 
 // echoProvider answers every stream with one text delta.

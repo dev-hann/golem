@@ -38,7 +38,7 @@ make lint     # golangci-lint (strict; config in .golangci.yml)
 make test     # go test ./...
 make test-race
 make cover    # race + coverage; floor is 80% (enforced in CI)
-make fmt      # gofumpt + goimports (local prefix github.com/golem-agent/golem)
+make fmt      # gofumpt + goimports (local prefix github.com/dev-hann/golem)
 make build
 ```
 
@@ -46,7 +46,7 @@ make build
 
 Enforced by lint (`make lint`), but know them:
 
-- Formatting: `gofumpt -extra` + `goimports` with local prefix `github.com/golem-agent/golem`.
+- Formatting: `gofumpt -extra` + `goimports` with local prefix `github.com/dev-hann/golem`.
 - Max line length 120. Functions ≤ 80 lines. Cyclomatic complexity ≤ 15. Nesting depth ≤ 6.
 - Errors: always check, always wrap with context (`fmt.Errorf("reading session %s: %w", id, err)`). Use `errors.Is/As`, never string-match errors.
 - Every `switch` over an enum must be exhaustive (or explicitly `default` with rationale).

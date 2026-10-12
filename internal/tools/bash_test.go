@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golem-agent/golem/internal/tools"
+	"github.com/dev-hann/golem/internal/tools"
 )
 
 func TestBash_CapturesStdoutAndStderr(t *testing.T) {

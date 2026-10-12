@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/golem-agent/golem/internal/tools"
+	"github.com/dev-hann/golem/internal/tools"
 )
 
 func TestEdit_ReplacesUniqueString(t *testing.T) {

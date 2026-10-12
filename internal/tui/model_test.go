@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/golem-agent/golem/pkg/golemclient"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // fakeClient scripts inbound events and records outbound ones.

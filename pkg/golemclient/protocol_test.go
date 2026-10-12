@@ -7,7 +7,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/golem-agent/golem/pkg/golemclient"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 func TestRoundTrip_AllClientEvents(t *testing.T) {

@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/golem-agent/golem/internal/llm"
-	"github.com/golem-agent/golem/internal/server"
-	"github.com/golem-agent/golem/internal/session"
+	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/server"
+	"github.com/dev-hann/golem/internal/session"
 )
 
 // ServeOptions configures a golem server run.

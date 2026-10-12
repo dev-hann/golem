@@ -9,7 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golem-agent/golem/pkg/golemclient"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // ChatOptions configures a line-REPL chat client run.

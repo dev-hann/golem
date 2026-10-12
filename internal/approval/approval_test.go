@@ -3,7 +3,7 @@ package approval_test
 import (
 	"testing"
 
-	"github.com/golem-agent/golem/internal/approval"
+	"github.com/dev-hann/golem/internal/approval"
 )
 
 func TestApproval_AutoAllowsWhitelistedPrefixes(t *testing.T) {

@@ -112,7 +112,7 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/golem-agent/golem
+        - github.com/dev-hann/golem
 
 issues:
   max-issues-per-linter: 0

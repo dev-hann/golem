@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/golem-agent/golem/internal/tools"
+	"github.com/dev-hann/golem/internal/tools"
 )
 
 // stubTool is a minimal Tool for registry tests.

@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/golem-agent/golem/pkg/golemclient"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // mode is the TUI's input mode.

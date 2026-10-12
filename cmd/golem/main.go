@@ -13,8 +13,8 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/golem-agent/golem/internal/cli"
-	anthropicgo "github.com/golem-agent/golem/internal/llm/anthropic"
+	"github.com/dev-hann/golem/internal/cli"
+	anthropicgo "github.com/dev-hann/golem/internal/llm/anthropic"
 )
 
 // defaultModel is used when GOLEM_MODEL is unset (config file lands in

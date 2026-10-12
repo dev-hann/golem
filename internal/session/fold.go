@@ -3,7 +3,7 @@ package session
 import (
 	"encoding/json"
 
-	"github.com/golem-agent/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/llm"
 )
 
 // folder incrementally rebuilds conversation state from stored wire events.

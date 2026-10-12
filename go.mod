@@ -1,4 +1,4 @@
-module github.com/golem-agent/golem
+module github.com/dev-hann/golem
 
 go 1.25
 

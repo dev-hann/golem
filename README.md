@@ -2,7 +2,7 @@
 
 A lightweight, fast coding agent. Go server + TUI client.
 
-[![CI](https://github.com/golem-agent/golem/actions/workflows/ci.yml/badge.svg)](https://github.com/golem-agent/golem/actions/workflows/ci.yml)
+[![CI](https://github.com/dev-hann/golem/actions/workflows/ci.yml/badge.svg)](https://github.com/dev-hann/golem/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 
 ## Why
@@ -25,7 +25,7 @@ Pre-release. Under active development following [docs/ROADMAP.md](docs/ROADMAP.m
 Requires Go 1.25+.
 
 ```bash
-git clone https://github.com/golem-agent/golem
+git clone https://github.com/dev-hann/golem
 cd golem
 make build
 ./bin/golem serve &   # agent server on a unix socket
