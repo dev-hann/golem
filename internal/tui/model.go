@@ -20,6 +20,8 @@ const (
 	modeChat mode = iota
 	modeApproval
 	modeSessions
+	modeHelp
+	modeModels
 )
 
 // Model is the Bubble Tea model for the golem terminal client.
@@ -43,6 +45,8 @@ type Model struct {
 	height      int
 	provider    string
 	modelName   string
+	models      []string
+	modelCursor int
 	statusParts []string
 	inputRows   int
 	quitting    bool
@@ -58,7 +62,7 @@ func New(socketPath string) Model {
 // construct a new model view through this).
 func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
-	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+n new · ctrl+p sessions · ctrl+l clear)"
+	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+/ help)"
 	input.ShowLineNumbers = false
 	input.FocusedStyle.Text = k.Style(kit.Fg)
 	input.FocusedStyle.Placeholder = k.Style(kit.Dim)
@@ -186,6 +190,12 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateApproval(key)
 	case modeSessions:
 		return m.updateSessions(key)
+	case modeHelp:
+		m.mode = modeChat // any key closes the help modal
+
+		return m, nil
+	case modeModels:
+		return m.updateModels(key)
 	default:
 		return m, nil
 	}
@@ -208,6 +218,15 @@ func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 
 // updateChat handles chat-mode keys.
 func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Alt && len(key.Runes) == 1 && key.Runes[0] == 'm' {
+		// alt/option+m opens the model picker (ctrl+m is enter in terminal
+		// protocols — CR, byte 0x0D — and cannot be bound separately).
+		m.mode = modeModels
+		m.modelCursor = m.cursorOnModel(m.modelName)
+
+		return m, nil
+	}
+
 	switch key.Type { //nolint:exhaustive // foreign enum; default routes to the textarea
 	case tea.KeyCtrlN:
 		m.blocks = nil
@@ -221,17 +240,17 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.listRequest = true
 
 		return m, m.send(golemclient.ListSessions{Type: golemclient.TypeListSessions})
+	case tea.KeyCtrlUnderscore: // terminals send ctrl+/ as 0x1F
+		m.mode = modeHelp
+
+		return m, nil
 	case tea.KeyCtrlL:
 		m.blocks = nil
 		m.refreshView()
 
 		return m, nil
 	case tea.KeyEscape:
-		if m.turnActive {
-			return m.ctrlC() // interrupt only; quitting stays ctrl+c's job
-		}
-
-		return m, nil
+		return m.escKey()
 	case tea.KeyEnter:
 		if key.Alt { // alt/option+enter inserts a newline; plain enter submits
 			m.input.InsertString("\n")
@@ -270,6 +289,16 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// escKey interrupts an active turn; idle presses do nothing (quitting is
+// ctrl+c's job).
+func (m Model) escKey() (tea.Model, tea.Cmd) {
+	if m.turnActive {
+		return m.ctrlC()
+	}
+
+	return m, nil
+}
+
 // toggleLastTool expands or collapses the most recent tool block.
 func (m *Model) toggleLastTool() {
 	for i := len(m.blocks) - 1; i >= 0; i-- {
@@ -302,6 +331,54 @@ func (m Model) submit(line string) (tea.Model, tea.Cmd) {
 }
 
 // updateApproval handles y/n for a pending approval_request.
+// updateModels drives the model picker modal: arrows move, enter applies
+// via set_model, esc cancels.
+func (m Model) updateModels(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if len(m.models) == 0 {
+		m.mode = modeChat
+
+		return m, nil
+	}
+
+	switch key.Type { //nolint:exhaustive // foreign enum; default ignores
+	case tea.KeyUp:
+		m.modelCursor = max(m.modelCursor-1, 0)
+	case tea.KeyDown:
+		m.modelCursor = min(m.modelCursor+1, len(m.models)-1)
+	case tea.KeyEsc:
+		m.mode = modeChat
+	case tea.KeyEnter:
+		chosen := m.models[m.modelCursor]
+		m.modelName = chosen
+		m.mode = modeChat
+
+		return m, m.send(golemclient.SetModel{
+			Type: golemclient.TypeSetModel, Session: m.sessionID, Model: chosen,
+		})
+	default:
+	}
+
+	return m, nil
+}
+
+// cursorOnModel prepositions the picker cursor on the current model.
+func (m Model) cursorOnModel(current string) int {
+	for i, model := range m.models {
+		if model == current {
+			return i
+		}
+	}
+
+	return 0
+}
+
+// WithModels supplies the provider's model list for the ctrl+m picker.
+func (m Model) WithModels(models []string) Model {
+	m.models = models
+
+	return m
+}
+
 func (m Model) updateApproval(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	req := m.pending
 	if req == nil {
@@ -599,6 +676,23 @@ func (m Model) View() string {
 		return "golem: " + m.connErr + "\n"
 	}
 
+	switch m.mode {
+	case modeHelp:
+		return m.kit.Overlay(m.width, m.height, m.kit.Modal("keys", m.helpBody()))
+	case modeModels:
+		return m.kit.Overlay(m.width, m.height, m.kit.Modal("models · "+m.provider, m.modelsBody()))
+	case modeSessions:
+		return m.kit.Overlay(m.width, m.height, m.kit.Modal("sessions", m.sessionsBody()))
+	case modeApproval:
+		if m.pending != nil {
+			return m.kit.Overlay(m.width, m.height, m.kit.Modal("approval", m.approvalBody()))
+		}
+	case modeChat:
+		// The full layout below.
+	default:
+		// modeApproval without a pending request also falls to the layout.
+	}
+
 	var b strings.Builder
 	b.WriteString(header(m) + "\n")
 	b.WriteString(m.vp.View() + "\n")
@@ -606,6 +700,86 @@ func (m Model) View() string {
 	b.WriteString(m.kit.Box(m.input.View()))
 
 	return b.String()
+}
+
+// helpBody renders the keybinding reference.
+func (m Model) helpBody() string {
+	rows := [][2]string{
+		{"enter", "send message"},
+		{"alt+enter", "newline in message"},
+		{"ctrl+n", "new session"},
+		{"ctrl+p", "session picker"},
+		{"alt+m", "model picker"},
+		{"ctrl+l", "clear transcript view"},
+		{"ctrl+/", "this help"},
+		{"esc / ctrl+c", "interrupt turn (ctrl+c twice quits)"},
+		{"tab", "expand or collapse tool block"},
+		{"pgup / pgdn", "scroll transcript"},
+	}
+
+	var b strings.Builder
+	for _, row := range rows {
+		fmt.Fprintf(&b, "%s%-14s %s\n", "", row[0], row[1]) //nolint:errcheck // strings.Builder
+	}
+
+	b.WriteString(m.kit.DimLine("any key closes"))
+
+	return b.String()
+}
+
+// modelsBody renders the model picker list.
+func (m Model) modelsBody() string {
+	if len(m.models) == 0 {
+		current := m.modelName
+		if current == "" {
+			current = "unknown"
+		}
+
+		return current + "\n" + m.kit.DimLine("no model list — enter closes")
+	}
+
+	var b strings.Builder
+
+	for i, model := range m.models {
+		if i == m.modelCursor {
+			fmt.Fprintf(&b, "%s\n", m.kit.Selection("▶ "+model)) //nolint:errcheck // strings.Builder
+
+			continue
+		}
+
+		fmt.Fprintf(&b, "  %s\n", model) //nolint:errcheck // strings.Builder
+	}
+
+	b.WriteString(m.kit.DimLine("↑↓ select · enter apply · esc cancel"))
+
+	return b.String()
+}
+
+// sessionsBody renders the session picker list.
+func (m Model) sessionsBody() string {
+	var b strings.Builder
+
+	for i, s := range m.sessions {
+		line := fmt.Sprintf("%s %s (%d turns)", s.ID, s.Cwd, s.Turns)
+		if i == m.pickIndex {
+			b.WriteString(m.kit.Selection("▶ "+line) + "\n")
+
+			continue
+		}
+
+		b.WriteString("  " + line + "\n")
+	}
+
+	b.WriteString(m.kit.DimLine("↑↓ select · enter open · esc cancel"))
+
+	return b.String()
+}
+
+// approvalBody renders the approval prompt.
+func (m Model) approvalBody() string {
+	return m.kit.WarnLine("run this command?") + "\n" +
+		m.kit.ToolLine("  "+m.pending.Preview) + "\n" +
+		m.kit.DimLine("y allow · n deny")
 }
 
 // header renders the top line.
@@ -618,33 +792,8 @@ func header(m Model) string {
 	return fmt.Sprintf("golem — %s (%s)", m.sessionID, state)
 }
 
-// footer renders the mode footer (approval prompt, session picker, or
-// status bar) through the kit theme.
+// footer renders the status bar line.
 func (m Model) footer() string {
-	if m.mode == modeApproval && m.pending != nil {
-		return m.kit.WarnLine("run command? y = allow, n = deny") + "\n" +
-			m.kit.ToolLine("  → "+m.pending.Preview)
-	}
-
-	if m.mode == modeSessions {
-		var b strings.Builder
-		b.WriteString(m.kit.Title("sessions"))
-		b.WriteString(m.kit.DimLine(" — ↑/↓ select, enter open, esc cancel\n"))
-
-		for i, s := range m.sessions {
-			line := fmt.Sprintf("%s %s (%d turns)", s.ID, s.Cwd, s.Turns)
-			if i == m.pickIndex {
-				b.WriteString(m.kit.Selection(line))
-			} else {
-				b.WriteString("  " + line)
-			}
-
-			b.WriteString("\n")
-		}
-
-		return b.String()
-	}
-
 	parts := m.statusParts
 	if m.provider != "" {
 		parts = append([]string{m.provider, m.modelName}, parts...)

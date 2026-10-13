@@ -157,9 +157,99 @@ func TestPlaceholderDocumentsShortcuts(t *testing.T) {
 
 	m := New("/tmp/unused.sock")
 
-	for _, want := range []string{"ctrl+n", "ctrl+p", "ctrl+l", "alt+enter"} {
+	// The placeholder stays minimal: the bindings reference lives behind
+	// ctrl+/ — the documented entry point.
+	for _, want := range []string{"enter", "alt+enter", "ctrl+/"} {
 		if !strings.Contains(m.input.Placeholder, want) {
 			t.Errorf("placeholder missing %q: %s", want, m.input.Placeholder)
 		}
+	}
+}
+
+func TestKey_CtrlSlashOpensHelpModal(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlUnderscore})
+
+	view := m.View()
+	if !strings.Contains(view, "keys") {
+		t.Fatalf("help modal missing:\n%s", view)
+	}
+
+	for _, want := range []string{"ctrl+n", "ctrl+p", "alt+m", "ctrl+l", "ctrl+/", "pgup"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("help modal missing %q:\n%s", want, view)
+		}
+	}
+
+	if !strings.Contains(view, "╭") {
+		t.Errorf("help modal not framed:\n%s", view)
+	}
+
+	// Any key closes.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+
+	if m.mode != modeChat {
+		t.Errorf("mode after any-key close = %v, want chat", m.mode)
+	}
+}
+
+func TestKey_AltMOpensModelModalAndApplies(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+	m = m.WithModels([]string{"glm-5.3", "glm-5.3-flash", "glm-5.3-air"})
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m = deliver(t, m, golemclient.TurnStart{
+		Type: golemclient.TypeTurnStart, Session: "s1", Provider: "zai-coding", Model: "glm-5.3",
+	})
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+
+	view := m.View()
+	if !strings.Contains(view, "models · zai-coding") {
+		t.Fatalf("model modal missing title:\n%s", view)
+	}
+
+	for _, want := range []string{"glm-5.3", "glm-5.3-flash", "glm-5.3-air"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("model modal missing %q:\n%s", want, view)
+		}
+	}
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	sent, ok := lastSent(t, fc).(golemclient.SetModel)
+	if !ok || sent.Model != "glm-5.3-flash" || sent.Session != "s1" {
+		t.Fatalf("sent = %#v, want SetModel glm-5.3-flash for s1", sent)
+	}
+
+	if m.mode != modeChat || m.modelName != "glm-5.3-flash" {
+		t.Errorf("after apply: mode=%v model=%q", m.mode, m.modelName)
+	}
+}
+
+func TestKey_AltMWithoutModelsShowsCurrentOnly(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.TurnStart{
+		Type: golemclient.TypeTurnStart, Session: "s1", Provider: "zai-coding", Model: "glm-5.3",
+	})
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'m'}, Alt: true})
+
+	if !strings.Contains(m.View(), "glm-5.3") {
+		t.Fatalf("current model missing from fallback modal:\n%s", m.View())
+	}
+
+	if !strings.Contains(m.View(), "no model list") {
+		t.Errorf("fallback note missing:\n%s", m.View())
 	}
 }
