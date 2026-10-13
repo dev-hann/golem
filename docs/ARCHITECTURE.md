@@ -41,7 +41,7 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
 | `cmd/golem` | implemented | Main binary. Bare `golem` (or `golem tui`) ensures a server is running — spawning a detached `golem serve` when the socket is dead — then runs the TUI. Also `serve`, `chat`, `ask`. Wiring only — no business logic. | `internal/*`, `pkg/*` |
 | `cmd/golem-tui` | implemented | TUI binary. Thin `main` wiring; the app lives in `internal/tui`. | `internal/cli`, `internal/tui` |
 | `internal/cli` | implemented | Subcommand implementations (`ask`, `serve`, `chat`) and the bare-`golem` launcher (ensure-server + TUI): provider wiring, default socket/session paths, the line REPL, socket probing and detached server spawn. One layer below `cmd` so it is testable without spawning processes. | `internal/agent`, `internal/approval`, `internal/llm`, `internal/server`, `internal/session`, `internal/tools`, `internal/tui`, `pkg/golemclient` |
-| `internal/llm` | partial | `Provider` interface + adapters. `anthropic` implemented (reference adapter); `openai`, `zai`, `ollama` land in roadmap phase 5. Streaming normalization. | stdlib, provider SDKs |
+| `internal/llm` | partial | `Provider` interface + adapters. `anthropic` (reference) and `openai` — one adapter for every OpenAI-compatible endpoint: openai, zai, ollama, gateways (ADR-0014). Streaming normalization. | stdlib, provider SDKs |
 | `internal/agent` | implemented | Agent loop: send context → receive tool calls → dispatch tools → append results → repeat until turn end. | `internal/llm`, `internal/tools`, `internal/session`, `internal/approval` |
 | `internal/tools` | implemented | Built-in tools: read, write, edit, bash, grep, glob. Pure execution, no LLM knowledge. | stdlib |
 | `internal/server` | implemented | Transport listeners (unix socket, TCP, WS later), connection handling, event routing. | `internal/agent`, `internal/session`, `pkg/golemclient` |
@@ -113,7 +113,7 @@ Adapters normalize each SDK's stream into the common event channel (text deltas,
 | Anthropic | `anthropics/anthropic-sdk-go` | Reference adapter, built first |
 | OpenAI | `openai/openai-go` | Responses API with tool calling |
 | Z.ai (GLM) | `openai-go` + `WithBaseURL` against OpenAI-compatible endpoint | No official Go SDK exists |
-| Ollama | `ollama/ollama/api` | Local models |
+| Ollama | `openai-go` + `WithBaseURL` against `:11434/v1` (ADR-0014) | Local models; no API key |
 
 Status: only the `anthropic` adapter exists today (phase 1); the remaining adapters arrive with the config system in phase 5, which is also when provider selection becomes config-driven. Until then `cmd/golem` wires Anthropic directly, with `GOLEM_MODEL` as the only model override.
 

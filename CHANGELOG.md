@@ -35,6 +35,15 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — provider presets + openai-compat adapter (2026-10-13)
+
+- `internal/llm` presets: built-in catalog for `anthropic`, `openai`, `zai`
+  (base URL + `ZAI_API_KEY` + default model), and `ollama` (keyless, local
+  endpoint), with `DetectFromEnv` listing providers whose key is set.
+- `internal/llm/openai`: one adapter for every OpenAI-compatible endpoint
+  (ADR-0014) — streaming text/tool-call normalization, usage accounting,
+  per-tool-result messages, context cancellation.
+
 ### Added — config bootstrap (2026-10-13)
 
 - `internal/config`: built-in defaults, global `~/.config/golem/config.toml`

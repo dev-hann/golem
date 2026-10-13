@@ -94,3 +94,10 @@ Chronological. Each ADR is immutable once accepted; superseding an ADR adds a ne
 - **Context:** Development is AI-driven across sessions; code uniformity and stable context are requirements, not preferences.
 - **Decision:** golangci-lint with maximum practical strictness (gofumpt, revive strict, exhaustive, gosec, complexity gates, 120 cols); race-detector tests; 80% coverage floor in CI; docs under `docs/` are the source of truth and must change with behavior (enforced socially via AGENTS.md review gate).
 - **Consequences:** Occasional lint friction is accepted as the price of uniformity.
+
+## ADR-0014: One openai-compat adapter for openai, zai, ollama, and gateways
+
+- **Status:** Accepted (2026-10-13)
+- **Context:** ADR-0005 planned four adapters, including `ollama/ollama/api` for local models. In practice every planned non-Anthropic provider speaks the OpenAI chat-completions wire format: zai and gateways via `base_url`, ollama via its `:11434/v1` compatibility endpoint. Four adapters would normalize the same protocol four times.
+- **Decision:** `internal/llm/openai` is the single OpenAI-compatible adapter (`openai/openai-go` + `WithBaseURL`). Provider ids in `internal/llm` presets select kind, endpoint, key env, and default model: `anthropic`, `openai`, `zai`, `ollama`. The planned `ollama/ollama/api` dependency is dropped. This amends ADR-0005; no other framework/SDK adoption (jetify-com/ai, GoAI, langchaingo, eino were evaluated and rejected — alpha-stage or heavyweight).
+- **Consequences:** One streaming/tool-call normalization to test; new OpenAI-compatible providers are a preset entry plus optional config. Native ollama features (keep-alive hints, model pulls) stay out of scope until needed.
