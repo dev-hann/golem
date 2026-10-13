@@ -36,6 +36,7 @@ type Model struct {
 	mode        mode
 	sessionID   string
 	turnActive  bool
+	follow      bool
 	blocks      []block
 	lastUserEnd int
 	pending     *golemclient.ApprovalRequest
@@ -84,6 +85,7 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 		mode:        modeChat,
 		inputRows:   minInputHeight,
 		lastUserEnd: -1,
+		follow:      true,
 	}
 }
 
@@ -230,6 +232,10 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.scrollKey(key) {
+		return m, nil
+	}
+
 	switch key.Type { //nolint:exhaustive // foreign enum; default routes to the textarea
 	case tea.KeyCtrlN:
 		m.blocks = nil
@@ -271,12 +277,6 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncInputHeight()
 
 		return m.submit(line)
-	case tea.KeyPgUp:
-		m.vp.ScrollUp(pageLines)
-		return m, nil
-	case tea.KeyPgDown:
-		m.vp.ScrollDown(pageLines)
-		return m, nil
 	case tea.KeyTab:
 		m.toggleLastTool()
 		m.refreshView()
@@ -315,6 +315,29 @@ func (m *Model) toggleLastTool() {
 // pageLines is the scroll step for page keys.
 const pageLines = 10
 
+// scrollKey handles page-scroll keys, reporting whether it consumed the
+// key. Manual page-up suspends auto-follow; paging back to the bottom
+// resumes it.
+func (m *Model) scrollKey(key tea.KeyMsg) bool {
+	switch key.Type { //nolint:exhaustive // only the scroll keys are ours
+	case tea.KeyPgUp:
+		m.follow = false
+		m.vp.ScrollUp(pageLines)
+
+		return true
+	case tea.KeyPgDown:
+		m.vp.ScrollDown(pageLines)
+
+		if m.vp.AtBottom() {
+			m.follow = true
+		}
+
+		return true
+	default:
+		return false
+	}
+}
+
 // submit sends the composed line as a chat message. Everything typed is
 // content — navigation and lifecycle live on keys, not slash commands.
 func (m Model) submit(line string) (tea.Model, tea.Cmd) {
@@ -326,6 +349,7 @@ func (m Model) submit(line string) (tea.Model, tea.Cmd) {
 	}
 
 	m.blocks = append(m.blocks, block{kind: blockUser, text: line})
+	m.follow = true
 	m.refreshView()
 
 	return m, m.send(golemclient.UserMessage{
@@ -560,6 +584,7 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.statusParts = []string{"session " + short, fmt.Sprintf("%d turns", e.Turns)}
 	case golemclient.TurnStart:
 		m.turnActive = true
+		m.follow = true
 		m.provider = e.Provider
 		m.modelName = e.Model
 		m.statusParts = append(m.statusParts, "thinking…")
@@ -658,14 +683,16 @@ func (m *Model) replayHistory(hist golemclient.History) {
 	}
 }
 
-// refreshView pushes the rendered transcript into the viewport and pins to
-// the bottom while a turn streams.
+// refreshView pushes the rendered transcript into the viewport. While a
+// turn streams, the viewport pins to the bottom unless the user has
+// paged back (follow=false until they reach the bottom again or send a
+// new message).
 func (m *Model) refreshView() {
 	content, lastUserEnd := renderBlocks(m.kit, m.blocks, m.vp.Width)
 	m.lastUserEnd = lastUserEnd
 	m.vp.SetContent(content)
 
-	if m.turnActive {
+	if m.turnActive && m.follow {
 		m.vp.GotoBottom()
 	}
 }

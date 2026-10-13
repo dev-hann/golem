@@ -348,6 +348,42 @@ func TestModel_StickyUserClearsWithTranscript(t *testing.T) {
 	}
 }
 
+func TestModel_ManualScrollSuspendsAutoFollow(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "head-marker\n"})
+	for range 100 {
+		m = deliver(t, m, golemclient.TextDelta{
+			Type: golemclient.TypeTextDelta, Delta: strings.Repeat("x", 60) + "\n",
+		})
+	}
+
+	// Scroll back mid-stream: the next delta must not snap to the bottom.
+	for range 20 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	}
+	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "mid\n"})
+	view := m.View()
+	if !strings.Contains(view, "head-marker") {
+		t.Errorf("manual scrollback should survive streaming deltas:\n%s", view)
+	}
+	if strings.Contains(view, "mid") {
+		t.Errorf("tail should stay off-screen while scrolled back:\n%s", view)
+	}
+
+	// Paging back to the bottom resumes the follow.
+	for range 20 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+
+	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "tail-marker"})
+	if !strings.Contains(m.View(), "tail-marker") {
+		t.Errorf("reaching the bottom should resume auto-follow:\n%s", m.View())
+	}
+}
+
 func TestModel_ConnectFailureShowsError(t *testing.T) {
 	t.Parallel()
 	m := New("/dev/null")
