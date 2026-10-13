@@ -45,6 +45,8 @@ func NeedsOnboarding(configPath string) bool {
 
 // RunOnboard is the setup wizard body: pick a provider, pick a model, prove
 // the key works, write the config file. It also backs `golem setup`.
+// Prompts are written unbuffered: they must be on screen before the wizard
+// blocks on stdin.
 func RunOnboard(opts OnboardOptions) error {
 	if opts.Stdin == nil {
 		opts.Stdin = os.Stdin
@@ -62,8 +64,7 @@ func RunOnboard(opts OnboardOptions) error {
 		opts.TestKey = liveKeyTest
 	}
 
-	out := bufio.NewWriter(opts.Stdout)
-	defer func() { _ = out.Flush() }()
+	out := opts.Stdout
 
 	reader := bufio.NewScanner(opts.Stdin)
 
@@ -113,7 +114,7 @@ func RunOnboard(opts OnboardOptions) error {
 }
 
 // promptProvider lists the catalog and reads the selection (number or id).
-func promptProvider(out *bufio.Writer, reader *bufio.Scanner) (string, error) {
+func promptProvider(out io.Writer, reader *bufio.Scanner) (string, error) {
 	fmt.Fprintln(out, "golem setup — choose a provider:") //nolint:errcheck // terminal output
 
 	detected := map[string]bool{}
@@ -183,7 +184,7 @@ func resolveChoice(choice string) (string, error) {
 }
 
 // promptModel reads the model, offering the preset default.
-func promptModel(out *bufio.Writer, reader *bufio.Scanner, id string, preset llm.Preset) (string, error) {
+func promptModel(out io.Writer, reader *bufio.Scanner, id string, preset llm.Preset) (string, error) {
 	suggestion := preset.DefaultModel
 	if suggestion == "" {
 		suggestion = "<required — e.g. llama3.3>"
@@ -208,7 +209,7 @@ func promptModel(out *bufio.Writer, reader *bufio.Scanner, id string, preset llm
 // promptAndTestKey reads a key (falling back to the preset env var), tests
 // it, and retries on failure.
 func promptAndTestKey(
-	out *bufio.Writer,
+	out io.Writer,
 	reader *bufio.Scanner,
 	opts OnboardOptions,
 	id, model string,

@@ -87,6 +87,12 @@ config schema may change without notice.
 
 ### Fixed
 
-- `golem serve` exits on SIGINT/SIGTERM. Previously the accept loop was
+- First-run wizard no longer hangs on a real terminal: prompts were
+  written through a buffered writer and only flushed after the wizard
+  returned, so the provider menu never appeared and golem sat blocked on
+  stdin with a blank screen. Prompts now write unbuffered (regression
+  test drives the wizard with no input available and requires the
+  provider menu on stdout first).
+- `golem version` exits on SIGINT/SIGTERM. Previously the accept loop was
   never unblocked after shutdown, so the server ignored signals and left a
   stale socket file behind.
