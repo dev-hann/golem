@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
 	"github.com/dev-hann/golem/pkg/golemclient"
@@ -678,14 +679,14 @@ func (m Model) View() string {
 
 	switch m.mode {
 	case modeHelp:
-		return m.kit.Overlay(m.width, m.height, m.kit.Modal("keys", m.helpBody()))
+		return m.modalized(m.kit.Modal("keys", m.helpBody()))
 	case modeModels:
-		return m.kit.Overlay(m.width, m.height, m.kit.Modal("models · "+m.provider, m.modelsBody()))
+		return m.modalized(m.kit.Modal("models · "+m.provider, m.modelsBody()))
 	case modeSessions:
-		return m.kit.Overlay(m.width, m.height, m.kit.Modal("sessions", m.sessionsBody()))
+		return m.modalized(m.kit.Modal("sessions", m.sessionsBody()))
 	case modeApproval:
 		if m.pending != nil {
-			return m.kit.Overlay(m.width, m.height, m.kit.Modal("approval", m.approvalBody()))
+			return m.modalized(m.kit.Modal("approval", m.approvalBody()))
 		}
 	case modeChat:
 		// The full layout below.
@@ -693,6 +694,11 @@ func (m Model) View() string {
 		// modeApproval without a pending request also falls to the layout.
 	}
 
+	return m.layout()
+}
+
+// layout composes the full chat screen through the active kit.
+func (m Model) layout() string {
 	var b strings.Builder
 	b.WriteString(header(m) + "\n")
 	b.WriteString(m.vp.View() + "\n")
@@ -700,6 +706,14 @@ func (m Model) View() string {
 	b.WriteString(m.kit.Box(m.input.View()))
 
 	return b.String()
+}
+
+// modalized renders the modal floating over a faded, escape-free backdrop
+// of the full layout — the base stays visible in the theme's dim tone.
+func (m Model) modalized(modal string) string {
+	backdrop := m.kit.Fade(ansi.Strip(m.layout()))
+
+	return m.kit.Overlay(m.width, m.height, backdrop, modal)
 }
 
 // helpBody renders the keybinding reference.

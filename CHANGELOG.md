@@ -35,6 +35,16 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — centered modal system, model picker, help (unreleased)
+
+- Every overlay now shares one shape: a centered `kit.Modal` frame (help,
+  model picker, session picker, approval prompt). `ctrl+/` opens the
+  binding reference; `alt+m` opens the model picker fed by the launcher
+  (which fetches the configured provider's models, degrading silently),
+  applying the choice via the new `set_model` event from the next turn.
+  Note: `ctrl+m` is indistinguishable from `enter` in terminal protocols
+  (both CR), so the m mnemonic rides the alt grammar with alt+enter.
+
 ### Added — keyboard-driven TUI controls (unreleased)
 
 - `ctrl+n` new session (transcript resets on the same connection; streaming

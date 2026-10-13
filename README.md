@@ -65,6 +65,8 @@ Also available: `golem serve` runs just the agent server; `golem chat` is a line
 | `ctrl+c` | interrupt the active turn; press again to quit |
 | `ctrl+n` | new session (transcript resets, same connection) |
 | `ctrl+p` | session picker — `↑`/`↓` select, `enter` open, `esc` cancel |
+| `alt+m` (option+m) | model picker — switches the session's model from the next turn (`set_model`) |
+| `ctrl+/` | help — every binding in a centered modal |
 | `ctrl+l` | clear the transcript view (session and context stay) |
 | `esc` | interrupt the active turn |
 | `pgup` / `pgdn` | scroll the transcript |
