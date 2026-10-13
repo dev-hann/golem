@@ -127,6 +127,24 @@ func (k *Kit) Box(content string) string {
 		Render(content)
 }
 
+// Modal renders the shared overlay panel: a title line over a padded,
+// framed body. Every overlay in the app (help, pickers, approvals) uses
+// this shape so their look cannot drift apart.
+func (k *Kit) Modal(title, body string) string {
+	return k.r.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(k.theme.Colors[Border]).
+		Padding(0, 2).
+		Render(k.Title(title) + "\n" + strings.TrimRight(body, "\n"))
+}
+
+// Overlay centers a modal on a clear canvas of the given size. The base
+// view hides behind the modal — ANSI-safe by construction, and closing
+// (esc/enter) restores it.
+func (k *Kit) Overlay(width, height int, modal string) string {
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal)
+}
+
 // Selection renders the picker cursor marker.
 func (k *Kit) Selection(line string) string {
 	return k.styles[Selection].Reverse(true).Render(" " + line + " ")

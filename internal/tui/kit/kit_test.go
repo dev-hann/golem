@@ -138,6 +138,52 @@ func TestKit_BoxRendersRoundedFrame(t *testing.T) {
 	}
 }
 
+func TestKit_ModalRendersTitleAndFrame(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	modal := k.Modal("keys", "ctrl+n new session\nglm-5.3")
+	for _, want := range []string{"╭", "╮", "╰", "╯", "keys", "ctrl+n new session", "glm-5.3"} {
+		if !strings.Contains(modal, want) {
+			t.Errorf("modal missing %q:\n%s", want, modal)
+		}
+	}
+}
+
+func TestKit_OverlayCentersModal(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	placed := k.Overlay(40, 10, "X")
+
+	lines := strings.Split(strings.TrimRight(placed, "\n"), "\n")
+	if len(lines) != 10 {
+		t.Fatalf("overlay height = %d lines, want 10", len(lines))
+	}
+
+	var middle string
+
+	found := false
+
+	for _, line := range lines {
+		if strings.Contains(line, "X") {
+			middle, found = line, true
+
+			break
+		}
+	}
+
+	if !found {
+		t.Fatalf("modal content missing from overlay:\n%s", placed)
+	}
+
+	if strings.Count(middle[:strings.Index(middle, "X")], " ") < 10 {
+		t.Errorf("modal not horizontally centered: %q", middle)
+	}
+}
+
 func TestKit_StatusBarJoinsWithAccent(t *testing.T) {
 	t.Parallel()
 
