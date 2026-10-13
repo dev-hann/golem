@@ -1,8 +1,10 @@
-package tui
+package kit_test
 
 import (
 	"strings"
 	"testing"
+
+	"github.com/dev-hann/golem/internal/tui/kit"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -28,10 +30,10 @@ func pickKey(s string) tea.KeyMsg {
 	}
 }
 
-func TestPicker_ArrowKeysMoveAndEnterSelects(t *testing.T) {
+func TestKitPicker_ArrowKeysMoveAndEnterSelects(t *testing.T) {
 	t.Parallel()
 
-	p := NewPicker("models", []string{"a", "b", "c"}, 0)
+	p := kit.NewPicker(kit.New(kit.DefaultTheme()), "models", []string{"a", "b", "c"}, 0)
 
 	p.Update(pickKey("down"))
 	p.Update(pickKey("down"))
@@ -42,7 +44,7 @@ func TestPicker_ArrowKeysMoveAndEnterSelects(t *testing.T) {
 	}
 
 	final, _ := p.Update(pickKey("enter"))
-	picker := final.(*Picker)
+	picker := final.(*kit.Picker)
 
 	item, ok := picker.Selection()
 	if !ok || item != "b" {
@@ -50,10 +52,10 @@ func TestPicker_ArrowKeysMoveAndEnterSelects(t *testing.T) {
 	}
 }
 
-func TestPicker_JKAndClamping(t *testing.T) {
+func TestKitPicker_JKAndClamping(t *testing.T) {
 	t.Parallel()
 
-	p := NewPicker("models", []string{"a", "b"}, 0)
+	p := kit.NewPicker(kit.New(kit.DefaultTheme()), "models", []string{"a", "b"}, 0)
 
 	p.Update(pickKey("k")) // above the top: stays
 	if p.Cursor != 0 {
@@ -67,23 +69,23 @@ func TestPicker_JKAndClamping(t *testing.T) {
 	}
 }
 
-func TestPicker_CancelYieldsNoSelection(t *testing.T) {
+func TestKitPicker_CancelYieldsNoSelection(t *testing.T) {
 	t.Parallel()
 
-	p := NewPicker("models", []string{"a", "b"}, 0)
+	p := kit.NewPicker(kit.New(kit.DefaultTheme()), "models", []string{"a", "b"}, 0)
 
 	final, _ := p.Update(pickKey("q"))
-	picker := final.(*Picker)
+	picker := final.(*kit.Picker)
 
 	if item, ok := picker.Selection(); ok {
 		t.Errorf("Selection() = %q, %v; want none after cancel", item, ok)
 	}
 }
 
-func TestPicker_ViewMarksCursor(t *testing.T) {
+func TestKitPicker_ViewMarksCursor(t *testing.T) {
 	t.Parallel()
 
-	p := NewPicker("pick", []string{"a", "b"}, 1)
+	p := kit.NewPicker(kit.New(kit.DefaultTheme()), "pick", []string{"a", "b"}, 1)
 
 	view := p.View()
 	if !strings.Contains(view, "pick") || !strings.Contains(view, "▶ b") {

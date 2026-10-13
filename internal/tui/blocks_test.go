@@ -3,20 +3,26 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/dev-hann/golem/internal/tui/kit"
 )
+
+// testKit builds the default kit; the test profile is Ascii, so plain
+// substring assertions hold.
+func testKit() *kit.Kit { return kit.New(kit.DefaultTheme()) }
 
 func TestBlockRender_UserAndAssistant(t *testing.T) {
 	t.Parallel()
-	if got := (block{kind: blockUser, text: "hello"}).render(); !strings.Contains(got, "you> hello") {
+	if got := (block{kind: blockUser, text: "hello"}).render(testKit()); !strings.Contains(got, "you> hello") {
 		t.Errorf("user block = %q", got)
 	}
-	if got := (block{kind: blockAssistant}).render(); !strings.Contains(got, "…") {
+	if got := (block{kind: blockAssistant}).render(testKit()); !strings.Contains(got, "…") {
 		t.Errorf("empty assistant block should show ellipsis, got %q", got)
 	}
-	if got := (block{kind: blockAssistant, text: "hi"}).render(); !strings.Contains(got, "golem> hi") {
+	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit()); !strings.Contains(got, "golem> hi") {
 		t.Errorf("assistant block = %q", got)
 	}
-	if got := (block{kind: blockError, text: "boom"}).render(); !strings.Contains(got, "error: boom") {
+	if got := (block{kind: blockError, text: "boom"}).render(testKit()); !strings.Contains(got, "error: boom") {
 		t.Errorf("error block = %q", got)
 	}
 }
@@ -24,15 +30,15 @@ func TestBlockRender_UserAndAssistant(t *testing.T) {
 func TestBlockRender_ToolStatuses(t *testing.T) {
 	t.Parallel()
 	running := block{kind: blockTool, tool: "bash", args: `{"command":"ls"}`}
-	if got := running.render(); !strings.Contains(got, "… bash") {
+	if got := running.render(testKit()); !strings.Contains(got, "… bash") {
 		t.Errorf("running tool = %q", got)
 	}
 	done := block{kind: blockTool, tool: "read", done: true, ok: true}
-	if got := done.render(); !strings.Contains(got, "✓ read") {
+	if got := done.render(testKit()); !strings.Contains(got, "✓ read") {
 		t.Errorf("ok tool = %q", got)
 	}
 	failed := block{kind: blockTool, tool: "edit", done: true}
-	if got := failed.render(); !strings.Contains(got, "✗ edit") {
+	if got := failed.render(testKit()); !strings.Contains(got, "✗ edit") {
 		t.Errorf("failed tool = %q", got)
 	}
 }
@@ -54,7 +60,7 @@ func TestPreview_TruncatesAtBoundary(t *testing.T) {
 
 func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 	t.Parallel()
-	got := renderBlocks([]block{
+	got := renderBlocks(testKit(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},

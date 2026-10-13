@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/dev-hann/golem/internal/tui/kit"
 )
 
 // blockKind distinguishes transcript entries.
@@ -32,15 +32,6 @@ type block struct {
 	expanded bool
 }
 
-// transcript styles. Colors degrade gracefully on dumb terminals.
-var (
-	userStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true)
-	asstStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
-	toolStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
-	okStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
-	errStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
-)
-
 // maxArgsPreview and maxResultPreview bound block sizes so giant payloads
 // cannot flood the viewport.
 const (
@@ -48,21 +39,21 @@ const (
 	maxResultPreview = 2000
 )
 
-// render turns one block into display lines.
-func (b block) render() string {
+// render turns one block into display lines through the kit theme.
+func (b block) render(k *kit.Kit) string {
 	switch b.kind {
 	case blockUser:
-		return userStyle.Render("you> ") + b.text
+		return k.User("you> ", b.text)
 	case blockAssistant:
 		if b.text == "" {
-			return asstStyle.Render("golem> …")
+			return k.Assistant("golem> ", "…")
 		}
 
-		return asstStyle.Render("golem> ") + b.text
+		return k.Assistant("golem> ", b.text)
 	case blockError:
-		return errStyle.Render("error: ") + b.text
+		return k.ErrLine(b.text)
 	case blockTool:
-		return b.renderTool()
+		return b.renderTool(k)
 	default:
 		return ""
 	}
@@ -70,24 +61,24 @@ func (b block) render() string {
 
 // renderTool renders collapsed (summary) or expanded (with result) tool
 // blocks. Tool calls are collapsed by default per ROADMAP phase 3.
-func (b block) renderTool() string {
+func (b block) renderTool(k *kit.Kit) string {
 	status := "…"
 
 	if b.done {
 		if b.ok {
-			status = okStyle.Render("✓")
+			status = k.Marker(kit.OK, "✓")
 		} else {
-			status = errStyle.Render("✗")
+			status = k.Marker(kit.Error, "✗")
 		}
 	}
 
 	summary := fmt.Sprintf("%s %s %s", status, b.tool, preview(b.args, maxArgsPreview))
 	if !b.expanded || !b.done {
-		return toolStyle.Render("  ") + summary
+		return k.ToolLine("  " + summary)
 	}
 
-	return toolStyle.Render("  ") + summary + "\n" +
-		toolStyle.Render("  │ ") + preview(b.result, maxResultPreview)
+	return k.ToolLine("  "+summary) + "\n" +
+		k.ToolLine("  │ "+preview(b.result, maxResultPreview))
 }
 
 // preview trims s to limit bytes with an ellipsis marker.
@@ -99,11 +90,11 @@ func preview(s string, limit int) string {
 	return s[:limit] + "…"
 }
 
-// renderBlocks renders the whole transcript.
-func renderBlocks(blocks []block) string {
+// renderBlocks renders the whole transcript through the kit theme.
+func renderBlocks(k *kit.Kit, blocks []block) string {
 	lines := make([]string, 0, len(blocks))
 	for _, b := range blocks {
-		lines = append(lines, b.render())
+		lines = append(lines, b.render(k))
 	}
 
 	return strings.Join(lines, "\n")

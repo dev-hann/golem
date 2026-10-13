@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dev-hann/golem/internal/tui/kit"
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
@@ -27,6 +28,7 @@ type Model struct {
 	dial    dialer
 	socket  string
 	connErr string
+	kit     *kit.Kit
 
 	mode        mode
 	sessionID   string
@@ -46,6 +48,12 @@ type Model struct {
 
 // New builds the model for a socket path.
 func New(socketPath string) Model {
+	return NewThemed(socketPath, kit.New(kit.DefaultTheme()))
+}
+
+// NewThemed builds the model with an explicit kit (theme switches
+// construct a new model view through this).
+func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
 	input.Placeholder = "message… (enter to send, ctrl+c to interrupt)"
 	input.Prompt = "you> "
@@ -58,6 +66,7 @@ func New(socketPath string) Model {
 	return Model{
 		dial:   realDial,
 		socket: socketPath,
+		kit:    k,
 		vp:     vp,
 		input:  input,
 		mode:   modeChat,
@@ -449,7 +458,7 @@ func (m *Model) replayHistory(hist golemclient.History) {
 // refreshView pushes the rendered transcript into the viewport and pins to
 // the bottom while a turn streams.
 func (m *Model) refreshView() {
-	m.vp.SetContent(renderBlocks(m.blocks))
+	m.vp.SetContent(renderBlocks(m.kit, m.blocks))
 
 	if m.turnActive {
 		m.vp.GotoBottom()
