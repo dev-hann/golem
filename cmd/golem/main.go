@@ -1,7 +1,7 @@
 // Command golem is the golem agent server and CLI.
 //
-// Subcommands: serve (unix-socket agent server), chat (line REPL client),
-// ask (one-shot prompt). See docs/ROADMAP.md for implementation status.
+// Bare `golem` (or `golem tui`) starts the server if needed and runs the
+// TUI. Other subcommands: serve, chat, ask. See docs/ROADMAP.md for status.
 package main
 
 import (
@@ -21,15 +21,30 @@ import (
 // roadmap phase 5).
 const defaultModel = "claude-opus-5"
 
+// deps injects the app launcher so the TUI path is testable without a
+// terminal.
+type deps struct {
+	launch func(ctx context.Context, opts cli.AppOptions) error
+}
+
 func main() {
-	os.Exit(run(os.Args[1:]))
+	os.Exit(run(os.Args[1:], defaultDeps()))
+}
+
+// defaultDeps wires production dependencies.
+func defaultDeps() deps {
+	return deps{launch: cli.RunApp}
 }
 
 // run executes the CLI and returns the process exit code.
-func run(args []string) int {
-	if len(args) == 0 {
-		usage(os.Stderr)
-		return 2
+func run(args []string, d deps) int {
+	if len(args) == 0 || args[0] == "tui" {
+		var rest []string
+		if len(args) > 1 {
+			rest = args[1:]
+		}
+
+		return launchApp(rest, d)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -46,6 +61,33 @@ func run(args []string) int {
 		usage(os.Stderr)
 		return 2
 	}
+}
+
+// launchApp is the bare-`golem` path: ensure the server is running, then
+// start the TUI against it.
+func launchApp(rest []string, d deps) int {
+	if len(rest) > 0 {
+		usage(os.Stderr)
+		return 2
+	}
+
+	if err := d.launch(context.Background(), cli.AppOptions{
+		Socket: cli.DefaultSocketPath(),
+		Start: func() error {
+			exe, err := os.Executable()
+			if err != nil {
+				return fmt.Errorf("golem: resolving executable: %w", err)
+			}
+
+			return cli.SpawnServe(exe)
+		},
+		Stderr: os.Stderr,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
+		return 1
+	}
+
+	return 0
 }
 
 // runAsk runs the one-shot prompt subcommand.
@@ -92,7 +134,7 @@ func runServe(ctx context.Context) int {
 		Socket:   cli.DefaultSocketPath(),
 		Sessions: cli.DefaultSessionsDir(),
 		OnReady: func(addr string) {
-			fmt.Fprintf(os.Stderr, "golem serving on %s\n", addr)
+			fmt.Fprintf(os.Stderr, "golem serving on %s\n", addr) //nolint:errcheck // terminal output
 		},
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
@@ -128,9 +170,11 @@ func model() string {
 
 // usage prints the CLI help.
 func usage(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "usage: golem <command> [args]")
-	_, _ = fmt.Fprintln(w, "  golem serve            start the agent server (unix socket)")
-	_, _ = fmt.Fprintln(w, "  golem chat             line REPL against the server")
-	_, _ = fmt.Fprintln(w, "  golem ask <prompt>     one-shot prompt")
+	_, _ = fmt.Fprintln(w, "usage: golem [command]")
+	_, _ = fmt.Fprintln(w, "  golem                 start the TUI (starts the server if needed)")
+	_, _ = fmt.Fprintln(w, "  golem tui             same as bare golem")
+	_, _ = fmt.Fprintln(w, "  golem serve           start the agent server (unix socket)")
+	_, _ = fmt.Fprintln(w, "  golem chat            line REPL against the server")
+	_, _ = fmt.Fprintln(w, "  golem ask <prompt>    one-shot prompt")
 	_, _ = fmt.Fprintln(w, "env: ANTHROPIC_API_KEY, GOLEM_MODEL")
 }

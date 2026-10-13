@@ -38,9 +38,9 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
 
 | Path | Status | Responsibility | May import |
 |---|---|---|---|
-| `cmd/golem` | implemented | Server binary. Subcommands: `serve`, `chat`, `ask`. Wiring only — no business logic. | `internal/*`, `pkg/*` |
+| `cmd/golem` | implemented | Main binary. Bare `golem` (or `golem tui`) ensures a server is running — spawning a detached `golem serve` when the socket is dead — then runs the TUI. Also `serve`, `chat`, `ask`. Wiring only — no business logic. | `internal/*`, `pkg/*` |
 | `cmd/golem-tui` | implemented | TUI binary. Thin `main` wiring; the app lives in `internal/tui`. | `internal/cli`, `internal/tui` |
-| `internal/cli` | implemented | Subcommand implementations (`ask`, `serve`, `chat`): provider wiring, default socket/session paths, the line REPL. One layer below `cmd` so it is testable without spawning processes. | `internal/agent`, `internal/approval`, `internal/llm`, `internal/server`, `internal/session`, `internal/tools`, `pkg/golemclient` |
+| `internal/cli` | implemented | Subcommand implementations (`ask`, `serve`, `chat`) and the bare-`golem` launcher (ensure-server + TUI): provider wiring, default socket/session paths, the line REPL, socket probing and detached server spawn. One layer below `cmd` so it is testable without spawning processes. | `internal/agent`, `internal/approval`, `internal/llm`, `internal/server`, `internal/session`, `internal/tools`, `internal/tui`, `pkg/golemclient` |
 | `internal/llm` | partial | `Provider` interface + adapters. `anthropic` implemented (reference adapter); `openai`, `zai`, `ollama` land in roadmap phase 5. Streaming normalization. | stdlib, provider SDKs |
 | `internal/agent` | implemented | Agent loop: send context → receive tool calls → dispatch tools → append results → repeat until turn end. | `internal/llm`, `internal/tools`, `internal/session`, `internal/approval` |
 | `internal/tools` | implemented | Built-in tools: read, write, edit, bash, grep, glob. Pure execution, no LLM knowledge. | stdlib |

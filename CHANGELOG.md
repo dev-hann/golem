@@ -27,3 +27,16 @@ config schema may change without notice.
 - `golem-tui` (Bubble Tea): streaming transcript, collapsible tool blocks,
   approval prompts (y/n), session picker, interrupt.
 - `golem ask` one-shot prompt mode.
+
+### Added — launcher (2026-10-13)
+
+- Bare `golem` (and `golem tui`): probes the default socket, spawns a
+  detached `golem serve` when no server is running (stale socket files are
+  removed so the new listener can bind), then runs the TUI. Subsequent
+  invocations reuse the running server.
+
+### Fixed
+
+- `golem serve` exits on SIGINT/SIGTERM. Previously the accept loop was
+  never unblocked after shutdown, so the server ignored signals and left a
+  stale socket file behind.

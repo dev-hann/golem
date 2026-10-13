@@ -25,21 +25,26 @@ Pre-release. Under active development following [docs/ROADMAP.md](docs/ROADMAP.m
 Requires Go 1.25+.
 
 ```bash
+go install github.com/dev-hann/golem/cmd/golem@latest
+```
+
+Or from a clone:
+
+```bash
 git clone https://github.com/dev-hann/golem
 cd golem
 make build
-./bin/golem serve &   # agent server on a unix socket
-./bin/golem-tui       # terminal client
 ```
 
 ## Usage
 
 ```bash
-./bin/golem serve &   # agent server on a unix socket
-./bin/golem-tui       # terminal client
+golem    # starts the server if needed, then the TUI
 ```
 
-`golem ask "<prompt>"` runs a one-shot prompt without the server; `golem chat` is a line-based REPL against a running server (`/quit` exits; command approvals are auto-denied until the phase 4 UX lands).
+The first run spawns a detached `golem serve` (unix socket) and waits for it; later runs reuse the running server. Sessions survive closing the TUI — reconnect with `golem` anytime; stop the server with `pkill -f 'golem serve'`.
+
+Also available: `golem serve` runs just the agent server; `golem chat` is a line-based REPL against a running server (`/quit` exits; command approvals are auto-denied until the phase 4 UX lands); `golem ask "<prompt>"` runs a one-shot prompt without the server.
 
 ### TUI keys
 

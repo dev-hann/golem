@@ -1,14 +1,13 @@
 // Command golem-tui is the terminal client for the golem agent server.
+// Unlike bare `golem` it never starts a server: it connects to the socket
+// given as the only argument (default: the standard golem socket).
 package main
 
 import (
 	"fmt"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
-
 	"github.com/dev-hann/golem/internal/cli"
-	"github.com/dev-hann/golem/internal/tui"
 )
 
 func main() {
@@ -17,16 +16,8 @@ func main() {
 		socket = os.Args[1]
 	}
 
-	program := tea.NewProgram(tui.New(socket), tea.WithAltScreen())
-
-	final, err := program.Run()
-	if err != nil {
+	if err := cli.RunTUI(socket); err != nil {
 		fmt.Fprintf(os.Stderr, "golem-tui: %v\n", err)
-		os.Exit(1)
-	}
-
-	if model, ok := final.(tui.Model); ok && model.ConnErr() != "" {
-		fmt.Fprintf(os.Stderr, "golem-tui: %s\n", model.ConnErr())
 		os.Exit(1)
 	}
 }

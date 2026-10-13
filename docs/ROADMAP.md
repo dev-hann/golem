@@ -236,6 +236,11 @@ Goal: daily-driver terminal client.
 
 ---
 
+## Landed outside the phase plan
+
+- 2026-10-12 — `golem serve` shutdown fix: SIGINT/SIGTERM now stop the server (the listener closes and the accept loop unblocks; regression-tested via the injected signal hook).
+- 2026-10-13 — Bare `golem` launcher: probe the default socket, spawn a detached `golem serve` when it is down (removing stale socket files), then run the TUI. Ships ahead of phases 4/5; `golem stop` and config-driven socket paths land with phase 5.
+
 ## Explicitly deferred (needs new ADR before starting)
 
 Context compaction, sub-agents, LSP integration, remote/web auth, Windows named pipes.
