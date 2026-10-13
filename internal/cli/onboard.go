@@ -118,7 +118,11 @@ func RunOnboard(opts OnboardOptions) error {
 	fmt.Fprintf(out, "\nWrote %s — provider: %s, model: %s\n", //nolint:errcheck // terminal output
 		opts.ConfigPath, id, model)
 
-	if existing.Path != "" {
+	if Probe(DefaultSocketPath()) {
+		fmt.Fprintln(out, //nolint:errcheck // terminal output
+			"warning: a golem server is already running and predates this config — restart it:")
+		fmt.Fprintln(out, "  pkill -f 'golem serve'   # then run: golem") //nolint:errcheck // terminal output
+	} else if existing.Path != "" {
 		fmt.Fprintln(out, "A running golem server picks this up on next restart.") //nolint:errcheck // terminal output
 	}
 

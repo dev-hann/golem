@@ -124,6 +124,54 @@ func TestEnsureServer_NotReadyErrors(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "not ready") {
 		t.Errorf("expected not-ready error, got: %v", err)
 	}
+	if !strings.Contains(err.Error(), "serve.log") {
+		t.Errorf("not-ready error should point at the serve log, got: %v", err)
+	}
+}
+
+func TestSpawnServe_ChildOutputLandsInLog(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	script := filepath.Join(dir, "talkative-golem")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho daemon-started\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write script: %v", err)
+	}
+
+	logPath := filepath.Join(dir, "logs", "serve.log")
+	if err := cli.SpawnServe(script, logPath); err != nil {
+		t.Fatalf("SpawnServe: %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if body, err := os.ReadFile(logPath); err == nil && strings.Contains(string(body), "daemon-started") {
+			return
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatalf("serve.log never captured child output: %v", logPath)
+}
+
+func TestRunOnboard_WarnsWhenServerAlreadyRunning(t *testing.T) {
+	runtimeDir := t.TempDir()
+	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
+	clearProviderKeys(t)
+
+	// A server is listening on the default socket while the wizard runs.
+	listenUnix(t, filepath.Join(runtimeDir, "golem.sock"))
+
+	h := newOnboard(t, "1\nsk-zai-123\n\n")
+
+	if err := h.run(t); err != nil {
+		t.Fatalf("RunOnboard: %v", err)
+	}
+
+	if !strings.Contains(h.stdout.String(), "already running") {
+		t.Errorf("stale-server warning missing:\n%s", h.stdout.String())
+	}
 }
 
 func TestEnsureServer_StartFailureBubbles(t *testing.T) {
@@ -147,11 +195,11 @@ func TestSpawnServe_StartsExecutable(t *testing.T) {
 		t.Fatalf("write script: %v", err)
 	}
 
-	if err := cli.SpawnServe(script); err != nil {
+	if err := cli.SpawnServe(script, filepath.Join(dir, "serve.log")); err != nil {
 		t.Errorf("SpawnServe(script) = %v, want nil", err)
 	}
 
-	if err := cli.SpawnServe(""); err == nil {
+	if err := cli.SpawnServe("", "unused.log"); err == nil {
 		t.Error("SpawnServe(empty) = nil, want error")
 	}
 }

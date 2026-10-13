@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 	"time"
 )
@@ -73,11 +74,15 @@ func EnsureServer(ctx context.Context, socket string, start func() error, stderr
 
 	for !Probe(socket) {
 		if err := ctx.Err(); err != nil {
-			return fmt.Errorf("cli: server on %s not ready: %w", socket, err)
+			return fmt.Errorf(
+				"cli: server on %s not ready: %w — details: %s (or run: golem serve)",
+				socket, err, ServeLogPath())
 		}
 
 		if time.Now().After(deadline) {
-			return fmt.Errorf("cli: server on %s not ready within %s", socket, readyTimeout)
+			return fmt.Errorf(
+				"cli: server on %s not ready within %s — details: %s (or run: golem serve)",
+				socket, readyTimeout, ServeLogPath())
 		}
 
 		timer := time.NewTimer(pollInterval)
@@ -85,7 +90,9 @@ func EnsureServer(ctx context.Context, socket string, start func() error, stderr
 		case <-ctx.Done():
 			timer.Stop()
 
-			return fmt.Errorf("cli: server on %s not ready: %w", socket, ctx.Err())
+			return fmt.Errorf(
+				"cli: server on %s not ready: %w — details: %s (or run: golem serve)",
+				socket, ctx.Err(), ServeLogPath())
 		case <-timer.C:
 		}
 	}
@@ -111,21 +118,45 @@ func removeStaleSocket(socket string) error {
 	return nil
 }
 
-// SpawnServe starts exe as a detached `golem serve` process. Production
-// callers pass os.Executable()'s result so golem re-executes itself; the
-// server outlives the client that spawned it.
-func SpawnServe(exe string) error {
+// ServeLogPath is where the spawned daemon's output lands so startup
+// failures are never invisible.
+func ServeLogPath() string {
+	return filepath.Join(dataDir(), "serve.log")
+}
+
+// SpawnServe starts exe as a detached `golem serve` process, logging its
+// output to logPath. Production callers pass os.Executable()'s result so
+// golem re-executes itself; the server outlives the client that spawned it.
+func SpawnServe(exe, logPath string) error {
 	if exe == "" {
 		return fmt.Errorf("cli: spawn: no executable path")
 	}
 
-	// Detached daemon: intentionally no cancellation tied to the client.
+	if err := os.MkdirAll(filepath.Dir(logPath), 0o750); err != nil {
+		return fmt.Errorf("cli: spawn: creating log dir: %w", err)
+	}
+
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600) //nolint:gosec // golem's own log path
+	if err != nil {
+		return fmt.Errorf("cli: spawn: opening %s: %w", logPath, err)
+	}
+
 	cmd := exec.CommandContext(context.Background(), exe, "serve")
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // detach from the client's session
 
 	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+
 		return fmt.Errorf("cli: spawning %s: %w", exe, err)
 	}
+
+	// The daemon holds its own descriptor; close ours in this process.
+	go func() {
+		_ = cmd.Wait() //nolint:errcheck // daemon exit is observed via serve.log
+		_ = logFile.Close()
+	}()
 
 	return nil
 }

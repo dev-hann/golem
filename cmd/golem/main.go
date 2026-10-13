@@ -96,7 +96,7 @@ func launchApp(rest []string, d deps) int {
 				return fmt.Errorf("golem: resolving executable: %w", err)
 			}
 
-			return cli.SpawnServe(exe)
+			return cli.SpawnServe(exe, cli.ServeLogPath())
 		},
 		Stderr: os.Stderr,
 	}); err != nil {
