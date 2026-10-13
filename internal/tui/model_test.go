@@ -302,6 +302,48 @@ func TestViewport_HandlesLongOutputScrollback(t *testing.T) {
 	}
 }
 
+func TestModel_StickyUserPinsWhenScrolledPast(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m.blocks = []block{{kind: blockUser, text: "fix the bug"}}
+	m.refreshView()
+	view := m.View()
+	if !strings.Contains(view, "fix the bug") {
+		t.Fatalf("user box should be visible before scrolling:\n%s", view)
+	}
+	if strings.Contains(view, "▎") {
+		t.Errorf("sticky must stay hidden while the box is visible:\n%s", view)
+	}
+
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	for range 100 {
+		m = deliver(t, m, golemclient.TextDelta{
+			Type: golemclient.TypeTextDelta, Delta: strings.Repeat("x", 60) + "\n",
+		})
+	}
+	view = m.View()
+	if !strings.Contains(view, "▎ fix the bug") {
+		t.Errorf("sticky should pin the last question above the viewport:\n%s", view)
+	}
+	if strings.Contains(view, "│ fix the bug │") {
+		t.Errorf("scrolled-off box should not render in the visible page:\n%s", view)
+	}
+}
+
+func TestModel_StickyUserClearsWithTranscript(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m.blocks = []block{{kind: blockUser, text: "fix the bug"}}
+	m.refreshView()
+	m.blocks = nil
+	m.refreshView()
+	if strings.Contains(m.View(), "▎") {
+		t.Errorf("sticky should disappear when the transcript clears:\n%s", m.View())
+	}
+}
+
 func TestModel_ConnectFailureShowsError(t *testing.T) {
 	t.Parallel()
 	m := New("/dev/null")

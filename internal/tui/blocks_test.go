@@ -13,16 +13,16 @@ func testKit() *kit.Kit { return kit.New(kit.DefaultTheme()) }
 
 func TestBlockRender_UserAndAssistant(t *testing.T) {
 	t.Parallel()
-	if got := (block{kind: blockUser, text: "hello"}).render(testKit()); !strings.Contains(got, "you> hello") {
-		t.Errorf("user block = %q", got)
+	if got := (block{kind: blockUser, text: "hello"}).render(testKit(), 80); !strings.Contains(got, "hello") || !strings.Contains(got, "╭") {
+		t.Errorf("user block should render a box, got %q", got)
 	}
-	if got := (block{kind: blockAssistant}).render(testKit()); !strings.Contains(got, "…") {
-		t.Errorf("empty assistant block should show ellipsis, got %q", got)
+	if got := (block{kind: blockAssistant}).render(testKit(), 80); got != "…" {
+		t.Errorf("empty assistant block should be a bare ellipsis, got %q", got)
 	}
-	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit()); !strings.Contains(got, "golem> hi") {
-		t.Errorf("assistant block = %q", got)
+	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit(), 80); got != "hi" {
+		t.Errorf("assistant block should be plain text without a label, got %q", got)
 	}
-	if got := (block{kind: blockError, text: "boom"}).render(testKit()); !strings.Contains(got, "error: boom") {
+	if got := (block{kind: blockError, text: "boom"}).render(testKit(), 80); !strings.Contains(got, "error: boom") {
 		t.Errorf("error block = %q", got)
 	}
 }
@@ -30,15 +30,15 @@ func TestBlockRender_UserAndAssistant(t *testing.T) {
 func TestBlockRender_ToolStatuses(t *testing.T) {
 	t.Parallel()
 	running := block{kind: blockTool, tool: "bash", args: `{"command":"ls"}`}
-	if got := running.render(testKit()); !strings.Contains(got, "… bash") {
+	if got := running.render(testKit(), 80); !strings.Contains(got, "… bash") {
 		t.Errorf("running tool = %q", got)
 	}
 	done := block{kind: blockTool, tool: "read", done: true, ok: true}
-	if got := done.render(testKit()); !strings.Contains(got, "✓ read") {
+	if got := done.render(testKit(), 80); !strings.Contains(got, "✓ read") {
 		t.Errorf("ok tool = %q", got)
 	}
 	failed := block{kind: blockTool, tool: "edit", done: true}
-	if got := failed.render(testKit()); !strings.Contains(got, "✗ edit") {
+	if got := failed.render(testKit(), 80); !strings.Contains(got, "✗ edit") {
 		t.Errorf("failed tool = %q", got)
 	}
 }
@@ -60,15 +60,54 @@ func TestPreview_TruncatesAtBoundary(t *testing.T) {
 
 func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 	t.Parallel()
-	got := renderBlocks(testKit(), []block{
+	got, lastUserEnd := renderBlocks(testKit(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},
 		{kind: blockError, text: "bad"},
-	})
-	for _, want := range []string{"you> q", "golem> a", "✓ read", "error: bad"} {
+	}, 80)
+	for _, want := range []string{"╭", "q", "a", "✓ read", "error: bad"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("renderBlocks missing %q in:\n%s", want, got)
 		}
+	}
+	// The user box is the first block: three frame lines, so the block
+	// ends before line 3 and the span must report exactly that.
+	if lastUserEnd != 3 {
+		t.Errorf("lastUserEnd = %d, want 3 (box frame lines):\n%s", lastUserEnd, got)
+	}
+}
+
+func TestRenderBlocks_NoUserBlockReportsMinusOne(t *testing.T) {
+	t.Parallel()
+	if _, lastUserEnd := renderBlocks(testKit(), []block{{kind: blockAssistant, text: "a"}}, 80); lastUserEnd != -1 {
+		t.Errorf("lastUserEnd = %d, want -1 without a user block", lastUserEnd)
+	}
+}
+
+func TestRenderBlocks_BlankLineBetweenBlocks(t *testing.T) {
+	t.Parallel()
+	got, _ := renderBlocks(testKit(), []block{
+		{kind: blockUser, text: "q"},
+		{kind: blockAssistant, text: "a"},
+		{kind: blockTool, tool: "read", done: true, ok: true},
+	}, 80)
+	// A blank line separates the box from the assistant text; tool lines
+	// attach to the block they follow without a blank line.
+	if !strings.Contains(got, "╯\n\na\n  ✓ read") {
+		t.Errorf("blocks should be separated by blank lines, tool lines attached:\n%s", got)
+	}
+}
+
+func TestRenderBlocks_TracksLastUserBlock(t *testing.T) {
+	t.Parallel()
+	got, lastUserEnd := renderBlocks(testKit(), []block{
+		{kind: blockUser, text: "first"},
+		{kind: blockAssistant, text: strings.Repeat("x", 100)},
+		{kind: blockUser, text: "second"},
+	}, 80)
+	_ = got
+	if lastUserEnd <= 4 {
+		t.Errorf("lastUserEnd = %d, should track the second user block past the first exchange", lastUserEnd)
 	}
 }

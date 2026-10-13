@@ -39,17 +39,18 @@ const (
 	maxResultPreview = 2000
 )
 
-// render turns one block into display lines through the kit theme.
-func (b block) render(k *kit.Kit) string {
+// render turns one block into display lines through the kit theme. User
+// messages get the identifying box; assistant text stays plain prose.
+func (b block) render(k *kit.Kit, width int) string {
 	switch b.kind {
 	case blockUser:
-		return k.User("you> ", b.text)
+		return k.UserBox(width, b.text)
 	case blockAssistant:
 		if b.text == "" {
-			return k.Assistant("golem> ", "…")
+			return k.DimLine("…")
 		}
 
-		return k.Assistant("golem> ", b.text)
+		return b.text
 	case blockError:
 		return k.ErrLine(b.text)
 	case blockTool:
@@ -90,12 +91,43 @@ func preview(s string, limit int) string {
 	return s[:limit] + "…"
 }
 
-// renderBlocks renders the whole transcript through the kit theme.
-func renderBlocks(k *kit.Kit, blocks []block) string {
-	lines := make([]string, 0, len(blocks))
-	for _, b := range blocks {
-		lines = append(lines, b.render(k))
+// renderBlocks renders the whole transcript through the kit theme,
+// separating blocks with a blank line (tool lines attach to the block
+// they follow). It also reports lastUserEnd: the line index one past the
+// final user block in the joined output, or -1 with no user block — the
+// scroll position the sticky header keys off.
+func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, lastUserEnd int) {
+	var b strings.Builder
+
+	lastUserEnd = -1
+	line := 0
+
+	for i, blk := range blocks {
+		if i > 0 {
+			// A blank line separates blocks; tool lines attach directly
+			// to the block they follow with a single newline.
+			if blk.kind == blockTool {
+				b.WriteByte('\n')
+
+				line++
+			} else {
+				b.WriteString("\n\n")
+
+				line += 2
+			}
+		}
+
+		rendered := blk.render(k, width)
+		lines := strings.Count(rendered, "\n") + 1
+
+		if blk.kind == blockUser {
+			lastUserEnd = line + lines
+		}
+
+		b.WriteString(rendered)
+
+		line += lines
 	}
 
-	return strings.Join(lines, "\n")
+	return b.String(), lastUserEnd
 }

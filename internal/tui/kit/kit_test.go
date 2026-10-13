@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/muesli/termenv"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
@@ -109,19 +110,49 @@ func TestKit_TokensUseTheirOwnColor(t *testing.T) {
 	}
 }
 
-func TestKit_UserBoldAssistantPlain(t *testing.T) {
+func TestKit_UserBoxRoundedFrame(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	user := k.User("you> ", "hello")
-	if !strings.Contains(user, "you> ") || !strings.Contains(user, "hello") {
-		t.Errorf("user message mangled: %q", user)
+	boxed := k.UserBox(30, "hello")
+	for _, want := range []string{"╭", "╮", "╰", "╯", "hello"} {
+		if !strings.Contains(boxed, want) {
+			t.Errorf("user box missing %q:\n%s", want, boxed)
+		}
 	}
+}
 
-	asst := k.Assistant("golem> ", "hi")
-	if !strings.Contains(asst, "golem> ") || !strings.Contains(asst, "hi") {
-		t.Errorf("assistant message mangled: %q", asst)
+func TestKit_UserBoxWrapsWithinWidth(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	boxed := k.UserBox(20, strings.Repeat("a", 50))
+	for i, line := range strings.Split(boxed, "\n") {
+		if w := ansi.StringWidth(line); w > 20 {
+			t.Errorf("user box line %d width %d exceeds cap 20:\n%s", i, w, boxed)
+		}
+	}
+	if !strings.Contains(boxed, "aaa") {
+		t.Errorf("user box lost text:\n%s", boxed)
+	}
+}
+
+func TestKit_StickyUserOneLineTruncated(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	sticky := k.StickyUser(12, strings.Repeat("b", 50))
+	if strings.Contains(sticky, "\n") {
+		t.Errorf("sticky must be one line:\n%s", sticky)
+	}
+	if w := ansi.StringWidth(sticky); w > 12 {
+		t.Errorf("sticky width %d exceeds 12:\n%s", w, sticky)
+	}
+	if !strings.Contains(sticky, "▎") || !strings.HasSuffix(sticky, "…") {
+		t.Errorf("sticky missing bar or ellipsis:\n%s", sticky)
 	}
 }
 

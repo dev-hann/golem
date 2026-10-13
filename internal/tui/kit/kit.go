@@ -41,16 +41,6 @@ func (k *Kit) Style(token Token) lipgloss.Style { return k.styles[token] }
 
 // --- transcript lines -------------------------------------------------
 
-// User renders the user-message prefix ("you> " style bold, user color).
-func (k *Kit) User(prefix, text string) string {
-	return k.styles[User].Bold(true).Render(prefix) + text
-}
-
-// Assistant renders the assistant-message prefix.
-func (k *Kit) Assistant(prefix, text string) string {
-	return k.styles[Assistant].Render(prefix) + text
-}
-
 // ToolLine renders a muted tool-activity line.
 func (k *Kit) ToolLine(text string) string {
 	return k.styles[Tool].Render(text)
@@ -126,6 +116,46 @@ func (k *Kit) Box(content string) string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(k.theme.Colors[Border]).
 		Render(content)
+}
+
+// UserBox geometry: a rounded frame (2 columns) plus horizontal padding.
+const (
+	userBoxPadding = 1
+	userBoxFrame   = 2
+	// Floors so narrow terminals still render a usable box.
+	minUserBoxInner = 10
+)
+
+// UserBox renders a user message inside a rounded frame in the user's
+// color — the visual identity separating human turns from assistant
+// prose. The frame hugs its content, wrapping anything wider than width.
+func (k *Kit) UserBox(width int, text string) string {
+	inner := max(width-2*userBoxPadding-userBoxFrame, minUserBoxInner)
+
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > inner {
+			lines[i] = ansi.Wrap(line, inner, "")
+		}
+	}
+
+	return k.r.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(k.theme.Colors[User]).
+		Padding(0, userBoxPadding).
+		Render(strings.Join(lines, "\n"))
+}
+
+// Sticky geometry: the "▎ " bar and its one space.
+const stickyBarCols = 2
+
+// StickyUser renders the one-line pinned reminder of the most recent user
+// message — a user-colored bar plus the truncated first line of the text.
+func (k *Kit) StickyUser(width int, text string) string {
+	first := strings.SplitN(text, "\n", 2)[0]
+	limit := max(width-stickyBarCols, 1)
+
+	return k.styles[User].Render("▎ " + ansi.Truncate(first, limit, "…"))
 }
 
 // Modal renders the shared overlay panel: a title line over a padded,

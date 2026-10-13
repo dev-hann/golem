@@ -37,6 +37,7 @@ type Model struct {
 	sessionID   string
 	turnActive  bool
 	blocks      []block
+	lastUserEnd int
 	pending     *golemclient.ApprovalRequest
 	sessions    []golemclient.SessionSummary
 	pickIndex   int
@@ -75,13 +76,14 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 	vp := viewport.New(startWidth, startHeight-headerLines-footerLines-minInputHeight-inputBorderRows)
 
 	return Model{
-		dial:      realDial,
-		socket:    socketPath,
-		kit:       k,
-		vp:        vp,
-		input:     input,
-		mode:      modeChat,
-		inputRows: minInputHeight,
+		dial:        realDial,
+		socket:      socketPath,
+		kit:         k,
+		vp:          vp,
+		input:       input,
+		mode:        modeChat,
+		inputRows:   minInputHeight,
+		lastUserEnd: -1,
 	}
 }
 
@@ -659,7 +661,9 @@ func (m *Model) replayHistory(hist golemclient.History) {
 // refreshView pushes the rendered transcript into the viewport and pins to
 // the bottom while a turn streams.
 func (m *Model) refreshView() {
-	m.vp.SetContent(renderBlocks(m.kit, m.blocks))
+	content, lastUserEnd := renderBlocks(m.kit, m.blocks, m.vp.Width)
+	m.lastUserEnd = lastUserEnd
+	m.vp.SetContent(content)
 
 	if m.turnActive {
 		m.vp.GotoBottom()
@@ -701,11 +705,44 @@ func (m Model) View() string {
 func (m Model) layout() string {
 	var b strings.Builder
 	b.WriteString(header(m) + "\n")
-	b.WriteString(m.vp.View() + "\n")
+
+	if text := m.stickyText(); text != "" {
+		b.WriteString(m.kit.StickyUser(m.vp.Width, text) + "\n")
+		b.WriteString(m.shrunkViewport() + "\n")
+	} else {
+		b.WriteString(m.vp.View() + "\n")
+	}
+
 	b.WriteString(m.footer() + "\n")
 	b.WriteString(m.kit.Box(m.input.View()))
 
 	return b.String()
+}
+
+// stickyText returns the pinned text for the most recent user message
+// when it has scrolled fully above the viewport, or "" when the box is
+// still visible (or no user message exists).
+func (m Model) stickyText() string {
+	if m.lastUserEnd < 0 || m.lastUserEnd > m.vp.YOffset {
+		return ""
+	}
+
+	for i := len(m.blocks) - 1; i >= 0; i-- {
+		if m.blocks[i].kind == blockUser {
+			return m.blocks[i].text
+		}
+	}
+
+	return ""
+}
+
+// shrunkViewport renders one viewport row shorter, paying for the sticky
+// line so the total screen height stays constant.
+func (m Model) shrunkViewport() string {
+	vp := m.vp
+	vp.Height = max(vp.Height-1, viewportMinHeight)
+
+	return vp.View()
 }
 
 // modalized renders the modal floating over a faded, escape-free backdrop
