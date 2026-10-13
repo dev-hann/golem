@@ -39,13 +39,15 @@ type OnboardOptions struct {
 }
 
 // NeedsOnboarding reports whether the first-run wizard should run: no
-// config file exists and no provider key is present in the environment.
+// config file exists and detection does not point at exactly one provider
+// — zero keys, or one key shared by several presets (ZAI_API_KEY selects
+// both zai plans), which only the wizard can disambiguate.
 func NeedsOnboarding(configPath string) bool {
 	if _, err := os.Stat(configPath); err == nil {
 		return false
 	}
 
-	return len(llm.DetectFromEnv()) == 0
+	return len(llm.DetectFromEnv()) != 1
 }
 
 // RunOnboard is the setup wizard body: pick a provider, prove the key via
@@ -244,6 +246,10 @@ func promptKeyAndList(
 		case errors.Is(err, llm.ErrAuth):
 			fmt.Fprintf(out, "key rejected: %v\n", err) //nolint:errcheck // terminal output
 
+			if hint := planHint(id); hint != "" {
+				fmt.Fprintln(out, "hint: "+hint) //nolint:errcheck // terminal output
+			}
+
 			continue
 		default:
 			// The key may be fine; only the listing endpoint is missing.
@@ -255,6 +261,19 @@ func promptKeyAndList(
 	}
 
 	return "", nil, fmt.Errorf("cli: setup: key rejected %d times", maxKeyAttempts)
+}
+
+// planHint points at the sibling zai preset when a key fits the other
+// plan: coding-plan keys only work on the coding endpoint and vice versa.
+func planHint(id string) string {
+	switch id {
+	case "zai":
+		return "a GLM Coding Plan key only works on zai-coding — rerun: golem setup"
+	case "zai-coding":
+		return "a pay-per-use key only works on zai — rerun: golem setup"
+	default:
+		return ""
+	}
 }
 
 // promptModel picks the model: a numbered selector over the fetched list,

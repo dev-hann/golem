@@ -39,8 +39,14 @@ var Presets = map[string]Preset{
 		KeyEnv: "OPENAI_API_KEY", DefaultModel: "gpt-5.2",
 	},
 	"zai": {
-		Kind: KindOpenAICompat, Label: "Z.ai (GLM)",
+		Kind: KindOpenAICompat, Label: "Z.ai (pay-per-use)",
 		KeyEnv: "ZAI_API_KEY", BaseURL: "https://api.z.ai/api/paas/v4/", DefaultModel: "glm-5",
+	},
+	"zai-coding": {
+		// GLM Coding Plan subscription; its keys only work on the coding
+		// endpoints (docs.z.ai/devpack) — never on the pay-per-use URL.
+		Kind: KindOpenAICompat, Label: "Z.ai GLM Coding Plan",
+		KeyEnv: "ZAI_API_KEY", BaseURL: "https://api.z.ai/api/coding/paas/v4/", DefaultModel: "glm-5.3",
 	},
 	"ollama": {
 		Kind: KindOpenAICompat, Label: "Ollama (local)",
@@ -49,7 +55,7 @@ var Presets = map[string]Preset{
 }
 
 // Order is the stable display order used by the setup wizard.
-var Order = []string{"zai", "anthropic", "openai", "ollama"}
+var Order = []string{"zai-coding", "zai", "anthropic", "openai", "ollama"}
 
 // DetectFromEnv lists provider ids whose API-key environment variable is
 // set, in Order sequence. Providers without a KeyEnv are never detected.

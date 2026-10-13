@@ -68,13 +68,15 @@ func TestPresets_OrderListsAllIDs(t *testing.T) {
 
 func TestDetectFromEnv_ListsProvidersWithKeys(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "sk-zai")
-	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
 	t.Setenv("ANTHROPIC_API_KEY", "")
 	t.Setenv("GOLEM_TEST_UNRELATED", "x")
 
 	detected := llm.DetectFromEnv()
-	if len(detected) != 1 || detected[0] != "zai" {
-		t.Errorf("DetectFromEnv() = %v, want [zai]", detected)
+	// ZAI_API_KEY lights up both zai presets (pay-per-use and coding plan
+	// share the console key); order follows the catalog.
+	if len(detected) != 3 || detected[0] != "zai-coding" || detected[1] != "zai" || detected[2] != "openai" {
+		t.Errorf("DetectFromEnv() = %v, want [zai-coding zai openai]", detected)
 	}
 }
 

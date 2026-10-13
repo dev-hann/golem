@@ -31,8 +31,9 @@ type onboardHarness struct {
 // stubModels is the default catalog the stub serves.
 func stubModels() map[string][]string {
 	return map[string][]string{
-		"zai":       {"glm-5.3-air", "glm-4.7", "glm-5", "embedding-3"},
-		"anthropic": {"claude-opus-5", "claude-sonnet-4"},
+		"zai":        {"glm-5.3-air", "glm-4.7", "glm-5", "embedding-3"},
+		"zai-coding": {"glm-5.3", "glm-5.3-flash"},
+		"anthropic":  {"claude-opus-5", "claude-sonnet-4"},
 	}
 }
 
@@ -91,14 +92,25 @@ func TestNeedsOnboarding(t *testing.T) {
 		t.Error("NeedsOnboarding(config exists) = true, want false")
 	}
 
-	t.Setenv("ZAI_API_KEY", "sk-set")
+	t.Setenv("ZAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "sk-only-openai")
+	t.Setenv("ANTHROPIC_API_KEY", "")
+
 	if cli.NeedsOnboarding(absent) {
-		t.Error("NeedsOnboarding(env key set) = true, want false")
+		t.Error("NeedsOnboarding(single unambiguous key) = true, want false")
+	}
+
+	// ZAI_API_KEY lights up both zai presets — only the wizard can pick a
+	// plan, so it must run despite a key being present.
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("ZAI_API_KEY", "sk-zai")
+	if !cli.NeedsOnboarding(absent) {
+		t.Error("NeedsOnboarding(ambiguous zai key) = false, want true")
 	}
 }
 
 func TestRunOnboard_WritesConfigWithPlaintextKey(t *testing.T) {
-	h := newOnboard(t, "1\nsk-zai-123\n\n") // zai, key, enter = default glm-5
+	h := newOnboard(t, "2\nsk-zai-123\n\n") // zai, key, enter = default glm-5
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v (stderr: %s)", err, h.stderr.String())
@@ -136,7 +148,7 @@ func TestRunOnboard_WritesConfigWithPlaintextKey(t *testing.T) {
 }
 
 func TestRunOnboard_SelectorListsFilteredModels(t *testing.T) {
-	h := newOnboard(t, "1\nsk-zai-123\n\n")
+	h := newOnboard(t, "2\nsk-zai-123\n\n")
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v", err)
@@ -155,7 +167,7 @@ func TestRunOnboard_SelectorListsFilteredModels(t *testing.T) {
 }
 
 func TestRunOnboard_SelectorPicksByNumber(t *testing.T) {
-	h := newOnboard(t, "1\nsk-zai-123\n1\n") // pick entry 1 = glm-4.7
+	h := newOnboard(t, "2\nsk-zai-123\n1\n") // pick entry 1 = glm-4.7
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v", err)
@@ -168,7 +180,7 @@ func TestRunOnboard_SelectorPicksByNumber(t *testing.T) {
 }
 
 func TestRunOnboard_SelectorAcceptsCustomID(t *testing.T) {
-	h := newOnboard(t, "1\nsk-zai-123\nglm-5.4-preview\n")
+	h := newOnboard(t, "2\nsk-zai-123\nglm-5.4-preview\n")
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v", err)
@@ -181,7 +193,7 @@ func TestRunOnboard_SelectorAcceptsCustomID(t *testing.T) {
 }
 
 func TestRunOnboard_AuthFailureRetries(t *testing.T) {
-	h := newOnboard(t, "1\nbad-key\ngood-key\n\n")
+	h := newOnboard(t, "2\nbad-key\ngood-key\n\n")
 	h.authFails = 1
 
 	if err := h.run(t); err != nil {
@@ -197,7 +209,7 @@ func TestRunOnboard_AuthFailureRetries(t *testing.T) {
 }
 
 func TestRunOnboard_AuthFailureThreeTimesErrors(t *testing.T) {
-	h := newOnboard(t, "1\nk1\nk2\nk3\n")
+	h := newOnboard(t, "2\nk1\nk2\nk3\n")
 	h.authFails = 3
 
 	if err := h.run(t); err == nil || !strings.Contains(err.Error(), "3 times") {
@@ -210,7 +222,7 @@ func TestRunOnboard_AuthFailureThreeTimesErrors(t *testing.T) {
 }
 
 func TestRunOnboard_ListUnavailableFallsBackToManual(t *testing.T) {
-	h := newOnboard(t, "3\nsk-openai\ngpt-5.2\n") // openai stub = no listing endpoint
+	h := newOnboard(t, "4\nsk-openai\ngpt-5.2\n") // openai stub = no listing endpoint
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v (stdout: %s)", err, h.stdout.String())
@@ -234,7 +246,7 @@ func TestRunOnboard_ListUnavailableFallsBackToManual(t *testing.T) {
 }
 
 func TestRunOnboard_OllamaFallsBackToManualModel(t *testing.T) {
-	h := newOnboard(t, "4\nllama3.3\n") // ollama stub = no listing endpoint (not running)
+	h := newOnboard(t, "5\nllama3.3\n") // ollama stub = no listing endpoint (not running)
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v", err)
@@ -254,8 +266,43 @@ func TestRunOnboard_OllamaFallsBackToManualModel(t *testing.T) {
 	}
 }
 
+func TestRunOnboard_ZaiCodingPresetUsesCodingEndpoint(t *testing.T) {
+	h := newOnboard(t, "1\ncoding-key\n\n") // entry 1 = zai-coding, default model glm-5.3
+
+	if err := h.run(t); err != nil {
+		t.Fatalf("RunOnboard: %v", err)
+	}
+
+	body, _ := os.ReadFile(h.configPath)
+	got := string(body)
+
+	for _, want := range []string{
+		`default = "zai-coding"`,
+		`base_url = "https://api.z.ai/api/coding/paas/v4/"`,
+		`model = "glm-5.3"`,
+		`api_key = "coding-key"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("config missing %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestRunOnboard_PlanHintOnRejectedZaiKey(t *testing.T) {
+	h := newOnboard(t, "2\nwrong-plan-key\n") // pay-per-use preset, coding key
+	h.authFails = 9                           // always rejected
+
+	if err := h.run(t); err == nil {
+		t.Fatal("expected exhaustion error")
+	}
+
+	if !strings.Contains(h.stdout.String(), "zai-coding") {
+		t.Errorf("plan hint missing:\n%s", h.stdout.String())
+	}
+}
+
 func TestRunOnboard_PreservesExistingSections(t *testing.T) {
-	h := newOnboard(t, "1\nsk-zai-123\n\n")
+	h := newOnboard(t, "2\nsk-zai-123\n\n")
 
 	existing := "[provider]\ndefault = \"openai\"\n\n[provider.openai]\nmodel = \"gpt-5.2\"\n"
 	if err := os.WriteFile(h.configPath, []byte(existing), 0o600); err != nil {
@@ -278,7 +325,7 @@ func TestRunOnboard_PreservesExistingSections(t *testing.T) {
 }
 
 func TestRunOnboard_InvalidSelectionRecovers(t *testing.T) {
-	h := newOnboard(t, "99\nnope\n2\nsk-ant\n\n")
+	h := newOnboard(t, "99\nnope\n3\nsk-ant\n\n")
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v", err)
@@ -293,7 +340,7 @@ func TestRunOnboard_InvalidSelectionRecovers(t *testing.T) {
 func TestRunOnboard_UsesEnvKeyWhenBlank(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "sk-from-env")
 
-	h := newOnboard(t, "1\n\n\n") // select zai, blank key, default model
+	h := newOnboard(t, "2\n\n\n") // select zai, blank key, default model
 
 	if err := h.run(t); err != nil {
 		t.Fatalf("RunOnboard: %v", err)

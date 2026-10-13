@@ -35,6 +35,16 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — Z.ai GLM Coding Plan preset (2026-10-13, v0.1.4)
+
+- New `zai-coding` provider preset: the GLM Coding Plan endpoint
+  (`https://api.z.ai/api/coding/paas/v4/`, default model glm-5.3) —
+  coding-plan keys only work there, pay-per-use keys only on `zai`. Both
+  presets share ZAI_API_KEY, so env detection is ambiguous by design and
+  the setup wizard runs to pick a plan once; a rejected zai key now hints
+  at the sibling preset. Note the plan's terms limit use to officially
+  supported tools.
+
 ### Added — resilient serve, arrow-key picker, self-update (2026-10-13, v0.1.3)
 
 - `golem update`: verified self-update from GitHub releases (platform

@@ -32,6 +32,26 @@ func clearProviderKeys(t *testing.T) {
 
 func TestResolveProvider_NoConfigInfersSingleEnvKey(t *testing.T) {
 	clearProviderKeys(t)
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+
+	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"))
+	if err != nil {
+		t.Fatalf("ResolveProvider: %v", err)
+	}
+
+	if choice.ID != "openai" {
+		t.Errorf("ID = %q, want openai (unambiguous single key)", choice.ID)
+	}
+	if choice.Model != "gpt-5.2" {
+		t.Errorf("Model = %q, want preset default gpt-5.2", choice.Model)
+	}
+	if choice.Provider == nil {
+		t.Error("Provider is nil")
+	}
+}
+
+func TestResolveProvider_AmbiguousZaiKeyKeepsDefault(t *testing.T) {
+	clearProviderKeys(t)
 	t.Setenv("ZAI_API_KEY", "sk-zai")
 
 	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"))
@@ -39,14 +59,11 @@ func TestResolveProvider_NoConfigInfersSingleEnvKey(t *testing.T) {
 		t.Fatalf("ResolveProvider: %v", err)
 	}
 
-	if choice.ID != "zai" {
-		t.Errorf("ID = %q, want zai", choice.ID)
-	}
-	if choice.Model != "glm-5" {
-		t.Errorf("Model = %q, want preset default glm-5", choice.Model)
-	}
-	if choice.Provider == nil {
-		t.Error("Provider is nil")
+	// ZAI_API_KEY covers both zai plans: inference cannot pick, so the
+	// built-in default stands and the wizard (run by NeedsOnboarding)
+	// resolves it once interactively.
+	if choice.ID != "anthropic" {
+		t.Errorf("ID = %q, want anthropic (ambiguous inference skipped)", choice.ID)
 	}
 }
 

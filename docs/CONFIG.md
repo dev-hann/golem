@@ -33,7 +33,7 @@ API keys live in the global config by default (ADR-0015): the wizard writes the 
 
 1. `api_key = "sk-..."` in config — plaintext, the designed default for the global file.
 2. `api_key = "ref:SOME_ENV_VAR"` in config — env indirection for users who prefer it; a missing referenced var is a startup warning naming the key and turns fail per turn.
-3. Dedicated env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`) when the config sets none.
+3. Dedicated env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY` — both zai plans read the same console key) when the config sets none.
 
 Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The future project-level `.golem.toml` (committable) will reject plaintext keys.
 
@@ -45,13 +45,13 @@ Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The future 
 |---|---|---|---|
 | `default` | string | `"anthropic"` | Provider id used when a session doesn't specify |
 
-### `[provider.<id>]` — `id` ∈ `anthropic`, `openai`, `zai`, `ollama`
+### `[provider.<id>]` — `id` ∈ `anthropic`, `openai`, `zai`, `zai-coding`, `ollama`
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `model` | string | per-provider | e.g. `claude-opus-5`, `glm-5`, `gpt-5.2` |
-| `api_key` | string | — | `ref:ENV_VAR` indirection (see Secrets) |
-| `base_url` | string | provider default | Endpoint override. `zai` preset: `https://api.z.ai/api/paas/v4/` |
+| `model` | string | per-provider | e.g. `claude-opus-5`, `glm-5.3`, `gpt-5.2` |
+| `api_key` | string | — | plaintext (default) or `ref:ENV_VAR` (see Secrets) |
+| `base_url` | string | provider default | Endpoint override. `zai` preset: `https://api.z.ai/api/paas/v4/` (pay-per-use); `zai-coding` preset: `https://api.z.ai/api/coding/paas/v4/` — GLM Coding Plan keys only work on the coding endpoints |
 
 ### `[server]`
 
