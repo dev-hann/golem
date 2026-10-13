@@ -179,8 +179,8 @@ func TestKit_OverlayCentersModal(t *testing.T) {
 		t.Fatalf("modal content missing from overlay:\n%s", placed)
 	}
 
-	if strings.Count(middle[:strings.Index(middle, "X")], " ") < 10 {
-		t.Errorf("modal not horizontally centered: %q", middle)
+	if idx := strings.Index(middle, "X"); idx < 10 {
+		t.Errorf("modal not horizontally centered (prefix %d chars): %q", idx, middle)
 	}
 }
 

@@ -121,6 +121,26 @@ func (h *harness) createSession() string {
 	return meta.Session
 }
 
+// expectTypeError reads events until an error event with the wanted code
+// arrives, failing on anything else.
+func (h *harness) expectTypeError(code string) error {
+	h.t.Helper()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		ev, got, err := h.client.ReceiveWithTimeout(2 * time.Second)
+		if err != nil || !got {
+			continue
+		}
+
+		if e, ok := ev.(golemclient.ErrorEvent); ok && e.Code == code {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("timed out waiting for error %q", code)
+}
+
 // expectType reads events until one of the wanted type arrives.
 func (h *harness) expectType(typ string) any {
 	h.t.Helper()
@@ -153,6 +173,74 @@ func typeName(t *testing.T, ev any) string {
 		t.Fatalf("unmarshal envelope: %v", err)
 	}
 	return env.Type
+}
+
+func TestServer_SetModelOverridesNextTurn(t *testing.T) {
+	t.Parallel()
+
+	provider := &scriptedProvider{rounds: [][]llm.Event{
+		{{Type: llm.EventTextDelta, Delta: "one"}, {Type: llm.EventUsage}},
+		{{Type: llm.EventTextDelta, Delta: "two"}, {Type: llm.EventUsage}},
+	}}
+	h := newHarness(t, provider, 5)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "hi",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	first := h.expectType(golemclient.TypeTurnStart).(golemclient.TurnStart)
+	if first.Model != "stub-model" {
+		t.Fatalf("first turn model = %q, want the configured one", first.Model)
+	}
+
+	h.expectType(golemclient.TypeTurnEnd)
+
+	if err := h.client.Send(golemclient.SetModel{
+		Type: golemclient.TypeSetModel, Session: sess, Model: "glm-5.3-flash",
+	}); err != nil {
+		t.Fatalf("send set_model: %v", err)
+	}
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "again",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	second := h.expectType(golemclient.TypeTurnStart).(golemclient.TurnStart)
+	if second.Model != "glm-5.3-flash" {
+		t.Errorf("second turn model = %q, want the override", second.Model)
+	}
+}
+
+func TestServer_SetModelRejectsEmptyAndUnknownSession(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, &scriptedProvider{}, 5)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.SetModel{
+		Type: golemclient.TypeSetModel, Session: sess, Model: "  ",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if err := h.expectTypeError("invalid_request"); err != nil {
+		t.Fatalf("empty model: %v", err)
+	}
+
+	if err := h.client.Send(golemclient.SetModel{
+		Type: golemclient.TypeSetModel, Session: "missing", Model: "m",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if err := h.expectTypeError("session_not_found"); err != nil {
+		t.Fatalf("unknown session: %v", err)
+	}
 }
 
 func TestServer_UserMessageProducesTurnLifecycle(t *testing.T) {

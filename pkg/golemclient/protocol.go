@@ -183,6 +183,16 @@ type TurnEnd struct {
 	Usage   Usage  `json:"usage"`
 }
 
+// TypeSetModel labels a client set_model event.
+const TypeSetModel = "set_model"
+
+// SetModel overrides the model a session uses for subsequent turns.
+type SetModel struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Model   string `json:"model"`
+}
+
 // decoder decodes one raw line into a typed event.
 type decoder func([]byte) (any, error)
 
@@ -190,6 +200,7 @@ type decoder func([]byte) (any, error)
 // fall through to the Envelope (forward compatibility per PROTOCOL.md).
 var decoders = map[string]decoder{
 	TypeUserMessage:      typed[UserMessage],
+	TypeSetModel:         typed[SetModel],
 	TypeApprovalResponse: typed[ApprovalResponse],
 	TypeInterrupt:        typed[Interrupt],
 	TypeCreateSession:    typed[CreateSession],

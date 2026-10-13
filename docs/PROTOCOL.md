@@ -52,6 +52,14 @@ Cancel the current turn. Server stops the agent loop at the next await point; pa
 {"type":"interrupt","session":"01J...","turn":"01J..."}
 ```
 
+### `set_model`
+
+Override the model this session uses for subsequent turns (same provider; switching providers is a later phase). Applies from the next turn; `turn_start` reports the model actually in effect. Empty models are `invalid_request`; unknown sessions get `session_not_found`. Not persisted — replay restores the transcript, not the override.
+
+```json
+{"type":"set_model","session":"01J...","model":"glm-5.3-flash"}
+```
+
 ### `create_session` / `list_sessions` / `load_session`
 
 Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client.

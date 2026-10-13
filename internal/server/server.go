@@ -7,8 +7,10 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -43,8 +45,9 @@ type Server struct {
 	registry *tools.Registry
 	policy   *approval.Policy
 
-	mu    sync.Mutex
-	turns map[string]*turnState
+	mu             sync.Mutex
+	turns          map[string]*turnState
+	modelOverrides map[string]string // session → model override (SetModel)
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -77,11 +80,12 @@ func New(cfg Config) (*Server, error) {
 	}
 
 	return &Server{
-		cfg:      cfg,
-		registry: registry,
-		policy:   approval.NewPolicy(approval.ModePrompt, approval.DefaultPrefixes),
-		turns:    make(map[string]*turnState),
-		closed:   make(chan struct{}),
+		cfg:            cfg,
+		registry:       registry,
+		policy:         approval.NewPolicy(approval.ModePrompt, approval.DefaultPrefixes),
+		turns:          make(map[string]*turnState),
+		modelOverrides: make(map[string]string),
+		closed:         make(chan struct{}),
 	}, nil
 }
 
@@ -150,6 +154,8 @@ func (s *Server) dispatch(_ net.Conn, writer *connWriter, event any) bool {
 		s.handleApprovalResponse(ev)
 	case golemclient.Interrupt:
 		s.handleInterrupt(ev)
+	case golemclient.SetModel:
+		s.handleSetModel(writer, ev)
 	case golemclient.Envelope:
 		// Unknown types are ignored per PROTOCOL.md forward compatibility.
 	default:
@@ -265,6 +271,40 @@ func (s *Server) handleInterrupt(ev golemclient.Interrupt) {
 	}
 }
 
+// handleSetModel stores a per-session model override applied from the next
+// turn on. Empty models are rejected; unknown sessions error out.
+func (s *Server) handleSetModel(writer *connWriter, ev golemclient.SetModel) {
+	if _, err := s.cfg.Store.Get(ev.Session); err != nil {
+		writer.send(errorOf(ev.Session, "", "session_not_found", err))
+
+		return
+	}
+
+	model := strings.TrimSpace(ev.Model)
+	if model == "" {
+		writer.send(errorOf(ev.Session, "", "invalid_request",
+			errors.New("set_model: model must not be empty")))
+
+		return
+	}
+
+	s.mu.Lock()
+	s.modelOverrides[ev.Session] = model
+	s.mu.Unlock()
+}
+
+// turnModel resolves the model a session's next turn runs with.
+func (s *Server) turnModel(sessionID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if model, ok := s.modelOverrides[sessionID]; ok {
+		return model
+	}
+
+	return s.cfg.Model
+}
+
 // beginTurn registers an active turn; false when one already runs.
 func (s *Server) beginTurn(ctx context.Context, sessionID string, cancel context.CancelFunc) bool {
 	s.mu.Lock()
@@ -308,7 +348,9 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 
 	defer s.cfg.Store.Invalidate(msg.Session)
 
-	ag := agent.New(s.cfg.Provider, s.registry, s.policy, s.cfg.Model,
+	model := s.turnModel(msg.Session)
+
+	ag := agent.New(s.cfg.Provider, s.registry, s.policy, model,
 		agent.WithApprovalFunc(s.approver(writer, msg.Session, turnID)))
 
 	sess, err := s.cfg.Store.Get(msg.Session)
@@ -318,7 +360,7 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 	}
 
 	for event := range ag.Run(ctx, sess.Messages, msg.Text) {
-		wire := s.wireEvent(msg.Session, turnID, event)
+		wire := s.wireEvent(msg.Session, turnID, model, event)
 		if wire == nil {
 			continue
 		}
@@ -334,12 +376,12 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 }
 
 // wireEvent converts one agent event to its protocol shape.
-func (s *Server) wireEvent(sessionID, turnID string, event agent.Event) any {
+func (s *Server) wireEvent(sessionID, turnID, model string, event agent.Event) any {
 	switch event.Type {
 	case agent.EventTurnStart:
 		return golemclient.TurnStart{
 			Type: golemclient.TypeTurnStart, Session: sessionID, Turn: turnID,
-			Provider: providerLabel(s.cfg.ProviderID), Model: s.cfg.Model,
+			Provider: providerLabel(s.cfg.ProviderID), Model: model,
 		}
 	case agent.EventTextDelta:
 		return golemclient.TextDelta{
