@@ -18,6 +18,7 @@ import (
 
 	"github.com/dev-hann/golem/internal/config"
 	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/tui"
 )
 
 // maxKeyAttempts bounds rejected keys before the wizard gives up.
@@ -290,9 +291,10 @@ func promptModel(
 	return model, nil
 }
 
-// pickModelFromList renders the numbered selector: enter accepts the
-// highlighted default, a number picks that entry, anything else is taken
-// as a custom model id.
+// pickModelFromList renders the selector: on a terminal it is an arrow-key
+// picker (bubbletea, no new dependency); without one it falls back to
+// numbered input. Cancel (q) drops to the numbered prompt so custom ids can
+// still be typed.
 func pickModelFromList(
 	out io.Writer,
 	reader *bufio.Scanner,
@@ -305,23 +307,17 @@ func pickModelFromList(
 		listed = listed[:maxModelChoices]
 	}
 
-	cursor := 1
+	cursor := cursorFor(listed, defaultModel)
 
-	if defaultModel != "" {
-		for i, m := range listed {
-			if m == defaultModel {
-				cursor = i + 1
-
-				break
-			}
-		}
+	if item, ok := tui.PickFromList(titleFor(id, listed), listed, cursor); ok {
+		return item, nil
 	}
 
-	fmt.Fprintf(out, "\nmodels for %s (%d):\n", id, len(listed)) //nolint:errcheck // terminal output
+	fmt.Fprintf(out, "\n%s\n", titleFor(id, listed)) //nolint:errcheck // terminal output
 
 	for i, m := range listed {
 		marker := "  "
-		if i+1 == cursor {
+		if i == cursor {
 			marker = "▶ "
 		}
 
@@ -329,13 +325,13 @@ func pickModelFromList(
 	}
 
 	fmt.Fprintf(out, "pick 1-%d, type an id, or enter for %q: ", //nolint:errcheck // terminal output
-		len(listed), listed[cursor-1])
+		len(listed), listed[cursor])
 
 	choice := strings.TrimSpace(readLine(reader))
 
 	switch {
 	case choice == "":
-		return listed[cursor-1], nil
+		return listed[cursor], nil
 	case isIndex(choice, len(listed)):
 		n, _ := strconv.Atoi(choice)
 
@@ -343,6 +339,24 @@ func pickModelFromList(
 	default:
 		return choice, nil
 	}
+}
+
+// titleFor renders the picker title.
+func titleFor(id string, listed []string) string {
+	return fmt.Sprintf("models for %s (%d) — ↑↓ move, enter select, q to type an id", id, len(listed))
+}
+
+// cursorFor prepositions the cursor on the preset default.
+func cursorFor(listed []string, defaultModel string) int {
+	if defaultModel != "" {
+		for i, m := range listed {
+			if m == defaultModel {
+				return i
+			}
+		}
+	}
+
+	return 0
 }
 
 // isIndex reports whether s is a valid 1-based index into n items.
