@@ -18,7 +18,7 @@ const shutdownLatency = 5 * time.Second
 func TestServe_ReturnsAfterShutdownSignal(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	socket := filepath.Join(dir, "golem.sock")
 	store, err := session.NewStore(filepath.Join(dir, "sessions"), 2)
 	if err != nil {

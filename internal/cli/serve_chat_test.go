@@ -14,6 +14,22 @@ import (
 	"github.com/dev-hann/golem/internal/session"
 )
 
+// shortTempDir returns a temp dir whose path stays under the macOS unix
+// socket limit (104 bytes) — t.TempDir() embeds the test name and makes
+// listen fail with EINVAL on macOS.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "golem")
+	if err != nil {
+		t.Fatalf("short temp dir: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return dir
+}
+
 // echoProvider answers every stream with one text delta.
 type echoProvider struct{}
 
@@ -29,7 +45,7 @@ func (echoProvider) Stream(
 
 func TestServe_AndChatSmoke(t *testing.T) {
 	t.Parallel()
-	sockDir := t.TempDir()
+	sockDir := shortTempDir(t)
 	socket := filepath.Join(sockDir, "golem.sock")
 	store, err := session.NewStore(filepath.Join(sockDir, "sessions"), 4)
 	if err != nil {

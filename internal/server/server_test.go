@@ -56,6 +56,22 @@ type harness struct {
 	root     string
 }
 
+// shortTempDir returns a temp dir whose full path stays under the macOS
+// unix-socket limit (sun_path, 104 bytes). t.TempDir() embeds the test name
+// and overflows on macOS, making every listen fail with EINVAL.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+
+	dir, err := os.MkdirTemp("", "golem")
+	if err != nil {
+		t.Fatalf("short temp dir: %v", err)
+	}
+
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+
+	return dir
+}
+
 func newHarness(t *testing.T, provider llm.Provider, approvalTimeoutS int) *harness {
 	t.Helper()
 	root := t.TempDir()
@@ -72,7 +88,7 @@ func newHarness(t *testing.T, provider llm.Provider, approvalTimeoutS int) *harn
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
 	}
-	sockDir := t.TempDir()
+	sockDir := shortTempDir(t)
 	listener, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", filepath.Join(sockDir, "golem.sock"))
 	if err != nil {
 		t.Fatalf("listen: %v", err)

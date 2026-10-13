@@ -27,7 +27,7 @@ func listenUnix(t *testing.T, socket string) {
 func TestProbe(t *testing.T) {
 	t.Parallel()
 
-	socket := filepath.Join(t.TempDir(), "golem.sock")
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
 
 	if cli.Probe(socket) {
 		t.Error("Probe(missing socket) = true, want false")
@@ -55,7 +55,7 @@ func TestProbe(t *testing.T) {
 func TestEnsureServer_AlreadyRunningSkipsStart(t *testing.T) {
 	t.Parallel()
 
-	socket := filepath.Join(t.TempDir(), "golem.sock")
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
 	listenUnix(t, socket)
 
 	started := false
@@ -74,7 +74,7 @@ func TestEnsureServer_AlreadyRunningSkipsStart(t *testing.T) {
 func TestEnsureServer_StartsWhenDown(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	socket := filepath.Join(dir, "golem.sock")
 
 	err := cli.EnsureServer(t.Context(), socket, func() error {
@@ -92,7 +92,7 @@ func TestEnsureServer_StartsWhenDown(t *testing.T) {
 func TestEnsureServer_RemovesStaleSocketBeforeStart(t *testing.T) {
 	t.Parallel()
 
-	dir := t.TempDir()
+	dir := shortTempDir(t)
 	socket := filepath.Join(dir, "golem.sock")
 
 	stale, err := os.Create(socket)
@@ -115,7 +115,7 @@ func TestEnsureServer_RemovesStaleSocketBeforeStart(t *testing.T) {
 func TestEnsureServer_NotReadyErrors(t *testing.T) {
 	t.Parallel()
 
-	socket := filepath.Join(t.TempDir(), "golem.sock")
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
 
 	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
 	defer cancel()
@@ -156,7 +156,7 @@ func TestSpawnServe_ChildOutputLandsInLog(t *testing.T) {
 }
 
 func TestRunOnboard_WarnsWhenServerAlreadyRunning(t *testing.T) {
-	runtimeDir := t.TempDir()
+	runtimeDir := shortTempDir(t)
 	t.Setenv("XDG_RUNTIME_DIR", runtimeDir)
 	clearProviderKeys(t)
 
@@ -177,7 +177,7 @@ func TestRunOnboard_WarnsWhenServerAlreadyRunning(t *testing.T) {
 func TestEnsureServer_StartFailureBubbles(t *testing.T) {
 	t.Parallel()
 
-	socket := filepath.Join(t.TempDir(), "golem.sock")
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
 	sentinel := errors.New("spawn refused")
 
 	err := cli.EnsureServer(t.Context(), socket, func() error { return sentinel }, os.Stderr)

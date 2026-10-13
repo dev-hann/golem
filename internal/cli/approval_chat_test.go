@@ -41,7 +41,7 @@ func (p *bashProvider) Stream(
 
 func TestChat_AutoDeniesApprovalRequests(t *testing.T) {
 	t.Parallel()
-	sockDir := t.TempDir()
+	sockDir := shortTempDir(t)
 	socket := filepath.Join(sockDir, "golem.sock")
 	store, err := session.NewStore(filepath.Join(sockDir, "sessions"), 4)
 	if err != nil {
