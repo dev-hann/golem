@@ -35,6 +35,16 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — keyboard-driven TUI controls (unreleased)
+
+- `ctrl+n` new session (transcript resets on the same connection; streaming
+  left over from the previous session is dropped via a session guard),
+  `ctrl+p` session picker, `ctrl+l` clear the transcript view, `esc`
+  interrupts the active turn. The slash commands (`/quit`, `/exit`,
+  `/sessions`) are gone — quitting is double `ctrl+c`, navigation is keys,
+  and everything typed is message content. The composer placeholder
+  documents the bindings.
+
 ### Added — multiline input (2026-10-13, v0.1.7)
 
 - `alt+enter` (option+enter) inserts a newline; the composer grows with

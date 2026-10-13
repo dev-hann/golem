@@ -58,7 +58,8 @@ func New(socketPath string) Model {
 // construct a new model view through this).
 func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
-	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+c interrupt)"
+	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+n new · ctrl+p sessions · ctrl+l clear)"
+	input.ShowLineNumbers = false
 	input.FocusedStyle.Text = k.Style(kit.Fg)
 	input.FocusedStyle.Placeholder = k.Style(kit.Dim)
 	input.BlurredStyle = input.FocusedStyle
@@ -208,6 +209,29 @@ func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 // updateChat handles chat-mode keys.
 func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.Type { //nolint:exhaustive // foreign enum; default routes to the textarea
+	case tea.KeyCtrlN:
+		m.blocks = nil
+		m.statusParts = nil
+		m.provider, m.modelName = "", ""
+		m.turnActive = false
+		m.refreshView()
+
+		return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
+	case tea.KeyCtrlP:
+		m.listRequest = true
+
+		return m, m.send(golemclient.ListSessions{Type: golemclient.TypeListSessions})
+	case tea.KeyCtrlL:
+		m.blocks = nil
+		m.refreshView()
+
+		return m, nil
+	case tea.KeyEscape:
+		if m.turnActive {
+			return m.ctrlC() // interrupt only; quitting stays ctrl+c's job
+		}
+
+		return m, nil
 	case tea.KeyEnter:
 		if key.Alt { // alt/option+enter inserts a newline; plain enter submits
 			m.input.InsertString("\n")
@@ -259,33 +283,22 @@ func (m *Model) toggleLastTool() {
 // pageLines is the scroll step for page keys.
 const pageLines = 10
 
-// submit sends a chat line or local command, returning the updated model so
-// transcript mutations survive the value-receiver chain.
+// submit sends the composed line as a chat message. Everything typed is
+// content — navigation and lifecycle live on keys, not slash commands.
 func (m Model) submit(line string) (tea.Model, tea.Cmd) {
-	switch line {
-	case "/quit", "/exit":
-		m.quitting = true
-
-		return m, tea.Quit
-	case "/sessions":
-		m.listRequest = true
-
-		return m, m.send(golemclient.ListSessions{Type: golemclient.TypeListSessions})
-	default:
-		if m.client == nil || m.sessionID == "" {
-			m.blocks = append(m.blocks, block{kind: blockError, text: "not connected yet"})
-			m.refreshView()
-
-			return m, nil
-		}
-
-		m.blocks = append(m.blocks, block{kind: blockUser, text: line})
+	if m.client == nil || m.sessionID == "" {
+		m.blocks = append(m.blocks, block{kind: blockError, text: "not connected yet"})
 		m.refreshView()
 
-		return m, m.send(golemclient.UserMessage{
-			Type: golemclient.TypeUserMessage, Session: m.sessionID, Text: line,
-		})
+		return m, nil
 	}
+
+	m.blocks = append(m.blocks, block{kind: blockUser, text: line})
+	m.refreshView()
+
+	return m, m.send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: m.sessionID, Text: line,
+	})
 }
 
 // updateApproval handles y/n for a pending approval_request.
@@ -405,7 +418,56 @@ const (
 )
 
 // applyEvent folds one server event into the model, returning the next cmd.
+// sessionOf extracts the session a streaming event belongs to; "" for
+// events that are session-less or carry a new session identity (SessionMeta).
+func sessionOf(ev any) string {
+	switch e := ev.(type) {
+	case golemclient.TurnStart:
+		return e.Session
+	case golemclient.TextDelta:
+		return e.Session
+	case golemclient.ToolCallStart:
+		return e.Session
+	case golemclient.ToolCallEnd:
+		return e.Session
+	case golemclient.ApprovalRequest:
+		return e.Session
+	case golemclient.ErrorEvent:
+		return e.Session
+	case golemclient.TurnEnd:
+		return e.Session
+	case golemclient.History:
+		return e.Session
+	default:
+		return ""
+	}
+}
+
+// skipStaleEvent drops streaming from a session this client no longer shows
+// (a fresh ctrl+n session started while a turn was in flight), reporting
+// whether it swallowed the event along with the keep-listening cmd.
+func (m *Model) skipStaleEvent(ev any) (tea.Cmd, bool) {
+	if m.sessionID == "" {
+		return nil, false
+	}
+
+	s := sessionOf(ev)
+	if s == "" || s == m.sessionID {
+		return nil, false
+	}
+
+	if m.client != nil {
+		return m.listen(), true
+	}
+
+	return nil, true
+}
+
 func (m *Model) applyEvent(ev any) tea.Cmd {
+	if cmd, stale := m.skipStaleEvent(ev); stale {
+		return cmd
+	}
+
 	switch e := ev.(type) {
 	case golemclient.SessionMeta:
 		m.sessionID = e.Session
@@ -450,9 +512,9 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		}
 	case golemclient.History:
 		m.replayHistory(e)
-	case golemclient.Envelope:
-		// unknown types ignored per PROTOCOL.md
 	default:
+		// Unknown types (including golemclient.Envelope) are ignored per
+		// PROTOCOL.md forward compatibility.
 	}
 
 	m.refreshView()

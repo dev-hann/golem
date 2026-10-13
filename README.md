@@ -63,11 +63,13 @@ Also available: `golem serve` runs just the agent server; `golem chat` is a line
 | `enter` | send message |
 | `alt+enter` (option+enter) | insert a newline — the input box grows with the message |
 | `ctrl+c` | interrupt the active turn; press again to quit |
+| `ctrl+n` | new session (transcript resets, same connection) |
+| `ctrl+p` | session picker — `↑`/`↓` select, `enter` open, `esc` cancel |
+| `ctrl+l` | clear the transcript view (session and context stay) |
+| `esc` | interrupt the active turn |
 | `pgup` / `pgdn` | scroll the transcript |
 | `tab` | expand/collapse the most recent tool-call block |
 | `y` / `n` | allow / deny a pending command approval (any other key denies) |
-| `/sessions` | session picker — `↑`/`↓` select, `enter` open, `esc` cancel |
-| `/quit`, `/exit` | quit |
 
 ## Configuration
 
