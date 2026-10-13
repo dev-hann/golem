@@ -5,6 +5,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 )
 
 // Role identifies the author of a Message.
@@ -65,6 +66,16 @@ const (
 	EventToolCalls EventType = "tool_calls"
 	EventUsage     EventType = "usage"
 	EventError     EventType = "error"
+)
+
+// Sentinel errors adapters wrap so callers can classify failures without
+// matching on SDK types.
+var (
+	// ErrAuth marks a rejected credential (HTTP 401/403).
+	ErrAuth = errors.New("credential rejected")
+	// ErrModelListUnavailable marks a provider whose model-list endpoint is
+	// missing or returned nothing — the key may still be fine.
+	ErrModelListUnavailable = errors.New("model list unavailable")
 )
 
 // Event is a normalized provider stream event.
