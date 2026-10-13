@@ -4,7 +4,7 @@ BIN_TUI := golem-tui
 
 .PHONY: all build test test-race cover lint fmt vet tidy clean
 
-all: lint test build
+all: lint test-race build
 
 build:
 	$(GO) build -o bin/$(BIN) ./cmd/golem
@@ -25,7 +25,7 @@ lint:
 
 fmt:
 	gofumpt -w -extra .
-	goimports -w -local github.com/golem-agent/golem .
+	goimports -w -local github.com/dev-hann/golem .
 
 vet:
 	$(GO) vet ./...

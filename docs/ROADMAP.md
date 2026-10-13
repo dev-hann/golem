@@ -1,6 +1,6 @@
 # golem Roadmap
 
-Last updated: 2026-09-27. Each phase lists deliverables, **acceptance criteria**, and the **test list** (TDD: tests are the specification — write them first). A phase is done when all acceptance criteria pass and `make all` is green.
+Last updated: 2026-10-12. Each phase lists deliverables, **acceptance criteria**, and the **test list** (TDD: tests are the specification — write them first). A phase is done when all acceptance criteria pass and `make all` is green.
 
 Convention used below: package paths are the unit of work; test names are indicative but the listed behaviors are the contract.
 
@@ -75,7 +75,7 @@ Goal: `golem serve` + protocol over the socket, testable with `nc`.
 - `internal/session`: JSONL append, replay, bounded cache, ULID ids.
 - `internal/server`: unix socket listener, connection loop, event routing per PROTOCOL.md.
 - `pkg/golemclient`: protocol types + blocking test client (used by tests and later by the TUI).
-- `cmd/golem`: `serve`, `chat` (line-based REPL over the socket).
+- `internal/cli` + `cmd/golem`: `serve`, `chat` (line-based REPL over the socket; subcommand logic lives in `internal/cli`, `cmd` stays wiring-only).
 
 ### Acceptance criteria
 
@@ -118,7 +118,7 @@ Goal: daily-driver terminal client.
 
 ### Deliverables
 
-- `cmd/golem-tui`: Bubble Tea app — chat view with streaming markdown-ish rendering, collapsible tool-call blocks, input box, `/sessions` picker, interrupt key.
+- `internal/tui` (behind a thin `cmd/golem-tui` binary): Bubble Tea app — chat view with streaming markdown-ish rendering, collapsible tool-call blocks, input box, `/sessions` picker, interrupt key.
 - `pkg/golemclient`: streaming (non-blocking) client API.
 
 ### Acceptance criteria

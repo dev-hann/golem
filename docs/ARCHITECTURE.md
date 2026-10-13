@@ -1,6 +1,8 @@
 # golem Architecture
 
-Last updated: 2026-09-27. If code and this document disagree, the code is wrong — fix the code or update this document in the same change.
+Last updated: 2026-10-12. If code and this document disagree, the code is wrong — fix the code or update this document in the same change.
+
+Implementation status lives in [ROADMAP.md](ROADMAP.md): phases 1–3 are implemented; sections describing later phases are specification the implementation must grow toward.
 
 ## Overview
 
@@ -34,20 +36,21 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
 
 ## Modules
 
-| Path | Responsibility | May import |
-|---|---|---|
-| `cmd/golem` | Server binary. Subcommands: `serve`, `chat`, `ask`. Wiring only — no business logic. | `internal/*`, `pkg/*` |
-| `cmd/golem-tui` | Bubble Tea client binary. Rendering and input only. | `pkg/golemclient`, `internal/*` for shared UI types only |
-| `internal/llm` | `Provider` interface + adapters (anthropic, openai, zai, ollama). Streaming normalization. | stdlib, provider SDKs |
-| `internal/agent` | Agent loop: send context → receive tool calls → dispatch tools → append results → repeat until turn end. | `internal/llm`, `internal/tools`, `internal/session`, `internal/approval` |
-| `internal/tools` | Built-in tools: read, write, edit, bash, grep, glob. Pure execution, no LLM knowledge. | stdlib |
-| `internal/server` | Transport listeners (unix socket, TCP, WS later), connection handling, event routing. | `internal/agent`, `internal/session`, `pkg/golemclient` |
-| `internal/session` | Append-only JSONL session store + in-memory cache with bounded size. Replay on load. | stdlib |
-| `internal/approval` | Approval policy engine: whitelist prefixes, prompt/auto modes, pending-approval state. | stdlib |
-| `internal/mcp` | MCP client: process lifecycle, JSON-RPC over stdio, tool discovery. | stdlib (or MCP Go SDK — ADR required to adopt) |
-| `internal/config` | Layered TOML config load & merge. | stdlib, `BurntSushi/toml` |
-| `pkg/golemclient` | **Public** client library. Protocol types + a typed client over any transport. Future apps build on this. | stdlib only — never `internal/*` |
-| `apps/` | Future web/desktop clients. Not part of the Go module build. | — |
+| Path | Status | Responsibility | May import |
+|---|---|---|---|
+| `cmd/golem` | implemented | Server binary. Subcommands: `serve`, `chat`, `ask`. Wiring only — no business logic. | `internal/*`, `pkg/*` |
+| `cmd/golem-tui` | implemented | TUI binary. Thin `main` wiring; the app lives in `internal/tui`. | `internal/cli`, `internal/tui` |
+| `internal/cli` | implemented | Subcommand implementations (`ask`, `serve`, `chat`): provider wiring, default socket/session paths, the line REPL. One layer below `cmd` so it is testable without spawning processes. | `internal/agent`, `internal/approval`, `internal/llm`, `internal/server`, `internal/session`, `internal/tools`, `pkg/golemclient` |
+| `internal/llm` | partial | `Provider` interface + adapters. `anthropic` implemented (reference adapter); `openai`, `zai`, `ollama` land in roadmap phase 5. Streaming normalization. | stdlib, provider SDKs |
+| `internal/agent` | implemented | Agent loop: send context → receive tool calls → dispatch tools → append results → repeat until turn end. | `internal/llm`, `internal/tools`, `internal/session`, `internal/approval` |
+| `internal/tools` | implemented | Built-in tools: read, write, edit, bash, grep, glob. Pure execution, no LLM knowledge. | stdlib |
+| `internal/server` | implemented | Transport listeners (unix socket, TCP, WS later), connection handling, event routing. | `internal/agent`, `internal/session`, `pkg/golemclient` |
+| `internal/session` | implemented | Append-only JSONL session store + in-memory cache with bounded size. Replay on load. | stdlib |
+| `internal/approval` | implemented | Approval policy engine: whitelist prefixes, prompt/auto modes, pending-approval state. | stdlib |
+| `internal/mcp` | planned (phase 6) | MCP client: process lifecycle, JSON-RPC over stdio, tool discovery. | stdlib (or MCP Go SDK — ADR required to adopt) |
+| `internal/config` | planned (phase 5) | Layered TOML config load & merge. Until then golem is configured via environment variables only. | stdlib, `BurntSushi/toml` |
+| `pkg/golemclient` | implemented | **Public** client library. Protocol types + a typed client over any transport. Future apps build on this. | stdlib only — never `internal/*` |
+| `apps/` | future | Web/desktop clients. Not part of the Go module build. | — |
 
 **Dependency direction:** `cmd → internal → pkg` is wrong; the rule is: `cmd` may import everything; `internal` packages import other `internal` packages and `pkg`; `pkg` imports stdlib/external only. Layer flow inside `internal`: `server → agent → (llm, tools, approval) → session`. Never upward.
 
@@ -112,17 +115,21 @@ Adapters normalize each SDK's stream into the common event channel (text deltas,
 | Z.ai (GLM) | `openai-go` + `WithBaseURL` against OpenAI-compatible endpoint | No official Go SDK exists |
 | Ollama | `ollama/ollama/api` | Local models |
 
+Status: only the `anthropic` adapter exists today (phase 1); the remaining adapters arrive with the config system in phase 5, which is also when provider selection becomes config-driven. Until then `cmd/golem` wires Anthropic directly, with `GOLEM_MODEL` as the only model override.
+
 ## Approval gate
 
 All shell-executing tools (built-in `bash`, MCP tools that declare side effects) pass through `internal/approval` before execution:
 
 - `auto_prefixes` (config): read-only commands (ls, cat, git status, grep, rg, …) run without prompting.
+- Compound command lines are split at `&&`, `||`, `|`, `;` and newlines; **every segment** must pass the whitelist or the whole line prompts.
+- Command substitution and redirection (`$(`, `` ` ``, `>`, `<`) anywhere in the line force a prompt regardless of prefixes — `cat notes.txt > out.txt` prompts even though `cat` is whitelisted. Matching rules live in [CONFIG.md](CONFIG.md).
 - Everything else: agent loop emits `approval_request`, blocks until `approval_response`, with timeout.
 - Policy modes: `prompt` (default), `all_auto` (danger, config-only). Documented in CONFIG.md.
 
 ## Plugins (MCP)
 
-External tool plugins are MCP servers declared in config. golem manages their lifecycle (declared → starting → ready → running → failed/restarting → stopped) and merges their tools into the agent's tool registry with an `mcp_<server>_<tool>` naming scheme. See [CONFIG.md](CONFIG.md) for the state machine and configuration.
+External tool plugins are MCP servers declared in config (**planned, roadmap phase 6** — `internal/mcp` is not implemented yet). golem manages their lifecycle (declared → starting → ready → running → failed/restarting → stopped) and merges their tools into the agent's tool registry with an `mcp_<server>_<tool>` naming scheme. See [CONFIG.md](CONFIG.md) for the state machine and configuration.
 
 ## Memory budget
 

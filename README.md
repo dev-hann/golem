@@ -12,8 +12,8 @@ Existing coding agents force a tradeoff: heavyweight runtimes that eat hundreds 
 - **~100–150 MB RSS** in normal use (single static binary, no runtime to load)
 - **Server/TUI split** — the agent server owns state; close your TUI, sessions live on. Reconnect anytime.
 - **Append-only JSONL sessions** — no database, instant replay, trivially inspectable
-- **Multi-provider** — Anthropic, OpenAI, Z.ai (GLM), Ollama behind one interface
-- **MCP plugins** — standard Model Context Protocol servers for extensibility
+- **Multi-provider** — Anthropic today; OpenAI, Z.ai (GLM), Ollama behind the same interface (roadmap phase 5)
+- **MCP plugins** — standard Model Context Protocol servers for extensibility (roadmap phase 6)
 - **Fast startup** — no VM warmup, connect and go
 
 ## Status
@@ -32,20 +32,37 @@ make build
 ./bin/golem-tui       # terminal client
 ```
 
-## Configuration
+## Usage
 
-See [docs/CONFIG.md](docs/CONFIG.md). Minimal setup:
-
-```toml
-# ~/.config/golem/config.toml
-[provider]
-default = "anthropic"
-
-[provider.anthropic]
-model = "claude-opus-5"
+```bash
+./bin/golem serve &   # agent server on a unix socket
+./bin/golem-tui       # terminal client
 ```
 
-API keys come from environment variables (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`); never store them in config files.
+`golem ask "<prompt>"` runs a one-shot prompt without the server; `golem chat` is a line-based REPL against a running server (`/quit` exits; command approvals are auto-denied until the phase 4 UX lands).
+
+### TUI keys
+
+| Key | Action |
+|---|---|
+| `enter` | send message |
+| `ctrl+c` | interrupt the active turn; press again to quit |
+| `pgup` / `pgdn` | scroll the transcript |
+| `tab` | expand/collapse the most recent tool-call block |
+| `y` / `n` | allow / deny a pending command approval (any other key denies) |
+| `/sessions` | session picker — `↑`/`↓` select, `enter` open, `esc` cancel |
+| `/quit`, `/exit` | quit |
+
+## Configuration
+
+Config files ([docs/CONFIG.md](docs/CONFIG.md) is the spec) land in [roadmap phase 5](docs/ROADMAP.md). Today golem is configured by environment variables only:
+
+| Variable | Purpose |
+|---|---|
+| `ANTHROPIC_API_KEY` | provider API key (required) |
+| `GOLEM_MODEL` | model override (default `claude-opus-5`) |
+
+Only the Anthropic provider is implemented so far; see [docs/ROADMAP.md](docs/ROADMAP.md) for the rest.
 
 ## Documentation
 

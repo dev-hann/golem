@@ -1,6 +1,8 @@
 # golem Configuration & Plugin Lifecycle
 
-Last updated: 2026-09-27. Schema changes require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
+Last updated: 2026-10-12. Schema changes require updating this file in the same commit.
+
+> **Status: specification — not yet implemented.** The config parser (`internal/config`), providers beyond Anthropic, and MCP plugin support land in [ROADMAP.md](ROADMAP.md) phases 5–6. Until then golem is configured via environment variables only (`ANTHROPIC_API_KEY`, `GOLEM_MODEL`). This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
 
 ## File locations & precedence
 
@@ -55,6 +57,12 @@ Plaintext `api_key = "sk-..."` is accepted with a stderr warning, for testing on
 | `mode` | string | `"prompt"` | `prompt` = gate non-whitelisted; `all_auto` = never block (dangerous, warns at startup) |
 | `auto_prefixes` | []string | `["ls", "cat", "head", "tail", "git status", "git log", "git diff", "grep", "rg", "find", "wc"]` | Word-boundary prefix match against the command line |
 | `timeout_secs` | int | `120` | Approval wait; expiry = deny |
+
+Matching rules (already enforced by `internal/approval` for the CLI harness):
+
+- The command line is split into segments at `&&`, `||`, `|`, `;` and newlines; **every segment** must pass the whitelist or the whole line is denied.
+- Prefixes match whole words at the start of a segment: `git status` matches `git status -s`, not `git statusx`.
+- Command substitution and redirection (`$(`, `` ` ``, `>`, `<`) anywhere in the line force a deny regardless of prefixes — `cat notes.txt > out.txt` prompts even though `cat` is whitelisted.
 
 ### `[tools]`
 

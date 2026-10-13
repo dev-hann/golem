@@ -33,7 +33,7 @@ Every unit of work follows red-green-refactor:
 ## Commands
 
 ```bash
-make all      # lint + test + build — the gate; run before claiming done
+make all      # lint + test-race + build — the gate; run before claiming done
 make lint     # golangci-lint (strict; config in .golangci.yml)
 make test     # go test ./...
 make test-race

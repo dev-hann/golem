@@ -42,4 +42,4 @@ Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, 
 
 ## Reporting bugs
 
-Open an issue with: what you ran, what you expected, what happened, and the session JSONL if relevant (redact secrets first).
+Open an issue with: what you ran, what you expected, what happened, and the session JSONL if relevant (redact secrets first). For security vulnerabilities, see [SECURITY.md](SECURITY.md) — do not open public issues for those.
