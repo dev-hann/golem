@@ -35,17 +35,20 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
-### Added — centered modal system, model picker, help (unreleased)
+### Added — centered modal system, model picker, help (2026-10-13, v0.1.8)
 
-- Every overlay now shares one shape: a centered `kit.Modal` frame (help,
-  model picker, session picker, approval prompt). `ctrl+/` opens the
-  binding reference; `alt+m` opens the model picker fed by the launcher
-  (which fetches the configured provider's models, degrading silently),
-  applying the choice via the new `set_model` event from the next turn.
-  Note: `ctrl+m` is indistinguishable from `enter` in terminal protocols
-  (both CR), so the m mnemonic rides the alt grammar with alt+enter.
+- Every overlay shares one shape: a background-filled `kit.Modal` panel
+  floating over a faded backdrop of the full layout (ANSI-aware merge via
+  `x/ansi`; the backdrop renders escape-free in the theme's dim gray —
+  terminals cannot blur, and this stays terminal-independent). `ctrl+/`
+  opens the binding reference; `alt+m` opens the model picker fed by the
+  launcher (which fetches the configured provider's models, degrading
+  silently), applying the choice via the new `set_model` event from the
+  next turn. Note: `ctrl+m` is indistinguishable from `enter` in terminal
+  protocols (both CR), so the m mnemonic rides the alt grammar with
+  alt+enter.
 
-### Added — keyboard-driven TUI controls (unreleased)
+### Added — keyboard-driven TUI controls (2026-10-13, v0.1.8)
 
 - `ctrl+n` new session (transcript resets on the same connection; streaming
   left over from the previous session is dropped via a session guard),
@@ -54,6 +57,15 @@ config schema may change without notice.
   `/sessions`) are gone — quitting is double `ctrl+c`, navigation is keys,
   and everything typed is message content. The composer placeholder
   documents the bindings.
+
+### Changed — composer and platform (2026-10-13, v0.1.8)
+
+- The composer is now a single-line rounded frame (`kit.Box`, Tokyo Night
+  border) with no prompt prefix or line numbers; it grows only when the
+  message has newlines.
+- The test suite runs on macOS: unix-socket test paths stay under the
+  104-byte `sun_path` limit via short temp dirs (`t.TempDir()` embeds
+  test names and made every listen fail with EINVAL on a Mac).
 
 ### Added — multiline input (2026-10-13, v0.1.7)
 
