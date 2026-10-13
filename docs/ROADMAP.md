@@ -214,7 +214,7 @@ Goal: daily-driver terminal client.
 
 ---
 
-## Phase 7 — Hardening & release prep
+## Phase 7 — Hardening & release prep (partial: release pipeline + version/update-check landed 2026-10-13)
 
 ### Deliverables
 

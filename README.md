@@ -28,6 +28,12 @@ Requires Go 1.25+.
 go install github.com/dev-hann/golem/cmd/golem@latest
 ```
 
+Or grab a release tarball ([releases](https://github.com/dev-hann/golem/releases); `golem` and `golem-tui` ship together for linux/darwin on amd64/arm64):
+
+```bash
+curl -L https://github.com/dev-hann/golem/releases/latest/download/golem_$(VERSION)_$(OS)_$(ARCH).tar.gz | tar xz
+```
+
 Or from a clone:
 
 ```bash
@@ -35,6 +41,8 @@ git clone https://github.com/dev-hann/golem
 cd golem
 make build
 ```
+
+`golem version` reports the build; on launch golem checks for a newer release once a day and prints an upgrade hint (`GOLEM_DISABLE_UPDATE_CHECK=1` silences it).
 
 ## Usage
 

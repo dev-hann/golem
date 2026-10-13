@@ -35,6 +35,12 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — release pipeline (2026-10-13)
+
+- Tag pushes (`v*`) run goreleaser in CI: `golem` and `golem-tui` for
+  linux/darwin on amd64/arm64, version/commit stamped via ldflags,
+  checksums attached to the GitHub release. First release: v0.1.0.
+
 ### Added — version reporting + update check (2026-10-13)
 
 - `golem version`: build version, commit, platform. Version resolves from
