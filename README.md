@@ -61,6 +61,7 @@ Also available: `golem serve` runs just the agent server; `golem chat` is a line
 | Key | Action |
 |---|---|
 | `enter` | send message |
+| `alt+enter` (option+enter) | insert a newline — the input box grows with the message |
 | `ctrl+c` | interrupt the active turn; press again to quit |
 | `pgup` / `pgdn` | scroll the transcript |
 | `tab` | expand/collapse the most recent tool-call block |

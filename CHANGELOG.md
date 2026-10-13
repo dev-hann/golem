@@ -35,6 +35,15 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — multiline input (unreleased)
+
+- `alt+enter` (option+enter) inserts a newline; the composer grows with
+  its content (floor of two rows, capped at 40% of the terminal) and
+  returns the rows to the transcript on send. Plain `enter` still
+  submits; multiline paste was already preserved and now has a visible
+  home. Shift+enter is indistinguishable from enter in bubbletea v1's
+  terminal protocol — hence the alt mapping.
+
 ### Changed — Tokyo Night default theme, full kit migration (2026-10-13, v0.1.6)
 
 - The default palette is now Tokyo Night (Night for dark terminals, Day

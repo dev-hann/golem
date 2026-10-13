@@ -44,6 +44,7 @@ type Model struct {
 	provider    string
 	modelName   string
 	statusParts []string
+	inputRows   int
 	quitting    bool
 	listRequest bool
 }
@@ -57,38 +58,44 @@ func New(socketPath string) Model {
 // construct a new model view through this).
 func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
-	input.Placeholder = "message… (enter to send, ctrl+c to interrupt)"
+	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+c interrupt)"
 	input.Prompt = "you> "
 	input.FocusedStyle.Prompt = k.Style(kit.User).Bold(true)
 	input.FocusedStyle.Text = k.Style(kit.Fg)
 	input.FocusedStyle.Placeholder = k.Style(kit.Dim)
 	input.BlurredStyle = input.FocusedStyle
-	input.SetHeight(inputHeight)
+	input.SetHeight(minInputHeight)
 	input.SetWidth(80)
 	input.Focus()
 
-	vp := viewport.New(startWidth, startHeight-headerLines-footerLines-inputHeight)
+	vp := viewport.New(startWidth, startHeight-headerLines-footerLines-minInputHeight)
 
 	return Model{
-		dial:   realDial,
-		socket: socketPath,
-		kit:    k,
-		vp:     vp,
-		input:  input,
-		mode:   modeChat,
+		dial:      realDial,
+		socket:    socketPath,
+		kit:       k,
+		vp:        vp,
+		input:     input,
+		mode:      modeChat,
+		inputRows: minInputHeight,
 	}
 }
 
 // sessionIDShortLen bounds the session id shown in the status bar.
 const sessionIDShortLen = 8
 
-// Layout constants. The viewport gets whatever height remains.
+// Layout constants. The viewport gets whatever height remains. The input
+// box grows with its content between minInputHeight and a share of the
+// terminal (inputMaxShareNumerator/inputMaxShareDenominator).
 const (
-	inputHeight = 3
-	headerLines = 1
-	footerLines = 1
-	startWidth  = 80
-	startHeight = 20
+	minInputHeight = 2
+	// Growing past 40% of the terminal would starve the transcript.
+	inputMaxShareNumerator   = 2
+	inputMaxShareDenominator = 5
+	headerLines              = 1
+	footerLines              = 1
+	startWidth               = 80
+	startHeight              = 20
 )
 
 // Init implements tea.Model: connect and start listening.
@@ -201,12 +208,20 @@ func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key.Type { //nolint:exhaustive // foreign enum; default routes to the textarea
 	case tea.KeyEnter:
+		if key.Alt { // alt/option+enter inserts a newline; plain enter submits
+			m.input.InsertString("\n")
+			m.syncInputHeight()
+
+			return m, nil
+		}
+
 		line := strings.TrimSpace(m.input.Value())
 		if line == "" {
 			return m, nil
 		}
 
 		m.input.Reset()
+		m.syncInputHeight()
 
 		return m.submit(line)
 	case tea.KeyPgUp:
@@ -224,6 +239,7 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 
 		m.input, cmd = m.input.Update(key)
+		m.syncInputHeight()
 
 		return m, cmd
 	}
@@ -350,8 +366,35 @@ func (m Model) send(event any) tea.Cmd {
 func (m *Model) resize(width, height int) {
 	m.width, m.height = width, height
 	m.vp.Width = max(width, viewportMinWidth)
-	m.vp.Height = max(height-inputHeight-headerLines-footerLines, viewportMinHeight)
+	m.vp.Height = max(height-m.inputRows-headerLines-footerLines, viewportMinHeight)
 	m.input.SetWidth(max(width, viewportMinWidth))
+	m.syncInputHeight()
+}
+
+// syncInputHeight grows the input box with its content — one row per
+// newline, min minInputHeight, capped at the terminal share — and returns
+// the freed or claimed rows to the transcript viewport.
+func (m *Model) syncInputHeight() {
+	rows := strings.Count(m.input.Value(), "\n") + 1
+
+	height := m.height
+	if height == 0 {
+		height = startHeight
+	}
+
+	rowCap := max(height*inputMaxShareNumerator/inputMaxShareDenominator, minInputHeight)
+	rows = min(max(rows, minInputHeight), rowCap)
+
+	if rows == m.inputRows {
+		return
+	}
+
+	m.inputRows = rows
+	m.input.SetHeight(rows)
+
+	if m.height > 0 {
+		m.vp.Height = max(m.height-rows-headerLines-footerLines, viewportMinHeight)
+	}
 }
 
 // Layout minimums so tiny terminals still render.
