@@ -76,13 +76,15 @@ func EnsureServer(ctx context.Context, socket string, start func() error, stderr
 		if err := ctx.Err(); err != nil {
 			return fmt.Errorf(
 				"cli: server on %s not ready: %w — details: %s (or run: golem serve)",
-				socket, err, ServeLogPath())
+				socket, err, ServeLogPath(),
+			)
 		}
 
 		if time.Now().After(deadline) {
 			return fmt.Errorf(
 				"cli: server on %s not ready within %s — details: %s (or run: golem serve)",
-				socket, readyTimeout, ServeLogPath())
+				socket, readyTimeout, ServeLogPath(),
+			)
 		}
 
 		timer := time.NewTimer(pollInterval)
@@ -92,7 +94,8 @@ func EnsureServer(ctx context.Context, socket string, start func() error, stderr
 
 			return fmt.Errorf(
 				"cli: server on %s not ready: %w — details: %s (or run: golem serve)",
-				socket, ctx.Err(), ServeLogPath())
+				socket, ctx.Err(), ServeLogPath(),
+			)
 		case <-timer.C:
 		}
 	}

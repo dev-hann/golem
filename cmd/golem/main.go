@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 
@@ -62,6 +64,8 @@ func run(args []string, d deps) int {
 		cli.MaybeNotifyUpdate(ctx, os.Stderr, resolveVersion(), cli.ReleasesAPI)
 
 		return code
+	case "update":
+		return runUpdate()
 	default:
 		usage(os.Stderr)
 		return 2
@@ -213,6 +217,32 @@ func runChat(ctx context.Context) int {
 	return 0
 }
 
+// runUpdate self-updates to the newest release for this platform.
+func runUpdate() int {
+	dir := func() (string, error) {
+		exe, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("resolving executable: %w", err)
+		}
+
+		return filepath.Dir(exe), nil
+	}
+
+	if err := cli.RunUpdate(cli.UpdateOptions{
+		Stdout:     os.Stdout,
+		Current:    resolveVersion(),
+		APIURL:     cli.ReleasesAPI,
+		GOOS:       runtime.GOOS,
+		GOARCH:     runtime.GOARCH,
+		InstallDir: dir,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
+		return 1
+	}
+
+	return 0
+}
+
 // usage prints the CLI help.
 func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "usage: golem [command]")
@@ -220,6 +250,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  golem tui             same as bare golem")
 	_, _ = fmt.Fprintln(w, "  golem setup           choose a provider and write the config")
 	_, _ = fmt.Fprintln(w, "  golem version         print the build version")
+	_, _ = fmt.Fprintln(w, "  golem update          self-update to the newest release")
 	_, _ = fmt.Fprintln(w, "  golem serve           start the agent server (unix socket)")
 	_, _ = fmt.Fprintln(w, "  golem chat            line REPL against the server")
 	_, _ = fmt.Fprintln(w, "  golem ask <prompt>    one-shot prompt")
