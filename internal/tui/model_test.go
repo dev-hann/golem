@@ -384,6 +384,45 @@ func TestModel_ManualScrollSuspendsAutoFollow(t *testing.T) {
 	}
 }
 
+func TestModel_MouseWheelScrollsTranscript(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "head-marker\n"})
+	for range 100 {
+		m = deliver(t, m, golemclient.TextDelta{
+			Type: golemclient.TypeTextDelta, Delta: strings.Repeat("x", 60) + "\n",
+		})
+	}
+
+	// Wheel back: the next delta must not snap to the bottom.
+	for range 40 {
+		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+		m = next.(Model)
+	}
+
+	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "mid\n"})
+	view := m.View()
+	if !strings.Contains(view, "head-marker") {
+		t.Errorf("wheel scrollback should survive streaming deltas:\n%s", view)
+	}
+	if strings.Contains(view, "mid") {
+		t.Errorf("tail should stay off-screen while wheeled back:\n%s", view)
+	}
+
+	// Wheel to the bottom resumes the follow.
+	for range 40 {
+		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+		m = next.(Model)
+	}
+
+	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "tail-marker"})
+	if !strings.Contains(m.View(), "tail-marker") {
+		t.Errorf("reaching the bottom should resume auto-follow:\n%s", m.View())
+	}
+}
+
 func TestModel_ConnectFailureShowsError(t *testing.T) {
 	t.Parallel()
 	m := New("/dev/null")

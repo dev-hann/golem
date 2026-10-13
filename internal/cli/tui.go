@@ -23,7 +23,7 @@ const pickerFetchTimeout = 5 * time.Second
 func RunTUI(socket string) error {
 	model := tui.New(socket).WithModels(FetchModelsForPicker(LiveListModels))
 
-	program := tea.NewProgram(model, tea.WithAltScreen())
+	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	final, err := program.Run()
 	if err != nil {

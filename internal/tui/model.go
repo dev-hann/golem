@@ -175,6 +175,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 	case serverEventMsg:
 		cmd := m.applyEvent(msg.ev)
 		return m, cmd
+	case tea.MouseMsg:
+		m.mouseScroll(msg)
+		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	default:
@@ -315,26 +318,52 @@ func (m *Model) toggleLastTool() {
 // pageLines is the scroll step for page keys.
 const pageLines = 10
 
-// scrollKey handles page-scroll keys, reporting whether it consumed the
-// key. Manual page-up suspends auto-follow; paging back to the bottom
-// resumes it.
+// scrollBy scrolls the transcript by delta lines (negative scrolls back
+// toward older output). Manual scrollback suspends auto-follow; reaching
+// the bottom resumes it.
+func (m *Model) scrollBy(delta int) {
+	if delta < 0 {
+		m.follow = false
+		m.vp.ScrollUp(-delta)
+
+		return
+	}
+
+	m.vp.ScrollDown(delta)
+
+	if m.vp.AtBottom() {
+		m.follow = true
+	}
+}
+
+// wheelLines is the scroll step for one mouse-wheel notch.
+const wheelLines = 3
+
+// scrollKey handles page-scroll keys, reporting whether it consumed the key.
 func (m *Model) scrollKey(key tea.KeyMsg) bool {
 	switch key.Type { //nolint:exhaustive // only the scroll keys are ours
 	case tea.KeyPgUp:
-		m.follow = false
-		m.vp.ScrollUp(pageLines)
+		m.scrollBy(-pageLines)
 
 		return true
 	case tea.KeyPgDown:
-		m.vp.ScrollDown(pageLines)
-
-		if m.vp.AtBottom() {
-			m.follow = true
-		}
+		m.scrollBy(pageLines)
 
 		return true
 	default:
 		return false
+	}
+}
+
+// mouseScroll turns wheel motion into transcript scrolling through the
+// shared follow-suspension path.
+func (m *Model) mouseScroll(msg tea.MouseMsg) {
+	switch msg.Button { //nolint:exhaustive // only the wheel scrolls
+	case tea.MouseButtonWheelUp:
+		m.scrollBy(-wheelLines)
+	case tea.MouseButtonWheelDown:
+		m.scrollBy(wheelLines)
+	default:
 	}
 }
 
