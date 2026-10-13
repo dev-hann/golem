@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -39,6 +40,8 @@ type Model struct {
 	follow      bool
 	blocks      []block
 	userSpans   []userSpan
+	leaderArmed bool
+	leaderGen   int
 	pending     *golemclient.ApprovalRequest
 	sessions    []golemclient.SessionSummary
 	pickIndex   int
@@ -65,7 +68,7 @@ func New(socketPath string) Model {
 // construct a new model view through this).
 func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
-	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+/ help)"
+	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+x keys)"
 	input.ShowLineNumbers = false
 	input.FocusedStyle.Text = k.Style(kit.Fg)
 	input.FocusedStyle.Placeholder = k.Style(kit.Dim)
@@ -154,6 +157,21 @@ type (
 	serverEventMsg struct{ ev any }
 )
 
+// leaderTimeoutMsg disarms a leader sequence whose window elapsed; gen
+// identifies which arm it belongs to so a stale tick cannot disarm a
+// newer sequence.
+type leaderTimeoutMsg struct{ gen int }
+
+// leaderTimeout bounds how long a ctrl+x sequence waits for its key.
+const leaderTimeout = 2 * time.Second
+
+// armLeader starts the leader timeout window for gen.
+func armLeader(gen int) tea.Cmd {
+	return tea.Tick(leaderTimeout, func(time.Time) tea.Msg {
+		return leaderTimeoutMsg{gen: gen}
+	})
+}
+
 // Update implements tea.Model. Split by input mode for readability.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // interface contract
 	switch msg := msg.(type) {
@@ -174,6 +192,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 	case serverEventMsg:
 		cmd := m.applyEvent(msg.ev)
 		return m, cmd
+	case leaderTimeoutMsg:
+		if m.leaderArmed && m.leaderGen == msg.gen {
+			m.leaderArmed = false
+		}
+
+		return m, nil
 	case tea.MouseMsg:
 		m.mouseScroll(msg)
 		return m, nil
@@ -225,13 +249,8 @@ func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 
 // updateChat handles chat-mode keys.
 func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Alt && len(key.Runes) == 1 && key.Runes[0] == 'm' {
-		// alt/option+m opens the model picker (ctrl+m is enter in terminal
-		// protocols — CR, byte 0x0D — and cannot be bound separately).
-		m.mode = modeModels
-		m.modelCursor = m.cursorOnModel(m.modelName)
-
-		return m, nil
+	if m.leaderArmed {
+		return m.leaderKey(key)
 	}
 
 	if m.scrollKey(key) {
@@ -239,27 +258,11 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	switch key.Type { //nolint:exhaustive // foreign enum; default routes to the textarea
-	case tea.KeyCtrlN:
-		m.blocks = nil
-		m.statusParts = nil
-		m.provider, m.modelName = "", ""
-		m.turnActive = false
-		m.refreshView()
+	case tea.KeyCtrlX:
+		m.leaderArmed = true
+		m.leaderGen++
 
-		return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
-	case tea.KeyCtrlP:
-		m.listRequest = true
-
-		return m, m.send(golemclient.ListSessions{Type: golemclient.TypeListSessions})
-	case tea.KeyCtrlUnderscore: // terminals send ctrl+/ as 0x1F
-		m.mode = modeHelp
-
-		return m, nil
-	case tea.KeyCtrlL:
-		m.blocks = nil
-		m.refreshView()
-
-		return m, nil
+		return m, armLeader(m.leaderGen)
 	case tea.KeyEscape:
 		return m.escKey()
 	case tea.KeyEnter:
@@ -279,11 +282,6 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.syncInputHeight()
 
 		return m.submit(line)
-	case tea.KeyTab:
-		m.toggleLastTool()
-		m.refreshView()
-
-		return m, nil
 	default:
 		var cmd tea.Cmd
 
@@ -292,6 +290,62 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		return m, cmd
 	}
+}
+
+// leaderHints is the cheat sheet the status bar shows while a ctrl+x
+// sequence is pending.
+const leaderHints = "n new · p sessions · m model · x expand · l clear · ? help · esc cancel"
+
+// leaderKey dispatches the second key of a ctrl+x sequence. Bound keys
+// consume the press; esc cancels; anything else disarms and continues as
+// ordinary chat input, so a stray arm never swallows typing (ctrl+x here
+// re-arms with a fresh window). Direct chords stay impossible where the
+// terminal protocol cannot distinguish them — ctrl+m is enter (CR), which
+// is why every command rides the leader namespace.
+func (m Model) leaderKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.leaderArmed = false
+
+	if key.Type == tea.KeyEscape {
+		return m, nil
+	}
+
+	if !key.Alt && key.Type == tea.KeyRunes && len(key.Runes) == 1 {
+		switch key.Runes[0] {
+		case 'n':
+			m.blocks = nil
+			m.statusParts = nil
+			m.provider, m.modelName = "", ""
+			m.turnActive = false
+			m.refreshView()
+
+			return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
+		case 'p':
+			m.listRequest = true
+
+			return m, m.send(golemclient.ListSessions{Type: golemclient.TypeListSessions})
+		case 'm':
+			m.mode = modeModels
+			m.modelCursor = m.cursorOnModel(m.modelName)
+
+			return m, nil
+		case 'x':
+			m.toggleLastTool()
+			m.refreshView()
+
+			return m, nil
+		case 'l':
+			m.blocks = nil
+			m.refreshView()
+
+			return m, nil
+		case '?':
+			m.mode = modeHelp
+
+			return m, nil
+		}
+	}
+
+	return m.updateChat(key)
 }
 
 // escKey interrupts an active turn; idle presses do nothing (quitting is
@@ -823,13 +877,13 @@ func (m Model) helpBody() string {
 	rows := [][2]string{
 		{"enter", "send message"},
 		{"alt+enter", "newline in message"},
-		{"ctrl+n", "new session"},
-		{"ctrl+p", "session picker"},
-		{"alt+m", "model picker"},
-		{"ctrl+l", "clear transcript view"},
-		{"ctrl+/", "this help"},
+		{"ctrl+x n", "new session"},
+		{"ctrl+x p", "session picker"},
+		{"ctrl+x m", "model picker"},
+		{"ctrl+x x", "expand or collapse tool block"},
+		{"ctrl+x l", "clear transcript view"},
+		{"ctrl+x ?", "this help"},
 		{"esc / ctrl+c", "interrupt turn (ctrl+c twice quits)"},
-		{"tab", "expand or collapse tool block"},
 		{"pgup / pgdn", "scroll transcript"},
 	}
 
@@ -911,6 +965,10 @@ func header(m Model) string {
 // footer renders the status bar line.
 func (m Model) footer() string {
 	parts := m.statusParts
+	if m.leaderArmed {
+		parts = append([]string{leaderHints}, parts...)
+	}
+
 	if m.provider != "" {
 		parts = append([]string{m.provider, m.modelName}, parts...)
 	}

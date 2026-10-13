@@ -84,6 +84,24 @@ func resize(m Model, w, h int) Model {
 	return next.(Model)
 }
 
+// arm presses the leader key without running its tick cmd — executing it
+// would stall the test for the full timeout window.
+func arm(m Model) Model {
+	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	return next.(Model)
+}
+
+// tick delivers the leader timeout for the given arm generation.
+func tick(m Model, gen int) Model {
+	next, _ := m.Update(leaderTimeoutMsg{gen: gen})
+	return next.(Model)
+}
+
+// rkey presses a single printable key.
+func rkey(s rune) tea.KeyMsg {
+	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{s}}
+}
+
 func TestModel_AppliesTextDelta_UpdatesView(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
@@ -139,7 +157,7 @@ func TestModel_ApprovalPromptOtherKeysDeny(t *testing.T) {
 	}
 }
 
-func TestModel_ToolCallCollapsedByDefault_ExpandableViaTab(t *testing.T) {
+func TestModel_ToolCallCollapsedByDefault_ExpandableViaLeaderX(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
 	m = resize(m, 100, 40)
@@ -158,8 +176,8 @@ func TestModel_ToolCallCollapsedByDefault_ExpandableViaTab(t *testing.T) {
 	if strings.Contains(view, "package main") {
 		t.Errorf("result should be hidden while collapsed:\n%s", view)
 	}
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	m = next.(Model)
+	m = arm(m)
+	m = key(t, m, rkey('x'))
 	if !strings.Contains(m.View(), "package main") {
 		t.Errorf("expanded block should show result:\n%s", m.View())
 	}

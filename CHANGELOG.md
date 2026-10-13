@@ -35,6 +35,20 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Changed — leader-key command namespace (2026-10-13)
+
+- Every command now rides a `ctrl+x` leader sequence: `ctrl+x n` new
+  session, `p` session picker, `m` model picker, `x` expand/collapse the
+  latest tool block, `l` clear the transcript view, `?` this reference.
+  Press `ctrl+x`, then the key within two seconds; the status bar lists
+  the options while the sequence is pending, `esc` cancels, any other
+  key disarms and types normally. Direct chords (`ctrl+n/p/l`, `alt+m`,
+  `tab`, `ctrl+/`) are gone — `ctrl+m` specifically is unbindable
+  because terminals send it identically to `enter` (both CR, byte
+  0x0D), which is what pushed every mnemonic behind the leader.
+- Timeout ticks are generation-guarded: a stale timer cannot disarm a
+  freshly armed sequence.
+
 ### Changed — transcript readability (2026-10-13, v0.1.9)
 
 - Chat turns are visually separated: user messages carry a colored left

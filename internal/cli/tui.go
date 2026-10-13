@@ -38,7 +38,7 @@ func RunTUI(socket string) error {
 }
 
 // FetchModelsForPicker resolves the configured provider and lists its models
-// for the alt+m picker. Failures are silent — the picker degrades to the
+// for the ctrl+x m picker. Failures are silent — the picker degrades to the
 // current model.
 func FetchModelsForPicker(list func(id, key string) ([]string, error)) []string {
 	cfg, err := config.Load(config.DefaultPath())

@@ -60,18 +60,24 @@ Also available: `golem serve` runs just the agent server; `golem chat` is a line
 
 | Key | Action |
 |---|---|
+| `ctrl+x` … `n` | new session (transcript resets, same connection) |
+| `ctrl+x` … `p` | session picker — `↑`/`↓` select, `enter` open, `esc` cancel |
+| `ctrl+x` … `m` | model picker — switches the session's model from the next turn (`set_model`) |
+| `ctrl+x` … `x` | expand/collapse the most recent tool-call block |
+| `ctrl+x` … `l` | clear the transcript view (session and context stay) |
+| `ctrl+x` … `?` | help — every binding in a centered modal |
 | `enter` | send message |
 | `alt+enter` (option+enter) | insert a newline — the input box grows with the message |
 | `ctrl+c` | interrupt the active turn; press again to quit |
-| `ctrl+n` | new session (transcript resets, same connection) |
-| `ctrl+p` | session picker — `↑`/`↓` select, `enter` open, `esc` cancel |
-| `alt+m` (option+m) | model picker — switches the session's model from the next turn (`set_model`) |
-| `ctrl+/` | help — every binding in a centered modal |
-| `ctrl+l` | clear the transcript view (session and context stay) |
 | `esc` | interrupt the active turn |
 | `pgup` / `pgdn` | scroll the transcript |
-| `tab` | expand/collapse the most recent tool-call block |
 | `y` / `n` | allow / deny a pending command approval (any other key denies) |
+
+All commands share the `ctrl+x` leader: press it, then the key within two
+seconds (the status bar lists the options while the sequence is pending).
+Direct chords like `ctrl+m` cannot be bound — terminals send them
+identically to `enter` — which is why the command namespace lives behind
+the leader.
 
 ## Configuration
 
