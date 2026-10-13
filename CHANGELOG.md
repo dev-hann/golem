@@ -35,6 +35,18 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Changed — Tokyo Night default theme, full kit migration (2026-10-13, v0.1.6)
+
+- The default palette is now Tokyo Night (Night for dark terminals, Day
+  for light ones) — a designed scheme replacing the incidental ANSI
+  colors the transcript happened to use.
+- Every remaining surface renders through the kit: the TUI footer
+  (approval prompt, session picker with a themed cursor, and a real
+  status bar showing provider · model · state and turn usage), the
+  message input (prompt/placeholder themed), and the wizard's prompts,
+  errors, plan hints, and numbered fallback. Raw lipgloss usage outside
+  `internal/tui/kit` is now zero.
+
 ### Added — themeable TUI design kit (2026-10-13, v0.1.5)
 
 - `internal/tui/kit`: the design system every TUI surface renders through.

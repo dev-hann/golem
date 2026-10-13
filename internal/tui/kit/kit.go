@@ -114,6 +114,11 @@ func (k *Kit) StatusBar(parts ...string) string {
 	return out
 }
 
+// Prompt renders an input prompt label (the colored "API key:" style).
+func (k *Kit) Prompt(text string) string {
+	return k.styles[Accent].Bold(true).Render(text)
+}
+
 // Selection renders the picker cursor marker.
 func (k *Kit) Selection(line string) string {
 	return k.styles[Selection].Reverse(true).Render(" " + line + " ")

@@ -45,25 +45,25 @@ type Theme struct {
 	Colors map[Token]lipgloss.AdaptiveColor
 }
 
-// DefaultTheme is the built-in look, carried over from the original
-// transcript styling.
+// DefaultTheme is the built-in look: Tokyo Night (folke/tokyonight), the
+// Night variant for dark terminals and Day for light ones.
 func DefaultTheme() *Theme {
 	return &Theme{
-		Name: "default",
+		Name: "tokyo-night",
 		Colors: map[Token]lipgloss.AdaptiveColor{
-			Fg:        {Light: "0", Dark: "15"},
-			Bg:        {},
-			Accent:    {Light: "5", Dark: "14"},
-			Dim:       {Light: "8", Dark: "8"},
-			Error:     {Light: "9", Dark: "9"},
-			OK:        {Light: "10", Dark: "10"},
-			Warn:      {Light: "11", Dark: "11"},
-			User:      {Light: "12", Dark: "12"},
-			Assistant: {Light: "15", Dark: "15"},
-			Tool:      {Light: "8", Dark: "8"},
-			Border:    {Light: "8", Dark: "8"},
-			Title:     {Light: "13", Dark: "13"},
-			Selection: {Light: "6", Dark: "6"},
+			Fg:        {Light: "#3760bf", Dark: "#c0caf5"},
+			Bg:        {Light: "#e1e2e7", Dark: "#1a1b26"},
+			Accent:    {Light: "#2e7de9", Dark: "#7aa2f7"},
+			Dim:       {Light: "#a1a6c5", Dark: "#565f89"},
+			Error:     {Light: "#f52a65", Dark: "#f7768e"},
+			OK:        {Light: "#587539", Dark: "#9ece6a"},
+			Warn:      {Light: "#8c6c3e", Dark: "#e0af68"},
+			User:      {Light: "#007197", Dark: "#7dcfff"},
+			Assistant: {Light: "#3760bf", Dark: "#c0caf5"},
+			Tool:      {Light: "#848cb5", Dark: "#737aa2"},
+			Border:    {Light: "#a1a6c5", Dark: "#3b4261"},
+			Title:     {Light: "#9854f1", Dark: "#bb9af7"},
+			Selection: {Light: "#2e7de9", Dark: "#7aa2f7"},
 		},
 	}
 }

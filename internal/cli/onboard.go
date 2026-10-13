@@ -98,7 +98,7 @@ func RunOnboard(opts OnboardOptions) error {
 		models = listed // keyless local provider answered with models
 	}
 
-	model, err := promptModel(out, reader, id, preset, models)
+	model, err := promptModel(out, reader, id, preset, models, k)
 	if err != nil {
 		return fmt.Errorf("cli: setup: %w", err)
 	}
@@ -122,14 +122,17 @@ func RunOnboard(opts OnboardOptions) error {
 
 	fmt.Fprintln(out, "")       //nolint:errcheck // terminal output
 	fmt.Fprintln(out, k.OKLine( //nolint:errcheck // terminal output
-		fmt.Sprintf("wrote %s — provider: %s, model: %s", opts.ConfigPath, id, model)))
+		fmt.Sprintf("wrote %s — provider: %s, model: %s", opts.ConfigPath, id, model),
+	))
 
 	if Probe(DefaultSocketPath()) {
 		fmt.Fprintln(out, k.WarnLine( //nolint:errcheck // terminal output
-			"a golem server is already running and predates this config — restart it:"))
+			"a golem server is already running and predates this config — restart it:",
+		))
 		fmt.Fprintln(out, "  pkill -f 'golem serve'   # then run: golem") //nolint:errcheck // terminal output
 	} else if existing.Path != "" {
-		fmt.Fprintln(out, "A running golem server picks this up on next restart.") //nolint:errcheck // terminal output
+		fmt.Fprintln(out, //nolint:errcheck // terminal output
+			k.DimLine("A running golem server picks this up on next restart."))
 	}
 
 	return nil
@@ -168,7 +171,7 @@ func promptProvider(out io.Writer, reader *bufio.Scanner, k *kit.Kit) (string, e
 			return id, nil
 		}
 
-		fmt.Fprintln(out, "invalid selection — enter 1-4 or a provider id") //nolint:errcheck // terminal output
+		fmt.Fprintln(out, k.ErrLine("invalid selection — enter 1-5 or a provider id")) //nolint:errcheck // terminal output
 	}
 
 	return "", errors.New("too many invalid selections")
@@ -226,7 +229,7 @@ func promptKeyAndList(
 			prompt += " (blank: use $" + preset.KeyEnv + ")"
 		}
 
-		fmt.Fprintf(out, "%s: ", prompt) //nolint:errcheck // terminal output
+		fmt.Fprint(out, k.Prompt(prompt+": ")) //nolint:errcheck // terminal output
 
 		key := strings.TrimSpace(readLine(reader))
 		if key == "" {
@@ -234,7 +237,8 @@ func promptKeyAndList(
 		}
 
 		if key == "" {
-			fmt.Fprintln(out, "no key available — set it in your shell or paste it here") //nolint:errcheck // terminal output
+			fmt.Fprintln(out, //nolint:errcheck // terminal output
+				k.WarnLine("no key available — set it in your shell or paste it here"))
 
 			continue
 		}
@@ -251,7 +255,7 @@ func promptKeyAndList(
 			fmt.Fprintln(out, k.ErrLine(fmt.Sprintf("key rejected: %v", err))) //nolint:errcheck // terminal output
 
 			if hint := planHint(id); hint != "" {
-				fmt.Fprintln(out, "hint: "+hint) //nolint:errcheck // terminal output
+				fmt.Fprintln(out, k.WarnLine("hint: "+hint)) //nolint:errcheck // terminal output
 			}
 
 			continue
@@ -288,9 +292,10 @@ func promptModel(
 	id string,
 	preset llm.Preset,
 	models []string,
+	k *kit.Kit,
 ) (string, error) {
 	if len(models) > 0 {
-		return pickModelFromList(out, reader, id, NormalizeModels(models), preset.DefaultModel)
+		return pickModelFromList(out, reader, id, NormalizeModels(models), preset.DefaultModel, k)
 	}
 
 	suggestion := preset.DefaultModel
@@ -298,7 +303,7 @@ func promptModel(
 		suggestion = "<required — e.g. llama3.3>"
 	}
 
-	fmt.Fprintf(out, "model for %s [%s]: ", id, suggestion) //nolint:errcheck // terminal output
+	fmt.Fprint(out, k.Prompt(fmt.Sprintf("model for %s [%s]: ", id, suggestion))) //nolint:errcheck // terminal output
 
 	model := strings.TrimSpace(readLine(reader))
 	if model == "" {
@@ -306,7 +311,7 @@ func promptModel(
 	}
 
 	if model == "" {
-		fmt.Fprintln(out, "a model id is required for this provider") //nolint:errcheck // terminal output
+		fmt.Fprintln(out, k.ErrLine("a model id is required for this provider")) //nolint:errcheck // terminal output
 
 		return "", errors.New("missing model")
 	}
@@ -324,6 +329,7 @@ func pickModelFromList(
 	id string,
 	models []string,
 	defaultModel string,
+	k *kit.Kit,
 ) (string, error) {
 	listed := models
 	if len(listed) > maxModelChoices {
@@ -336,19 +342,23 @@ func pickModelFromList(
 		return item, nil
 	}
 
-	fmt.Fprintf(out, "\n%s\n", titleFor(id, listed)) //nolint:errcheck // terminal output
+	fmt.Fprintln(out, "")                            //nolint:errcheck // terminal output
+	fmt.Fprintln(out, k.Title(titleFor(id, listed))) //nolint:errcheck // terminal output
 
 	for i, m := range listed {
-		marker := "  "
+		line := fmt.Sprintf("%2d) %s", i+1, m)
 		if i == cursor {
-			marker = "▶ "
+			fmt.Fprintln(out, k.Selection("▶ "+line)) //nolint:errcheck // terminal output
+
+			continue
 		}
 
-		fmt.Fprintf(out, "%s%2d) %s\n", marker, i+1, m) //nolint:errcheck // terminal output
+		fmt.Fprintln(out, "  "+line) //nolint:errcheck // terminal output
 	}
 
-	fmt.Fprintf(out, "pick 1-%d, type an id, or enter for %q: ", //nolint:errcheck // terminal output
-		len(listed), listed[cursor])
+	fmt.Fprint(out, k.Prompt( //nolint:errcheck // terminal output
+		fmt.Sprintf("pick 1-%d, type an id, or enter for %q: ", len(listed), listed[cursor]),
+	))
 
 	choice := strings.TrimSpace(readLine(reader))
 

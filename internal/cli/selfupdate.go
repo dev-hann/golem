@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -263,6 +264,8 @@ func installBinaries(tarball []byte, dir string) ([]string, error) {
 	if len(installed) != len(updateBinaryNames) {
 		return nil, fmt.Errorf("cli: update: tarball carried %v, want %v", installed, updateBinaryNames)
 	}
+
+	sort.Strings(installed)
 
 	return installed, nil
 }

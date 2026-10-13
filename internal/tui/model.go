@@ -41,7 +41,9 @@ type Model struct {
 	input       textarea.Model
 	width       int
 	height      int
-	statusLine  string
+	provider    string
+	modelName   string
+	statusParts []string
 	quitting    bool
 	listRequest bool
 }
@@ -57,6 +59,10 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
 	input.Placeholder = "message… (enter to send, ctrl+c to interrupt)"
 	input.Prompt = "you> "
+	input.FocusedStyle.Prompt = k.Style(kit.User).Bold(true)
+	input.FocusedStyle.Text = k.Style(kit.Fg)
+	input.FocusedStyle.Placeholder = k.Style(kit.Dim)
+	input.BlurredStyle = input.FocusedStyle
 	input.SetHeight(inputHeight)
 	input.SetWidth(80)
 	input.Focus()
@@ -72,6 +78,9 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 		mode:   modeChat,
 	}
 }
+
+// sessionIDShortLen bounds the session id shown in the status bar.
+const sessionIDShortLen = 8
 
 // Layout constants. The viewport gets whatever height remains.
 const (
@@ -176,7 +185,7 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 // ctrlC interrupts an active turn; a second press (or idle press) quits.
 func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 	if m.turnActive && m.client != nil {
-		m.statusLine = "interrupting…"
+		m.statusParts = append(m.statusParts[:len(m.statusParts):len(m.statusParts)], "interrupting…")
 
 		return m, m.send(golemclient.Interrupt{
 			Type: golemclient.TypeInterrupt, Session: m.sessionID,
@@ -356,10 +365,18 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 	switch e := ev.(type) {
 	case golemclient.SessionMeta:
 		m.sessionID = e.Session
-		m.statusLine = fmt.Sprintf("session %s — %d turns", e.Session, e.Turns)
+
+		short := e.Session
+		if len(short) > sessionIDShortLen {
+			short = short[:sessionIDShortLen]
+		}
+
+		m.statusParts = []string{"session " + short, fmt.Sprintf("%d turns", e.Turns)}
 	case golemclient.TurnStart:
 		m.turnActive = true
-		m.statusLine = "thinking…"
+		m.provider = e.Provider
+		m.modelName = e.Model
+		m.statusParts = append(m.statusParts, "thinking…")
 	case golemclient.TextDelta:
 		m.appendToAssistant(e.Delta)
 	case golemclient.ToolCallStart:
@@ -377,8 +394,8 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.turnActive = false
 	case golemclient.TurnEnd:
 		m.turnActive = false
-		m.statusLine = fmt.Sprintf("done (in=%d out=%d)",
-			e.Usage.InputTokens, e.Usage.OutputTokens)
+		m.statusParts = append(m.statusParts[:len(m.statusParts):len(m.statusParts)],
+			fmt.Sprintf("done (in=%d out=%d)", e.Usage.InputTokens, e.Usage.OutputTokens))
 	case golemclient.SessionList:
 		m.sessions = e.Sessions
 
@@ -495,27 +512,37 @@ func header(m Model) string {
 	return fmt.Sprintf("golem — %s (%s)", m.sessionID, state)
 }
 
-// footer renders the mode footer (approval prompt or status).
+// footer renders the mode footer (approval prompt, session picker, or
+// status bar) through the kit theme.
 func (m Model) footer() string {
 	if m.mode == modeApproval && m.pending != nil {
-		return fmt.Sprintf("run command? y = allow, n = deny → %s", m.pending.Preview)
+		return m.kit.WarnLine("run command? y = allow, n = deny") + "\n" +
+			m.kit.ToolLine("  → "+m.pending.Preview)
 	}
 
 	if m.mode == modeSessions {
 		var b strings.Builder
-		b.WriteString("sessions — ↑/↓ select, enter open, esc cancel\n")
+		b.WriteString(m.kit.Title("sessions"))
+		b.WriteString(m.kit.DimLine(" — ↑/↓ select, enter open, esc cancel\n"))
 
 		for i, s := range m.sessions {
-			marker := "  "
+			line := fmt.Sprintf("%s %s (%d turns)", s.ID, s.Cwd, s.Turns)
 			if i == m.pickIndex {
-				marker = "> "
+				b.WriteString(m.kit.Selection(line))
+			} else {
+				b.WriteString("  " + line)
 			}
 
-			fmt.Fprintf(&b, "%s%s %s (%d turns)\n", marker, s.ID, s.Cwd, s.Turns)
+			b.WriteString("\n")
 		}
 
 		return b.String()
 	}
 
-	return m.statusLine
+	parts := m.statusParts
+	if m.provider != "" {
+		parts = append([]string{m.provider, m.modelName}, parts...)
+	}
+
+	return m.kit.StatusBar(parts...)
 }
