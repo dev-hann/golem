@@ -35,7 +35,7 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
-### Added — multiline input (unreleased)
+### Added — multiline input (2026-10-13, v0.1.7)
 
 - `alt+enter` (option+enter) inserts a newline; the composer grows with
   its content (floor of two rows, capped at 40% of the terminal) and
