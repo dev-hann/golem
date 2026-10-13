@@ -20,17 +20,22 @@ var (
 // toolchain embeds for `go install pkg@vX.Y.Z` (ldflags cannot be passed
 // there), then dev.
 func resolveVersion() string {
-	if version != "dev" {
-		return version
+	return resolveVersionFrom(version)
+}
+
+// resolveVersionFrom is the pure resolver so tests never touch globals.
+func resolveVersionFrom(v string) string {
+	if v != "dev" {
+		return v
 	}
 
 	if info, ok := debug.ReadBuildInfo(); ok {
-		if v := info.Main.Version; v != "" && v != "(devel)" {
-			return v
+		if mv := info.Main.Version; mv != "" && mv != "(devel)" {
+			return mv
 		}
 	}
 
-	return version
+	return v
 }
 
 // runVersion prints the build version.

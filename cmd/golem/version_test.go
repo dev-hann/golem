@@ -24,24 +24,27 @@ func TestRunVersion_PrintsBuildInfo(t *testing.T) {
 	}
 }
 
-func TestResolveVersion_LdflagsWin(t *testing.T) {
+func TestResolveVersionFrom(t *testing.T) {
 	t.Parallel()
 
-	origVersion, origCommit := version, commit
-	t.Cleanup(func() { version, commit = origVersion, origCommit })
-
-	version, commit = "v9.9.9", "abc1234"
-	if got := resolveVersion(); got != "v9.9.9" {
-		t.Errorf("resolveVersion() = %q, want ldflags value", got)
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		// Test binaries carry no ldflags and a (devel) build info version,
+		// so the dev default must survive.
+		{name: "dev falls through", in: "dev", want: "dev"},
+		{name: "ldflags value wins", in: "v9.9.9", want: "v9.9.9"},
+		{name: "git describe wins", in: "v0.1.0-3-gabc", want: "v0.1.0-3-gabc"},
 	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-func TestResolveVersion_DevFallback(t *testing.T) {
-	t.Parallel()
-
-	// Test binaries have no ldflags injection and a (devel) build info
-	// version, so the dev default must survive.
-	if got := resolveVersion(); got == "" {
-		t.Error("resolveVersion() = empty")
+			if got := resolveVersionFrom(tt.in); got != tt.want {
+				t.Errorf("resolveVersionFrom(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
 	}
 }

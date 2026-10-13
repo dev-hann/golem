@@ -57,7 +57,11 @@ func run(args []string, d deps) int {
 	case "setup":
 		return runSetup(d)
 	case "version":
-		return runVersion(os.Stdout)
+		code := runVersion(os.Stdout)
+
+		cli.MaybeNotifyUpdate(ctx, os.Stderr, resolveVersion(), cli.ReleasesAPI)
+
+		return code
 	default:
 		usage(os.Stderr)
 		return 2
@@ -85,6 +89,7 @@ func launchApp(rest []string, d deps) int {
 	if err := d.launch(context.Background(), cli.AppOptions{
 		Socket:     cli.DefaultSocketPath(),
 		ConfigPath: config.DefaultPath(),
+		Version:    resolveVersion(),
 		Start: func() error {
 			exe, err := os.Executable()
 			if err != nil {

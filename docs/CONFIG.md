@@ -149,3 +149,4 @@ Rules:
 
 - `/model <provider>` in chat/TUI switches provider for the session (in-memory only, not persisted to config).
 - `GOLEM_PROVIDER`, `GOLEM_MODEL` env vars override `provider.default`/model for one launch.
+- `GOLEM_DISABLE_UPDATE_CHECK=1` silences the once-a-day newer-release notice (checked at launch; the last check time lives in the data directory, and failed checks stay silent).

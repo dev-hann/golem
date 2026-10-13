@@ -28,6 +28,8 @@ type AppOptions struct {
 	Socket string
 	// ConfigPath is checked for first-run onboarding.
 	ConfigPath string
+	// Version labels this build for the update check ("" skips it).
+	Version string
 	// Start spawns a server on Socket when none is running. Production
 	// wiring spawns the golem executable detached (see SpawnServe).
 	Start func() error
@@ -136,6 +138,10 @@ func RunApp(ctx context.Context, opts AppOptions) error {
 		if err := RunOnboard(OnboardOptions{ConfigPath: opts.ConfigPath}); err != nil {
 			return fmt.Errorf("cli: setup: %w", err)
 		}
+	}
+
+	if opts.Version != "" {
+		MaybeNotifyUpdate(ctx, opts.Stderr, opts.Version, ReleasesAPI)
 	}
 
 	if err := EnsureServer(ctx, opts.Socket, opts.Start, opts.Stderr); err != nil {

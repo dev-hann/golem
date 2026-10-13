@@ -35,6 +35,16 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — version reporting + update check (2026-10-13)
+
+- `golem version`: build version, commit, platform. Version resolves from
+  ldflags (goreleaser, `make build` stamps git describe), then the module
+  version embedded by `go install pkg@vX.Y.Z`, then `dev`.
+- Launch and `golem version` check the latest GitHub release at most once
+  a day (3s timeout, failures silent, `GOLEM_DISABLE_UPDATE_CHECK=1`
+  disables) and print a one-line upgrade hint when a newer semver exists.
+  Dev builds are never nagged.
+
 ### Added — config-driven provider wiring (2026-10-13)
 
 - `golem serve` and `golem ask` resolve their provider through
