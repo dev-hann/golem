@@ -9,11 +9,11 @@ Last updated: 2026-10-12. Schema changes require updating this file in the same 
 Bare `golem` (and `golem setup` at any time) runs a short wizard when no provider is configured — no config file and no provider key in the environment:
 
 1. Pick a provider from the built-in catalog (detected keys are marked).
-2. Enter a model (the preset default is offered; zai suggests `glm-5`).
-3. For keyed providers, paste an API key — golem proves it with a live call (3 attempts).
+2. For keyed providers, paste an API key — golem proves it by fetching the provider's model list (`GET /v1/models`). A rejected key retries (3 attempts); if the endpoint offers no listing, the key is accepted and the model is typed manually with the preset default suggested.
+3. Pick a model from the live list: a numbered selector (non-chat ids like embeddings filtered, sorted, capped at 30) — pick by number, type a custom id, or press enter for the highlighted preset default.
 4. The config file is written with `api_key = "ref:ENV_VAR"`; the plaintext key never touches disk. The wizard prints the matching `export` line for your shell profile.
 
-Ollama needs no key; its section records only model and the local endpoint.
+Ollama needs no key; the wizard lists whatever models the local endpoint reports (`:11434/v1/models`), falling back to manual entry when nothing is running.
 
 ## File locations & precedence
 

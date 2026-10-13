@@ -1,6 +1,7 @@
 // First-run provider onboarding: when no provider is configured, a short
 // wizard writes ~/.config/golem/config.toml (ref:-style secrets only, per
-// docs/CONFIG.md).
+// docs/CONFIG.md). The model choice comes from the provider's live model
+// list when the endpoint offers one.
 
 package cli
 
@@ -19,8 +20,11 @@ import (
 	"github.com/dev-hann/golem/internal/llm"
 )
 
-// maxKeyAttempts bounds failed API-key tests before the wizard gives up.
+// maxKeyAttempts bounds rejected keys before the wizard gives up.
 const maxKeyAttempts = 3
+
+// maxModelChoices caps the rendered model list.
+const maxModelChoices = 30
 
 // OnboardOptions configures a wizard run.
 type OnboardOptions struct {
@@ -28,9 +32,9 @@ type OnboardOptions struct {
 	Stdin      io.Reader
 	Stdout     io.Writer
 	Stderr     io.Writer
-	// TestKey validates a key against the provider (injected; production
-	// wiring performs a minimal live stream).
-	TestKey func(providerID, key, model string) error
+	// ListModels fetches a provider's model ids and doubles as key
+	// validation (injected; production wiring hits the live endpoint).
+	ListModels func(providerID, key string) ([]string, error)
 }
 
 // NeedsOnboarding reports whether the first-run wizard should run: no
@@ -43,8 +47,9 @@ func NeedsOnboarding(configPath string) bool {
 	return len(llm.DetectFromEnv()) == 0
 }
 
-// RunOnboard is the setup wizard body: pick a provider, pick a model, prove
-// the key works, write the config file. It also backs `golem setup`.
+// RunOnboard is the setup wizard body: pick a provider, prove the key via
+// the model-list endpoint, pick a model from the live list, write the
+// config file. It also backs `golem setup`.
 // Prompts are written unbuffered: they must be on screen before the wizard
 // blocks on stdin.
 func RunOnboard(opts OnboardOptions) error {
@@ -60,8 +65,8 @@ func RunOnboard(opts OnboardOptions) error {
 		opts.Stderr = os.Stderr
 	}
 
-	if opts.TestKey == nil {
-		opts.TestKey = liveKeyTest
+	if opts.ListModels == nil {
+		opts.ListModels = liveListModels
 	}
 
 	out := opts.Stdout
@@ -75,15 +80,20 @@ func RunOnboard(opts OnboardOptions) error {
 
 	preset := llm.Presets[id]
 
-	model, err := promptModel(out, reader, id, preset)
-	if err != nil {
-		return fmt.Errorf("cli: setup: %w", err)
-	}
+	models := []string(nil)
 
 	if preset.KeyEnv != "" {
-		if err := promptAndTestKey(out, reader, opts, id, model); err != nil {
+		models, err = promptKeyAndList(out, reader, opts, id)
+		if err != nil {
 			return err
 		}
+	} else if listed, listErr := opts.ListModels(id, ""); listErr == nil {
+		models = listed // keyless local provider answered with models
+	}
+
+	model, err := promptModel(out, reader, id, preset, models)
+	if err != nil {
+		return fmt.Errorf("cli: setup: %w", err)
 	}
 
 	settings := config.ProviderSettings{Model: model, BaseURL: preset.BaseURL}
@@ -183,37 +193,10 @@ func resolveChoice(choice string) (string, error) {
 	return "", errors.New("unknown provider")
 }
 
-// promptModel reads the model, offering the preset default.
-func promptModel(out io.Writer, reader *bufio.Scanner, id string, preset llm.Preset) (string, error) {
-	suggestion := preset.DefaultModel
-	if suggestion == "" {
-		suggestion = "<required — e.g. llama3.3>"
-	}
-
-	fmt.Fprintf(out, "model for %s [%s]: ", id, suggestion) //nolint:errcheck // terminal output
-
-	model := strings.TrimSpace(readLine(reader))
-	if model == "" {
-		model = preset.DefaultModel
-	}
-
-	if model == "" {
-		fmt.Fprintln(out, "a model id is required for this provider") //nolint:errcheck // terminal output
-
-		return "", errors.New("missing model")
-	}
-
-	return model, nil
-}
-
-// promptAndTestKey reads a key (falling back to the preset env var), tests
-// it, and retries on failure.
-func promptAndTestKey(
-	out io.Writer,
-	reader *bufio.Scanner,
-	opts OnboardOptions,
-	id, model string,
-) error {
+// promptKeyAndList reads a key (blank falls back to the preset env var) and
+// validates it by listing models: a rejected credential retries, a missing
+// listing endpoint accepts the key and returns no models.
+func promptKeyAndList(out io.Writer, reader *bufio.Scanner, opts OnboardOptions, id string) ([]string, error) {
 	preset := llm.Presets[id]
 
 	envKey := os.Getenv(preset.KeyEnv)
@@ -237,26 +220,178 @@ func promptAndTestKey(
 			continue
 		}
 
-		fmt.Fprintln(out, "testing key…") //nolint:errcheck // terminal output
+		fmt.Fprintln(out, "fetching models…") //nolint:errcheck // terminal output
 
-		if err := opts.TestKey(id, key, model); err != nil {
-			fmt.Fprintf(out, "key test failed: %v\n", err) //nolint:errcheck // terminal output
+		models, err := opts.ListModels(id, key)
+		switch {
+		case err == nil:
+			printKeyAccepted(out, preset, envKey, key)
 
+			return models, nil
+		case errors.Is(err, llm.ErrAuth):
+			fmt.Fprintf(out, "key rejected: %v\n", err) //nolint:errcheck // terminal output
+
+			continue
+		default:
+			// The key may be fine; only the listing endpoint is missing.
+			fmt.Fprintf(out, "key accepted (model list unavailable: %v)\n", err) //nolint:errcheck // terminal output
+			printKeyAccepted(out, preset, envKey, key)
+
+			return nil, nil
+		}
+	}
+
+	return nil, fmt.Errorf("cli: setup: key rejected %d times", maxKeyAttempts)
+}
+
+// printKeyAccepted confirms the key and points at the shell profile when
+// the key is not already exported.
+func printKeyAccepted(out io.Writer, preset llm.Preset, envKey, key string) {
+	fmt.Fprintln(out, "key works ✓") //nolint:errcheck // terminal output
+
+	if envKey == "" {
+		fmt.Fprintf(out, //nolint:errcheck // terminal output
+			"\nAdd the key to your shell profile (config stores only a reference):\n  export %s=%s\n",
+			preset.KeyEnv, key)
+	}
+}
+
+// promptModel picks the model: a numbered selector over the fetched list,
+// or manual entry with the preset default as the suggestion.
+func promptModel(
+	out io.Writer,
+	reader *bufio.Scanner,
+	id string,
+	preset llm.Preset,
+	models []string,
+) (string, error) {
+	if len(models) > 0 {
+		return pickModelFromList(out, reader, id, NormalizeModels(models), preset.DefaultModel)
+	}
+
+	suggestion := preset.DefaultModel
+	if suggestion == "" {
+		suggestion = "<required — e.g. llama3.3>"
+	}
+
+	fmt.Fprintf(out, "model for %s [%s]: ", id, suggestion) //nolint:errcheck // terminal output
+
+	model := strings.TrimSpace(readLine(reader))
+	if model == "" {
+		model = preset.DefaultModel
+	}
+
+	if model == "" {
+		fmt.Fprintln(out, "a model id is required for this provider") //nolint:errcheck // terminal output
+
+		return "", errors.New("missing model")
+	}
+
+	return model, nil
+}
+
+// pickModelFromList renders the numbered selector: enter accepts the
+// highlighted default, a number picks that entry, anything else is taken
+// as a custom model id.
+func pickModelFromList(
+	out io.Writer,
+	reader *bufio.Scanner,
+	id string,
+	models []string,
+	defaultModel string,
+) (string, error) {
+	listed := models
+	if len(listed) > maxModelChoices {
+		listed = listed[:maxModelChoices]
+	}
+
+	cursor := 1
+
+	if defaultModel != "" {
+		for i, m := range listed {
+			if m == defaultModel {
+				cursor = i + 1
+
+				break
+			}
+		}
+	}
+
+	fmt.Fprintf(out, "\nmodels for %s (%d):\n", id, len(listed)) //nolint:errcheck // terminal output
+
+	for i, m := range listed {
+		marker := "  "
+		if i+1 == cursor {
+			marker = "▶ "
+		}
+
+		fmt.Fprintf(out, "%s%2d) %s\n", marker, i+1, m) //nolint:errcheck // terminal output
+	}
+
+	fmt.Fprintf(out, "pick 1-%d, type an id, or enter for %q: ", //nolint:errcheck // terminal output
+		len(listed), listed[cursor-1])
+
+	choice := strings.TrimSpace(readLine(reader))
+
+	switch {
+	case choice == "":
+		return listed[cursor-1], nil
+	case isIndex(choice, len(listed)):
+		n, _ := strconv.Atoi(choice)
+
+		return listed[n-1], nil
+	default:
+		return choice, nil
+	}
+}
+
+// isIndex reports whether s is a valid 1-based index into n items.
+func isIndex(s string, n int) bool {
+	num, err := strconv.Atoi(s)
+
+	return err == nil && num >= 1 && num <= n
+}
+
+// nonChatFragments mark model ids that cannot serve chat completions.
+var nonChatFragments = []string{
+	"embedding", "embed-", "bge-", "reranker", "whisper", "tts",
+	"dall-e", "-image", "moderation", "transcribe", "realtime", "-audio",
+}
+
+// NormalizeModels dedupes, filters non-chat ids, and sorts the list.
+func NormalizeModels(ids []string) []string {
+	seen := map[string]bool{}
+
+	filtered := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || seen[id] {
 			continue
 		}
 
-		fmt.Fprintln(out, "key works ✓") //nolint:errcheck // terminal output
-
-		if envKey == "" {
-			fmt.Fprintf(out, //nolint:errcheck // terminal output
-				"\nAdd the key to your shell profile (config stores only a reference):\n  export %s=%s\n",
-				preset.KeyEnv, key)
+		if hasAnyFold(id, nonChatFragments) {
+			continue
 		}
 
-		return nil
+		seen[id] = true
+		filtered = append(filtered, id)
 	}
 
-	return fmt.Errorf("cli: setup: key test failed %d times", maxKeyAttempts)
+	sort.Strings(filtered)
+
+	return filtered
+}
+
+// hasAnyFold reports whether s contains any fragment, case-insensitively.
+func hasAnyFold(s string, fragments []string) bool {
+	lower := strings.ToLower(s)
+	for _, fragment := range fragments {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // readLine consumes one scanner line, returning "" at end of input.

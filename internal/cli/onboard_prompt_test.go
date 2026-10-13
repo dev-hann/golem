@@ -50,7 +50,7 @@ func TestRunOnboard_PromptAppearsBeforeInput(t *testing.T) {
 			Stdin:      stdinReader,
 			Stdout:     out,
 			Stderr:     io.Discard,
-			TestKey:    func(_, _, _ string) error { return nil },
+			ListModels: func(_, _ string) ([]string, error) { return nil, nil },
 		})
 	}()
 

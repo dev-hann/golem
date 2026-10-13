@@ -68,7 +68,8 @@ func ResolveProvider(configPath string, warn io.Writer) (ProviderChoice, error) 
 	model := firstOf(os.Getenv("GOLEM_MODEL"), settings.Model, preset.DefaultModel)
 	if model == "" {
 		return ProviderChoice{}, fmt.Errorf(
-			"cli: provider %s requires a model — set [provider.%s] model or GOLEM_MODEL", id, id)
+			"cli: provider %s requires a model — set [provider.%s] model or GOLEM_MODEL", id, id,
+		)
 	}
 
 	key := ""
@@ -117,31 +118,25 @@ func firstOf(values ...string) string {
 	return ""
 }
 
-// keyTestTimeout bounds the wizard's live key probe.
-const keyTestTimeout = 20 * time.Second
+// modelListTimeout bounds the wizard's live model-list fetch.
+const modelListTimeout = 20 * time.Second
 
-// liveKeyTest proves a key with a one-word round trip against the provider.
-func liveKeyTest(id, key, model string) error {
-	provider, err := buildProvider(id, key, "")
-	if err != nil {
-		return err
+// liveListModels fetches a provider's model ids from its real endpoint.
+func liveListModels(id, key string) ([]string, error) {
+	preset, ok := llm.Presets[id]
+	if !ok {
+		return nil, fmt.Errorf("cli: unknown provider %q", id)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), keyTestTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), modelListTimeout)
 	defer cancel()
 
-	stream, err := provider.Stream(ctx, llm.Request{
-		Model: model, Messages: []llm.Message{{Role: llm.RoleUser, Text: "ping"}},
-	})
-	if err != nil {
-		return fmt.Errorf("key test: %w", err)
+	switch preset.Kind {
+	case llm.KindAnthropic:
+		return anthropicgo.ListModels(ctx, key, preset.BaseURL)
+	case llm.KindOpenAICompat:
+		return openaicompat.ListModels(ctx, key, preset.BaseURL)
+	default:
+		return nil, fmt.Errorf("cli: provider %q has unsupported kind %q", id, preset.Kind)
 	}
-
-	for event := range stream {
-		if event.Type == llm.EventError {
-			return fmt.Errorf("key test: %w", event.Err)
-		}
-	}
-
-	return nil
 }

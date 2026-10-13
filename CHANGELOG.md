@@ -35,6 +35,15 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — setup wizard model selector (2026-10-13)
+
+- The wizard fetches the provider's live model list (`/v1/models`) and
+  offers a numbered picker: filter (non-chat ids), sort, 30-entry cap,
+  preset-default highlight, custom id entry. The fetch doubles as key
+  validation — a 401/403 retries the key, a missing endpoint accepts it
+  and falls back to manual model entry with the preset suggestion.
+  Ollama lists local models when the endpoint is up.
+
 ### Added — release pipeline (2026-10-13)
 
 - Tag pushes (`v*`) run goreleaser in CI: `golem` and `golem-tui` for
