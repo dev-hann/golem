@@ -19,6 +19,7 @@ import (
 	"github.com/dev-hann/golem/internal/config"
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/tui"
+	"github.com/dev-hann/golem/internal/tui/kit"
 )
 
 // maxKeyAttempts bounds rejected keys before the wizard gives up.
@@ -73,10 +74,11 @@ func RunOnboard(opts OnboardOptions) error {
 	}
 
 	out := opts.Stdout
+	k := kit.New(kit.DefaultTheme()) // colors appear on TTYs, plain otherwise
 
 	reader := bufio.NewScanner(opts.Stdin)
 
-	id, err := promptProvider(out, reader)
+	id, err := promptProvider(out, reader, k)
 	if err != nil {
 		return fmt.Errorf("cli: setup: %w", err)
 	}
@@ -88,7 +90,7 @@ func RunOnboard(opts OnboardOptions) error {
 	models := []string(nil)
 
 	if preset.KeyEnv != "" {
-		apiKey, models, err = promptKeyAndList(out, reader, opts, id)
+		apiKey, models, err = promptKeyAndList(out, reader, opts, id, k)
 		if err != nil {
 			return err
 		}
@@ -118,12 +120,13 @@ func RunOnboard(opts OnboardOptions) error {
 		return err
 	}
 
-	fmt.Fprintf(out, "\nWrote %s — provider: %s, model: %s\n", //nolint:errcheck // terminal output
-		opts.ConfigPath, id, model)
+	fmt.Fprintln(out, "")       //nolint:errcheck // terminal output
+	fmt.Fprintln(out, k.OKLine( //nolint:errcheck // terminal output
+		fmt.Sprintf("wrote %s — provider: %s, model: %s", opts.ConfigPath, id, model)))
 
 	if Probe(DefaultSocketPath()) {
-		fmt.Fprintln(out, //nolint:errcheck // terminal output
-			"warning: a golem server is already running and predates this config — restart it:")
+		fmt.Fprintln(out, k.WarnLine( //nolint:errcheck // terminal output
+			"a golem server is already running and predates this config — restart it:"))
 		fmt.Fprintln(out, "  pkill -f 'golem serve'   # then run: golem") //nolint:errcheck // terminal output
 	} else if existing.Path != "" {
 		fmt.Fprintln(out, "A running golem server picks this up on next restart.") //nolint:errcheck // terminal output
@@ -133,8 +136,8 @@ func RunOnboard(opts OnboardOptions) error {
 }
 
 // promptProvider lists the catalog and reads the selection (number or id).
-func promptProvider(out io.Writer, reader *bufio.Scanner) (string, error) {
-	fmt.Fprintln(out, "golem setup — choose a provider:") //nolint:errcheck // terminal output
+func promptProvider(out io.Writer, reader *bufio.Scanner, k *kit.Kit) (string, error) {
+	fmt.Fprintln(out, k.Title("golem setup — choose a provider:")) //nolint:errcheck // terminal output
 
 	detected := map[string]bool{}
 	for _, id := range llm.DetectFromEnv() {
@@ -211,6 +214,7 @@ func promptKeyAndList(
 	reader *bufio.Scanner,
 	opts OnboardOptions,
 	id string,
+	k *kit.Kit,
 ) (key string, models []string, err error) {
 	preset := llm.Presets[id]
 
@@ -235,16 +239,16 @@ func promptKeyAndList(
 			continue
 		}
 
-		fmt.Fprintln(out, "fetching models…") //nolint:errcheck // terminal output
+		fmt.Fprintln(out, k.DimLine("fetching models…")) //nolint:errcheck // terminal output
 
 		models, err := opts.ListModels(id, key)
 		switch {
 		case err == nil:
-			fmt.Fprintln(out, "key works ✓ (stored in config, chmod 600)") //nolint:errcheck // terminal output
+			fmt.Fprintln(out, k.OKLine("key works ✓ (stored in config, chmod 600)")) //nolint:errcheck // terminal output
 
 			return key, models, nil
 		case errors.Is(err, llm.ErrAuth):
-			fmt.Fprintf(out, "key rejected: %v\n", err) //nolint:errcheck // terminal output
+			fmt.Fprintln(out, k.ErrLine(fmt.Sprintf("key rejected: %v", err))) //nolint:errcheck // terminal output
 
 			if hint := planHint(id); hint != "" {
 				fmt.Fprintln(out, "hint: "+hint) //nolint:errcheck // terminal output

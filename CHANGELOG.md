@@ -35,6 +35,16 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — themeable TUI design kit (2026-10-13, v0.1.5)
+
+- `internal/tui/kit`: the design system every TUI surface renders through.
+  Semantic color tokens, pure-data themes (a future `[theme]` config
+  section is `ThemeFromMap` + `kit.New`; runtime switching constructs a new
+  kit — no globals), derived styles, and shared components including the
+  arrow-key picker with a themed selection cursor. The chat transcript,
+  tool blocks, and the setup wizard are themed now; `NO_COLOR` and
+  non-terminal output degrade to plain automatically.
+
 ### Added — Z.ai GLM Coding Plan preset (2026-10-13, v0.1.4)
 
 - New `zai-coding` provider preset: the GLM Coding Plan endpoint
