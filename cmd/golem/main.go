@@ -56,6 +56,8 @@ func run(args []string, d deps) int {
 		return runChat(ctx)
 	case "setup":
 		return runSetup(d)
+	case "version":
+		return runVersion(os.Stdout)
 	default:
 		usage(os.Stderr)
 		return 2
@@ -199,6 +201,7 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "  golem                 start the TUI (starts the server if needed)")
 	_, _ = fmt.Fprintln(w, "  golem tui             same as bare golem")
 	_, _ = fmt.Fprintln(w, "  golem setup           choose a provider and write the config")
+	_, _ = fmt.Fprintln(w, "  golem version         print the build version")
 	_, _ = fmt.Fprintln(w, "  golem serve           start the agent server (unix socket)")
 	_, _ = fmt.Fprintln(w, "  golem chat            line REPL against the server")
 	_, _ = fmt.Fprintln(w, "  golem ask <prompt>    one-shot prompt")
