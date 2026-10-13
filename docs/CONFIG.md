@@ -4,6 +4,17 @@ Last updated: 2026-10-12. Schema changes require updating this file in the same 
 
 > **Status: partially implemented.** The config parser (`internal/config`) is bootstrapped: built-in defaults, the global file, `GOLEM_PROVIDER`/`GOLEM_MODEL` overrides, `[provider]` sections, and `ref:` secret resolution. Project files, CLI flags, and the remaining sections (`[server]`, `[approval]`, `[tools]`, `[plugins]`) land with roadmap phases 4–6. Providers beyond Anthropic arrive in phase 5; MCP support in phase 6. This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
 
+## First-run onboarding
+
+Bare `golem` (and `golem setup` at any time) runs a short wizard when no provider is configured — no config file and no provider key in the environment:
+
+1. Pick a provider from the built-in catalog (detected keys are marked).
+2. Enter a model (the preset default is offered; zai suggests `glm-5`).
+3. For keyed providers, paste an API key — golem proves it with a live call (3 attempts).
+4. The config file is written with `api_key = "ref:ENV_VAR"`; the plaintext key never touches disk. The wizard prints the matching `export` line for your shell profile.
+
+Ollama needs no key; its section records only model and the local endpoint.
+
 ## File locations & precedence
 
 Loaded and merged low → high:

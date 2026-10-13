@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"github.com/dev-hann/golem/internal/cli"
+	"github.com/dev-hann/golem/internal/config"
 	anthropicgo "github.com/dev-hann/golem/internal/llm/anthropic"
 )
 
@@ -21,10 +22,11 @@ import (
 // roadmap phase 5).
 const defaultModel = "claude-opus-5"
 
-// deps injects the app launcher so the TUI path is testable without a
-// terminal.
+// deps injects the app launcher and setup wizard so the TUI path is
+// testable without a terminal.
 type deps struct {
 	launch func(ctx context.Context, opts cli.AppOptions) error
+	setup  func(opts cli.OnboardOptions) error
 }
 
 func main() {
@@ -33,7 +35,7 @@ func main() {
 
 // defaultDeps wires production dependencies.
 func defaultDeps() deps {
-	return deps{launch: cli.RunApp}
+	return deps{launch: cli.RunApp, setup: cli.RunOnboard}
 }
 
 // run executes the CLI and returns the process exit code.
@@ -57,10 +59,22 @@ func run(args []string, d deps) int {
 		return runServe(ctx)
 	case "chat":
 		return runChat(ctx)
+	case "setup":
+		return runSetup(d)
 	default:
 		usage(os.Stderr)
 		return 2
 	}
+}
+
+// runSetup runs the provider setup wizard.
+func runSetup(d deps) int {
+	if err := d.setup(cli.OnboardOptions{ConfigPath: config.DefaultPath()}); err != nil {
+		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
+		return 1
+	}
+
+	return 0
 }
 
 // launchApp is the bare-`golem` path: ensure the server is running, then
@@ -72,7 +86,8 @@ func launchApp(rest []string, d deps) int {
 	}
 
 	if err := d.launch(context.Background(), cli.AppOptions{
-		Socket: cli.DefaultSocketPath(),
+		Socket:     cli.DefaultSocketPath(),
+		ConfigPath: config.DefaultPath(),
 		Start: func() error {
 			exe, err := os.Executable()
 			if err != nil {
@@ -173,8 +188,9 @@ func usage(w io.Writer) {
 	_, _ = fmt.Fprintln(w, "usage: golem [command]")
 	_, _ = fmt.Fprintln(w, "  golem                 start the TUI (starts the server if needed)")
 	_, _ = fmt.Fprintln(w, "  golem tui             same as bare golem")
+	_, _ = fmt.Fprintln(w, "  golem setup           choose a provider and write the config")
 	_, _ = fmt.Fprintln(w, "  golem serve           start the agent server (unix socket)")
 	_, _ = fmt.Fprintln(w, "  golem chat            line REPL against the server")
 	_, _ = fmt.Fprintln(w, "  golem ask <prompt>    one-shot prompt")
-	_, _ = fmt.Fprintln(w, "env: ANTHROPIC_API_KEY, GOLEM_MODEL")
+	_, _ = fmt.Fprintln(w, "env: ANTHROPIC_API_KEY, ZAI_API_KEY, OPENAI_API_KEY, GOLEM_PROVIDER, GOLEM_MODEL")
 }

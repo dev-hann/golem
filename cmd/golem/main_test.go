@@ -76,6 +76,33 @@ func TestRun_LaunchErrorExitsOne(t *testing.T) {
 	}
 }
 
+func TestRun_SetupInvokesWizard(t *testing.T) {
+	t.Parallel()
+
+	called := false
+
+	d := deps{setup: func(_ cli.OnboardOptions) error {
+		called = true
+		return nil
+	}}
+
+	if got := run([]string{"setup"}, d); got != 0 {
+		t.Errorf("run(setup) = %d, want 0", got)
+	}
+	if !called {
+		t.Error("setup wizard not invoked")
+	}
+}
+
+func TestRun_SetupErrorExitsOne(t *testing.T) {
+	t.Parallel()
+
+	d := deps{setup: func(_ cli.OnboardOptions) error { return errors.New("no tty") }}
+	if got := run([]string{"setup"}, d); got != 1 {
+		t.Errorf("run(setup, error) = %d, want 1", got)
+	}
+}
+
 func TestRun_RejectsUnknownSubcommand(t *testing.T) {
 	t.Parallel()
 

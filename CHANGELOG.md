@@ -35,6 +35,15 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — first-run provider onboarding (2026-10-13)
+
+- Bare `golem` (and `golem setup`) runs a setup wizard when no config file
+  exists and no provider key is in the environment: provider picker with
+  key detection, model prompt with preset defaults, live key validation
+  (3 attempts), config written with `ref:ENV_VAR` secrets only — the
+  plaintext key never lands in the file, the wizard prints the `export`
+  line for the shell profile instead. Ollama registers keyless.
+
 ### Added — provider presets + openai-compat adapter (2026-10-13)
 
 - `internal/llm` presets: built-in catalog for `anthropic`, `openai`, `zai`

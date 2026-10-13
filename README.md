@@ -39,8 +39,10 @@ make build
 ## Usage
 
 ```bash
-golem    # starts the server if needed, then the TUI
+golem    # first run: pick a provider (zai, anthropic, openai, ollama), then the TUI
 ```
+
+The first run walks you through provider setup — keys are validated live and stored only as `ref:ENV_VAR` references (see [docs/CONFIG.md](docs/CONFIG.md)). Later runs skip straight to the TUI. `golem setup` re-runs the wizard anytime.
 
 The first run spawns a detached `golem serve` (unix socket) and waits for it; later runs reuse the running server. Sessions survive closing the TUI — reconnect with `golem` anytime; stop the server with `pkill -f 'golem serve'`.
 

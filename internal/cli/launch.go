@@ -26,6 +26,8 @@ const (
 // AppOptions configures the default app launch (bare `golem` / `golem tui`).
 type AppOptions struct {
 	Socket string
+	// ConfigPath is checked for first-run onboarding.
+	ConfigPath string
 	// Start spawns a server on Socket when none is running. Production
 	// wiring spawns the golem executable detached (see SpawnServe).
 	Start func() error
@@ -126,9 +128,16 @@ func SpawnServe(exe string) error {
 	return nil
 }
 
-// RunApp is the body of bare `golem`: ensure the server is up (spawning it
-// when needed), then run the TUI against it.
+// RunApp is the body of bare `golem`: run the first-run setup wizard when
+// no provider is configured, ensure the server is up (spawning it when
+// needed), then run the TUI against it.
 func RunApp(ctx context.Context, opts AppOptions) error {
+	if NeedsOnboarding(opts.ConfigPath) {
+		if err := RunOnboard(OnboardOptions{ConfigPath: opts.ConfigPath}); err != nil {
+			return fmt.Errorf("cli: setup: %w", err)
+		}
+	}
+
 	if err := EnsureServer(ctx, opts.Socket, opts.Start, opts.Stderr); err != nil {
 		return err
 	}
