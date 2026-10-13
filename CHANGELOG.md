@@ -35,6 +35,13 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — config bootstrap (2026-10-13)
+
+- `internal/config`: built-in defaults, global `~/.config/golem/config.toml`
+  parsing (`[provider]` + `[provider.<id>]` tables), `GOLEM_PROVIDER`
+  override, and `ref:ENV_VAR` secret resolution (missing env var is a
+  startup error naming the variable; plaintext keys warn).
+
 ### Fixed
 
 - `golem serve` exits on SIGINT/SIGTERM. Previously the accept loop was

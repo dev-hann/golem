@@ -48,7 +48,7 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
 | `internal/session` | implemented | Append-only JSONL session store + in-memory cache with bounded size. Replay on load. | stdlib |
 | `internal/approval` | implemented | Approval policy engine: whitelist prefixes, prompt/auto modes, pending-approval state. | stdlib |
 | `internal/mcp` | planned (phase 6) | MCP client: process lifecycle, JSON-RPC over stdio, tool discovery. | stdlib (or MCP Go SDK — ADR required to adopt) |
-| `internal/config` | planned (phase 5) | Layered TOML config load & merge. Until then golem is configured via environment variables only. | stdlib, `BurntSushi/toml` |
+| `internal/config` | partial | Layered TOML config load & merge. Bootstrapped: defaults, global file (`[provider]` sections), `GOLEM_PROVIDER`/`GOLEM_MODEL` env overrides, `ref:` secret resolution. Remaining sections and precedence layers land in phase 4–5. | stdlib, `BurntSushi/toml` |
 | `pkg/golemclient` | implemented | **Public** client library. Protocol types + a typed client over any transport. Future apps build on this. | stdlib only — never `internal/*` |
 | `apps/` | future | Web/desktop clients. Not part of the Go module build. | — |
 

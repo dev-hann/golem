@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-12. Schema changes require updating this file in the same commit.
 
-> **Status: specification — not yet implemented.** The config parser (`internal/config`), providers beyond Anthropic, and MCP plugin support land in [ROADMAP.md](ROADMAP.md) phases 5–6. Until then golem is configured via environment variables only (`ANTHROPIC_API_KEY`, `GOLEM_MODEL`). This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
+> **Status: partially implemented.** The config parser (`internal/config`) is bootstrapped: built-in defaults, the global file, `GOLEM_PROVIDER`/`GOLEM_MODEL` overrides, `[provider]` sections, and `ref:` secret resolution. Project files, CLI flags, and the remaining sections (`[server]`, `[approval]`, `[tools]`, `[plugins]`) land with roadmap phases 4–6. Providers beyond Anthropic arrive in phase 5; MCP support in phase 6. This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
 
 ## File locations & precedence
 

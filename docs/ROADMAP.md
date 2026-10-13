@@ -162,7 +162,7 @@ Goal: daily-driver terminal client.
 
 ---
 
-## Phase 5 — Remaining providers + config system
+## Phase 5 — Remaining providers + config system (in progress: config bootstrap landed 2026-10-13)
 
 ### Deliverables
 
