@@ -107,7 +107,8 @@ func launchApp(rest []string, d deps) int {
 	return 0
 }
 
-// providerFor resolves the configured provider for this process.
+// providerFor resolves the configured provider for one-shot commands where
+// a startup failure is the actual failure.
 func providerFor() (cli.ProviderChoice, error) {
 	choice, err := cli.ResolveProvider(config.DefaultPath())
 	if err != nil {
@@ -153,7 +154,9 @@ func runAsk(ctx context.Context, rest []string) int {
 	return 0
 }
 
-// runServe runs the agent server subcommand.
+// runServe runs the agent server subcommand. Credential problems degrade
+// turns instead of stopping the boot; the registry probes every provider
+// in the background and logs verdicts as they settle.
 func runServe(ctx context.Context) int {
 	root, err := os.Getwd()
 	if err != nil {
@@ -161,11 +164,21 @@ func runServe(ctx context.Context) int {
 		return 1
 	}
 
-	choice, err := providerFor()
+	reg := cli.NewStatusRegistry()
+
+	choice, err := cli.ResolveProviderForServe(config.DefaultPath(), reg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
 		return 1
 	}
+
+	fmt.Fprintf(os.Stderr, "golem provider: %s (model %s)\n", choice.ID, choice.Model) //nolint:errcheck // terminal output
+
+	reg.ProbeAll(ctx, cli.ProbeConfig{
+		ConfigPath: config.DefaultPath(),
+		ListModels: cli.LiveListModels,
+		Log:        os.Stderr,
+	})
 
 	if err := cli.Serve(ctx, cli.ServeOptions{
 		Provider:   choice.Provider,

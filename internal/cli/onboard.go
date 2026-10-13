@@ -66,7 +66,7 @@ func RunOnboard(opts OnboardOptions) error {
 	}
 
 	if opts.ListModels == nil {
-		opts.ListModels = liveListModels
+		opts.ListModels = LiveListModels
 	}
 
 	out := opts.Stdout

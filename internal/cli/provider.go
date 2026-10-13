@@ -5,6 +5,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -49,6 +50,10 @@ type ProviderChoice struct {
 // provider, model, and key (docs/CONFIG.md precedence). Without a config
 // file, exactly one detected provider key selects that provider; GOLEM_
 // MODEL overrides any configured or preset model.
+//
+// Key-resolution failures return a partially filled choice (ID and Model
+// set, Provider nil) alongside the error; structural failures (parse,
+// unknown provider, missing model) return an empty choice.
 func ResolveProvider(configPath string) (ProviderChoice, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
@@ -71,13 +76,15 @@ func ResolveProvider(configPath string) (ProviderChoice, error) {
 		)
 	}
 
+	choice := ProviderChoice{ID: id, Model: model}
+
 	key := ""
 
 	switch {
 	case settings.APIKey != "":
 		key, err = config.ResolveKey(settings.APIKey)
 		if err != nil {
-			return ProviderChoice{}, fmt.Errorf("cli: %w", err)
+			return choice, fmt.Errorf("cli: %w", err)
 		}
 	case preset.KeyEnv != "":
 		key = os.Getenv(preset.KeyEnv)
@@ -88,7 +95,36 @@ func ResolveProvider(configPath string) (ProviderChoice, error) {
 		return ProviderChoice{}, err
 	}
 
-	return ProviderChoice{ID: id, Provider: provider, Model: model}, nil
+	choice.Provider = provider
+
+	return choice, nil
+}
+
+// ResolveProviderForServe is the serve wiring: key problems never stop the
+// boot — the choice wraps a status-aware provider that fails turns with the
+// verdict instead, and the registry records the reason. Structural failures
+// still return an error.
+func ResolveProviderForServe(configPath string, reg *StatusRegistry) (ProviderChoice, error) {
+	choice, err := ResolveProvider(configPath)
+	if err == nil {
+		return ProviderChoice{
+			ID:       choice.ID,
+			Model:    choice.Model,
+			Provider: statusProvider{reg: reg, id: choice.ID, inner: choice.Provider},
+		}, nil
+	}
+
+	if choice.ID != "" && errors.Is(err, config.ErrKeyUnresolved) {
+		reg.Set(choice.ID, StateRejected, err.Error())
+
+		return ProviderChoice{
+			ID:       choice.ID,
+			Model:    choice.Model,
+			Provider: statusProvider{reg: reg, id: choice.ID},
+		}, nil
+	}
+
+	return ProviderChoice{}, err
 }
 
 // resolveProviderID picks the provider id: GOLEM_PROVIDER (already folded
@@ -120,8 +156,8 @@ func firstOf(values ...string) string {
 // modelListTimeout bounds the wizard's live model-list fetch.
 const modelListTimeout = 20 * time.Second
 
-// liveListModels fetches a provider's model ids from its real endpoint.
-func liveListModels(id, key string) ([]string, error) {
+// LiveListModels fetches a provider's model ids from its real endpoint.
+func LiveListModels(id, key string) ([]string, error) {
 	preset, ok := llm.Presets[id]
 	if !ok {
 		return nil, fmt.Errorf("cli: unknown provider %q", id)
