@@ -35,6 +35,15 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Changed — API keys stored in config by default (2026-10-13)
+
+- The setup wizard now writes the validated key as plaintext into the
+  global config (mode 0600) instead of a `ref:ENV_VAR` indirection that
+  required shell-profile exports and made daemon startup fail invisibly
+  (ADR-0015; same shape as `gh` and `aws` CLI local credentials).
+  `ref:` and env-only remain supported options; the plaintext warning is
+  gone.
+
 ### Added — setup wizard model selector (2026-10-13)
 
 - The wizard fetches the provider's live model list (`/v1/models`) and

@@ -109,7 +109,7 @@ func launchApp(rest []string, d deps) int {
 
 // providerFor resolves the configured provider for this process.
 func providerFor() (cli.ProviderChoice, error) {
-	choice, err := cli.ResolveProvider(config.DefaultPath(), os.Stderr)
+	choice, err := cli.ResolveProvider(config.DefaultPath())
 	if err != nil {
 		return choice, err
 	}

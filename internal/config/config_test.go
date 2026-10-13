@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,7 +104,7 @@ func TestLoad_EnvOverridesDefault(t *testing.T) {
 func TestResolveKey_RefResolvesFromEnv(t *testing.T) {
 	t.Setenv("GOLEM_TEST_KEY", "sk-test")
 
-	key, err := config.ResolveKey("ref:GOLEM_TEST_KEY", nil)
+	key, err := config.ResolveKey("ref:GOLEM_TEST_KEY")
 	if err != nil {
 		t.Fatalf("ResolveKey: %v", err)
 	}
@@ -115,24 +116,22 @@ func TestResolveKey_RefResolvesFromEnv(t *testing.T) {
 func TestResolveKey_RefMissingEnvFails(t *testing.T) {
 	t.Setenv("GOLEM_TEST_KEY", "")
 
-	_, err := config.ResolveKey("ref:GOLEM_TEST_KEY", nil)
+	_, err := config.ResolveKey("ref:GOLEM_TEST_KEY")
 	if err == nil || !strings.Contains(err.Error(), "GOLEM_TEST_KEY") {
 		t.Errorf("expected error naming GOLEM_TEST_KEY, got: %v", err)
 	}
+	if !errors.Is(err, config.ErrKeyUnresolved) {
+		t.Errorf("error must wrap ErrKeyUnresolved, got: %v", err)
+	}
 }
 
-func TestResolveKey_PlaintextWarnsAndPasses(t *testing.T) {
-	var warn strings.Builder
-
-	key, err := config.ResolveKey("sk-plaintext", &warn)
+func TestResolveKey_PlaintextPasses(t *testing.T) {
+	key, err := config.ResolveKey("sk-plaintext")
 	if err != nil {
 		t.Fatalf("ResolveKey: %v", err)
 	}
 	if key != "sk-plaintext" {
 		t.Errorf("key = %q, want passthrough", key)
-	}
-	if !strings.Contains(warn.String(), "warning") {
-		t.Errorf("expected plaintext warning, got %q", warn.String())
 	}
 }
 

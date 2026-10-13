@@ -11,7 +11,7 @@ Bare `golem` (and `golem setup` at any time) runs a short wizard when no provide
 1. Pick a provider from the built-in catalog (detected keys are marked).
 2. For keyed providers, paste an API key — golem proves it by fetching the provider's model list (`GET /v1/models`). A rejected key retries (3 attempts); if the endpoint offers no listing, the key is accepted and the model is typed manually with the preset default suggested.
 3. Pick a model from the live list: a numbered selector (non-chat ids like embeddings filtered, sorted, capped at 30) — pick by number, type a custom id, or press enter for the highlighted preset default.
-4. The config file is written with `api_key = "ref:ENV_VAR"`; the plaintext key never touches disk. The wizard prints the matching `export` line for your shell profile.
+4. The config file is written with the validated key stored directly (`api_key = "..."`, file mode 0600, ADR-0015) — no shell export needed. `ref:ENV_VAR` and env-only setups remain available for those who want them.
 
 Ollama needs no key; the wizard lists whatever models the local endpoint reports (`:11434/v1/models`), falling back to manual entry when nothing is running.
 
@@ -29,12 +29,13 @@ Merge rules: tables (maps) deep-merge; arrays (slices) are **replaced**, not con
 
 ## Secrets
 
-API keys are never stored in config files. Resolution order per provider:
+API keys live in the global config by default (ADR-0015): the wizard writes the validated key as plaintext into `~/.config/golem/config.toml` (mode 0600) — the same shape `gh` and the `aws` CLI use for local credentials. Resolution order per provider:
 
-1. Dedicated env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`).
-2. `api_key = "ref:SOME_ENV_VAR"` in config — any env var, resolved at startup. Missing referenced var is a startup error naming the key.
+1. `api_key = "sk-..."` in config — plaintext, the designed default for the global file.
+2. `api_key = "ref:SOME_ENV_VAR"` in config — env indirection for users who prefer it; a missing referenced var is a startup warning naming the key and turns fail per turn.
+3. Dedicated env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY`) when the config sets none.
 
-Plaintext `api_key = "sk-..."` is accepted with a stderr warning, for testing only.
+Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The future project-level `.golem.toml` (committable) will reject plaintext keys.
 
 ## Schema
 

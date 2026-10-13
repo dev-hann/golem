@@ -80,10 +80,12 @@ func RunOnboard(opts OnboardOptions) error {
 
 	preset := llm.Presets[id]
 
+	var apiKey string
+
 	models := []string(nil)
 
 	if preset.KeyEnv != "" {
-		models, err = promptKeyAndList(out, reader, opts, id)
+		apiKey, models, err = promptKeyAndList(out, reader, opts, id)
 		if err != nil {
 			return err
 		}
@@ -98,7 +100,7 @@ func RunOnboard(opts OnboardOptions) error {
 
 	settings := config.ProviderSettings{Model: model, BaseURL: preset.BaseURL}
 	if preset.KeyEnv != "" {
-		settings.APIKey = "ref:" + preset.KeyEnv
+		settings.APIKey = apiKey
 	}
 
 	existing, err := config.Load(opts.ConfigPath)
@@ -195,8 +197,14 @@ func resolveChoice(choice string) (string, error) {
 
 // promptKeyAndList reads a key (blank falls back to the preset env var) and
 // validates it by listing models: a rejected credential retries, a missing
-// listing endpoint accepts the key and returns no models.
-func promptKeyAndList(out io.Writer, reader *bufio.Scanner, opts OnboardOptions, id string) ([]string, error) {
+// listing endpoint accepts the key and returns no models. It returns the
+// working key (stored as plaintext per ADR-0015) alongside the models.
+func promptKeyAndList(
+	out io.Writer,
+	reader *bufio.Scanner,
+	opts OnboardOptions,
+	id string,
+) (key string, models []string, err error) {
 	preset := llm.Presets[id]
 
 	envKey := os.Getenv(preset.KeyEnv)
@@ -225,9 +233,9 @@ func promptKeyAndList(out io.Writer, reader *bufio.Scanner, opts OnboardOptions,
 		models, err := opts.ListModels(id, key)
 		switch {
 		case err == nil:
-			printKeyAccepted(out, preset, envKey, key)
+			fmt.Fprintln(out, "key works ✓ (stored in config, chmod 600)") //nolint:errcheck // terminal output
 
-			return models, nil
+			return key, models, nil
 		case errors.Is(err, llm.ErrAuth):
 			fmt.Fprintf(out, "key rejected: %v\n", err) //nolint:errcheck // terminal output
 
@@ -235,25 +243,13 @@ func promptKeyAndList(out io.Writer, reader *bufio.Scanner, opts OnboardOptions,
 		default:
 			// The key may be fine; only the listing endpoint is missing.
 			fmt.Fprintf(out, "key accepted (model list unavailable: %v)\n", err) //nolint:errcheck // terminal output
-			printKeyAccepted(out, preset, envKey, key)
+			fmt.Fprintln(out, "key stored in config, chmod 600")                 //nolint:errcheck // terminal output
 
-			return nil, nil
+			return key, nil, nil
 		}
 	}
 
-	return nil, fmt.Errorf("cli: setup: key rejected %d times", maxKeyAttempts)
-}
-
-// printKeyAccepted confirms the key and points at the shell profile when
-// the key is not already exported.
-func printKeyAccepted(out io.Writer, preset llm.Preset, envKey, key string) {
-	fmt.Fprintln(out, "key works ✓") //nolint:errcheck // terminal output
-
-	if envKey == "" {
-		fmt.Fprintf(out, //nolint:errcheck // terminal output
-			"\nAdd the key to your shell profile (config stores only a reference):\n  export %s=%s\n",
-			preset.KeyEnv, key)
-	}
+	return "", nil, fmt.Errorf("cli: setup: key rejected %d times", maxKeyAttempts)
 }
 
 // promptModel picks the model: a numbered selector over the fetched list,

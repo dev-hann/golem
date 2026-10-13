@@ -6,7 +6,6 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"time"
 
@@ -50,7 +49,7 @@ type ProviderChoice struct {
 // provider, model, and key (docs/CONFIG.md precedence). Without a config
 // file, exactly one detected provider key selects that provider; GOLEM_
 // MODEL overrides any configured or preset model.
-func ResolveProvider(configPath string, warn io.Writer) (ProviderChoice, error) {
+func ResolveProvider(configPath string) (ProviderChoice, error) {
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return ProviderChoice{}, fmt.Errorf("cli: %w", err)
@@ -76,7 +75,7 @@ func ResolveProvider(configPath string, warn io.Writer) (ProviderChoice, error) 
 
 	switch {
 	case settings.APIKey != "":
-		key, err = config.ResolveKey(settings.APIKey, warn)
+		key, err = config.ResolveKey(settings.APIKey)
 		if err != nil {
 			return ProviderChoice{}, fmt.Errorf("cli: %w", err)
 		}

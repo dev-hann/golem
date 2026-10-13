@@ -34,7 +34,7 @@ func TestResolveProvider_NoConfigInfersSingleEnvKey(t *testing.T) {
 	clearProviderKeys(t)
 	t.Setenv("ZAI_API_KEY", "sk-zai")
 
-	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"), nil)
+	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"))
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestResolveProvider_NoConfigInfersSingleEnvKey(t *testing.T) {
 func TestResolveProvider_NoConfigNoKeysFallsBackToAnthropic(t *testing.T) {
 	clearProviderKeys(t)
 
-	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"), nil)
+	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"))
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestResolveProvider_TwoKeysWithoutConfigKeepsDefault(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "sk-1")
 	t.Setenv("OPENAI_API_KEY", "sk-2")
 
-	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"), nil)
+	choice, err := cli.ResolveProvider(filepath.Join(t.TempDir(), "absent.toml"))
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
 	}
@@ -90,7 +90,7 @@ default = "ollama"
 model = "llama3.3"
 `)
 
-	choice, err := cli.ResolveProvider(path, nil)
+	choice, err := cli.ResolveProvider(path)
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
 	}
@@ -112,7 +112,7 @@ default = "zai"
 model = "glm-4.7"
 `)
 
-	choice, err := cli.ResolveProvider(path, nil)
+	choice, err := cli.ResolveProvider(path)
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
 	}
@@ -122,7 +122,7 @@ model = "glm-4.7"
 
 	t.Setenv("GOLEM_MODEL", "glm-5.3")
 
-	choice, err = cli.ResolveProvider(path, nil)
+	choice, err = cli.ResolveProvider(path)
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
 	}
@@ -143,7 +143,7 @@ model = "glm-5"
 api_key = "ref:GOLEM_MISSING_VAR"
 `)
 
-	_, err := cli.ResolveProvider(path, nil)
+	_, err := cli.ResolveProvider(path)
 	if err == nil || !strings.Contains(err.Error(), "GOLEM_MISSING_VAR") {
 		t.Errorf("expected error naming GOLEM_MISSING_VAR, got: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestResolveProvider_ModellessProviderRequiresModel(t *testing.T) {
 default = "ollama"
 `)
 
-	_, err := cli.ResolveProvider(path, nil)
+	_, err := cli.ResolveProvider(path)
 	if err == nil || !strings.Contains(err.Error(), "model") {
 		t.Errorf("expected model-required error, got: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestResolveProvider_KeyFallsBackToPresetEnv(t *testing.T) {
 default = "zai"
 `)
 
-	choice, err := cli.ResolveProvider(path, nil)
+	choice, err := cli.ResolveProvider(path)
 	if err != nil {
 		t.Fatalf("ResolveProvider: %v", err)
 	}

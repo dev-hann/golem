@@ -8,7 +8,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -130,10 +129,15 @@ func stringValue(v any) string {
 	return s
 }
 
+// ErrKeyUnresolved marks a ref: indirection whose environment variable is
+// not set; serve treats it as degraded, not fatal.
+var ErrKeyUnresolved = errors.New("api key unresolved")
+
 // ResolveKey expands an api_key value. "ref:NAME" resolves from the
 // environment — a missing NAME is an error naming it (docs/CONFIG.md
-// Secrets). Plaintext passes through with a warning, for testing only.
-func ResolveKey(raw string, warn io.Writer) (string, error) {
+// Secrets). Plaintext keys are the designed default for the global config
+// (ADR-0015: single-user local tool, 0600 file, the gh/aws-cli precedent).
+func ResolveKey(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
@@ -141,14 +145,10 @@ func ResolveKey(raw string, warn io.Writer) (string, error) {
 	if name, ok := strings.CutPrefix(raw, "ref:"); ok {
 		value := os.Getenv(name)
 		if value == "" {
-			return "", fmt.Errorf("config: api_key ref %s: environment variable not set", name)
+			return "", fmt.Errorf("config: %w: ref %s: environment variable not set", ErrKeyUnresolved, name)
 		}
 
 		return value, nil
-	}
-
-	if warn != nil {
-		fmt.Fprintf(warn, "warning: plaintext api_key in config — use ref:ENV_VAR\n") //nolint:errcheck // terminal output
 	}
 
 	return raw, nil

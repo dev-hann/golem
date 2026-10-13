@@ -97,7 +97,7 @@ func TestNeedsOnboarding(t *testing.T) {
 	}
 }
 
-func TestRunOnboard_WritesRefStyleConfig(t *testing.T) {
+func TestRunOnboard_WritesConfigWithPlaintextKey(t *testing.T) {
 	h := newOnboard(t, "1\nsk-zai-123\n\n") // zai, key, enter = default glm-5
 
 	if err := h.run(t); err != nil {
@@ -115,19 +115,21 @@ func TestRunOnboard_WritesRefStyleConfig(t *testing.T) {
 		`[provider.zai]`,
 		`model = "glm-5"`,
 		`base_url = "https://api.z.ai/api/paas/v4/"`,
-		`api_key = "ref:ZAI_API_KEY"`,
+		`api_key = "sk-zai-123"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("config missing %q:\n%s", want, got)
 		}
 	}
 
-	if strings.Contains(got, "sk-zai-123") {
-		t.Errorf("config leaks the plaintext key:\n%s", got)
+	info, err := os.Stat(h.configPath)
+	if err != nil {
+		t.Fatalf("stat config: %v", err)
 	}
-	if !strings.Contains(h.stdout.String(), "export ZAI_API_KEY=") {
-		t.Errorf("stdout missing export guidance:\n%s", h.stdout.String())
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("config perms = %o, want 600", perm)
 	}
+
 	if len(h.listCalls) != 1 || h.listCalls[0] != "zai:sk-zai-123" {
 		t.Errorf("list calls = %v", h.listCalls)
 	}
@@ -218,7 +220,7 @@ func TestRunOnboard_ListUnavailableFallsBackToManual(t *testing.T) {
 	if !strings.Contains(out, "model list unavailable") {
 		t.Errorf("fallback not surfaced:\n%s", out)
 	}
-	if !strings.Contains(out, "key works") {
+	if !strings.Contains(out, "key stored in config") {
 		t.Errorf("key should be accepted despite missing endpoint:\n%s", out)
 	}
 
@@ -226,8 +228,8 @@ func TestRunOnboard_ListUnavailableFallsBackToManual(t *testing.T) {
 	if !strings.Contains(string(body), `model = "gpt-5.2"`) {
 		t.Errorf("manual model not honored:\n%s", string(body))
 	}
-	if !strings.Contains(string(body), `api_key = "ref:OPENAI_API_KEY"`) {
-		t.Errorf("key reference missing:\n%s", string(body))
+	if !strings.Contains(string(body), `api_key = "sk-openai"`) {
+		t.Errorf("plaintext key missing:\n%s", string(body))
 	}
 }
 
@@ -300,8 +302,10 @@ func TestRunOnboard_UsesEnvKeyWhenBlank(t *testing.T) {
 	if len(h.listCalls) != 1 || h.listCalls[0] != "zai:sk-from-env" {
 		t.Errorf("list calls = %v, want sk-from-env", h.listCalls)
 	}
-	if strings.Contains(h.stdout.String(), "export ZAI_API_KEY=") {
-		t.Errorf("env-backed key should not print export guidance:\n%s", h.stdout.String())
+
+	body, _ := os.ReadFile(h.configPath)
+	if !strings.Contains(string(body), `api_key = "sk-from-env"`) {
+		t.Errorf("env key not stored as plaintext:\n%s", string(body))
 	}
 }
 
