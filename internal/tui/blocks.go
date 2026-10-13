@@ -39,18 +39,20 @@ const (
 	maxResultPreview = 2000
 )
 
-// render turns one block into display lines through the kit theme. User
-// messages get the identifying box; assistant text stays plain prose.
+// render turns one block into display lines through the kit theme. Both
+// chat sides carry a left bar in their role color; the assistant token
+// sits too close to the default foreground, so assistant bars borrow the
+// accent color to stay distinguishable.
 func (b block) render(k *kit.Kit, width int) string {
 	switch b.kind {
 	case blockUser:
-		return k.UserBox(width, b.text)
+		return k.MessageBar(kit.User, width, b.text)
 	case blockAssistant:
 		if b.text == "" {
-			return k.DimLine("…")
+			return k.MessageBar(kit.Accent, width, "…")
 		}
 
-		return b.text
+		return k.MessageBar(kit.Accent, width, b.text)
 	case blockError:
 		return k.ErrLine(b.text)
 	case blockTool:

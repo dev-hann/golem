@@ -118,32 +118,33 @@ func (k *Kit) Box(content string) string {
 		Render(content)
 }
 
-// UserBox geometry: a rounded frame (2 columns) plus horizontal padding.
+// Bar geometry: the "▎" bar, its space, and a floor for narrow terminals.
 const (
-	userBoxPadding = 1
-	userBoxFrame   = 2
-	// Floors so narrow terminals still render a usable box.
-	minUserBoxInner = 10
+	barCols    = 2
+	minBarText = 10
 )
 
-// UserBox renders a user message inside a rounded frame in the user's
-// color — the visual identity separating human turns from assistant
-// prose. The frame hugs its content, wrapping anything wider than width.
-func (k *Kit) UserBox(width int, text string) string {
-	inner := max(width-2*userBoxPadding-userBoxFrame, minUserBoxInner)
-
+// MessageBar renders message text with a colored left bar spanning every
+// wrapped line — the transcript's identity marker for chat turns. Body
+// text stays in the default foreground for readability.
+func (k *Kit) MessageBar(token Token, width int, text string) string {
+	inner := max(width-barCols, minBarText)
 	lines := strings.Split(text, "\n")
-	for i, line := range lines {
+
+	bar := k.styles[token].Render("▎")
+
+	barred := make([]string, 0, len(lines))
+	for _, line := range lines {
 		if ansi.StringWidth(line) > inner {
-			lines[i] = ansi.Wrap(line, inner, "")
+			line = ansi.Wrap(line, inner, "")
+		}
+
+		for _, seg := range strings.Split(line, "\n") {
+			barred = append(barred, bar+" "+seg)
 		}
 	}
 
-	return k.r.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(k.theme.Colors[User]).
-		Padding(0, userBoxPadding).
-		Render(strings.Join(lines, "\n"))
+	return strings.Join(barred, "\n")
 }
 
 // Sticky geometry: the "▎ " bar and its one space.

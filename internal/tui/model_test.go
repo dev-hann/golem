@@ -309,11 +309,11 @@ func TestModel_StickyUserPinsWhenScrolledPast(t *testing.T) {
 	m.blocks = []block{{kind: blockUser, text: "fix the bug"}}
 	m.refreshView()
 	view := m.View()
-	if !strings.Contains(view, "fix the bug") {
-		t.Fatalf("user box should be visible before scrolling:\n%s", view)
+	if !strings.Contains(view, "▎ fix the bug") {
+		t.Fatalf("user bar should be visible before scrolling:\n%s", view)
 	}
-	if strings.Contains(view, "▎") {
-		t.Errorf("sticky must stay hidden while the box is visible:\n%s", view)
+	if m.stickyText() != "" {
+		t.Errorf("sticky must stay hidden while the bar is visible")
 	}
 
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
@@ -323,11 +323,15 @@ func TestModel_StickyUserPinsWhenScrolledPast(t *testing.T) {
 		})
 	}
 	view = m.View()
-	if !strings.Contains(view, "▎ fix the bug") {
-		t.Errorf("sticky should pin the last question above the viewport:\n%s", view)
+	if m.stickyText() != "fix the bug" {
+		t.Errorf("sticky should pin the last question above the viewport")
 	}
-	if strings.Contains(view, "│ fix the bug │") {
-		t.Errorf("scrolled-off box should not render in the visible page:\n%s", view)
+	if !strings.Contains(view, "▎ fix the bug") {
+		t.Errorf("sticky line should render under the header:\n%s", view)
+	}
+	// The original bar line scrolled off: only the sticky copy renders.
+	if n := strings.Count(view, "▎ fix the bug"); n != 1 {
+		t.Errorf("scrolled-off bar should not render in the visible page, found %d:\n%s", n, view)
 	}
 }
 

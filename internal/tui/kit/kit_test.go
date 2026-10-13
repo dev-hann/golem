@@ -110,32 +110,41 @@ func TestKit_TokensUseTheirOwnColor(t *testing.T) {
 	}
 }
 
-func TestKit_UserBoxRoundedFrame(t *testing.T) {
+func TestKit_MessageBarMarksEveryLine(t *testing.T) {
 	t.Parallel()
 
 	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	boxed := k.UserBox(30, "hello")
-	for _, want := range []string{"╭", "╮", "╰", "╯", "hello"} {
-		if !strings.Contains(boxed, want) {
-			t.Errorf("user box missing %q:\n%s", want, boxed)
+	barred := k.MessageBar(kit.User, 30, "one\ntwo")
+	lines := strings.Split(barred, "\n")
+	if len(lines) != 2 || lines[0] != "▎ one" || lines[1] != "▎ two" {
+		t.Errorf("every line should carry the bar:\n%s", barred)
+	}
+}
+
+func TestKit_MessageBarWrapsWithinWidth(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	barred := k.MessageBar(kit.User, 20, strings.Repeat("a", 50))
+	for i, line := range strings.Split(barred, "\n") {
+		if w := ansi.StringWidth(line); w > 20 {
+			t.Errorf("bar line %d width %d exceeds cap 20:\n%s", i, w, barred)
+		}
+		if !strings.HasPrefix(line, "▎") {
+			t.Errorf("bar line %d missing bar:\n%s", i, barred)
 		}
 	}
 }
 
-func TestKit_UserBoxWrapsWithinWidth(t *testing.T) {
+func TestKit_MessageBarUsesTokenColor(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
 
-	boxed := k.UserBox(20, strings.Repeat("a", 50))
-	for i, line := range strings.Split(boxed, "\n") {
-		if w := ansi.StringWidth(line); w > 20 {
-			t.Errorf("user box line %d width %d exceeds cap 20:\n%s", i, w, boxed)
-		}
-	}
-	if !strings.Contains(boxed, "aaa") {
-		t.Errorf("user box lost text:\n%s", boxed)
+	if out := k.MessageBar(kit.User, 30, "hi"); !strings.Contains(out, "\x1b[") {
+		t.Errorf("bar should carry the token color: %q", out)
 	}
 }
 
