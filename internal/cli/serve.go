@@ -57,15 +57,22 @@ func Serve(ctx context.Context, opts ServeOptions) error {
 
 	_ = os.Chmod(opts.Socket, 0o600) //nolint:gosec // single-user local socket
 
+	// shutdown unblocks Serve: closing s.closed alone is not enough while
+	// the accept loop is parked in Accept, so the listener must close too.
+	shutdown := func() {
+		srv.Close()
+		_ = listener.Close()
+	}
+
 	if opts.SignalCtx != nil {
-		opts.SignalCtx(ctx, func() { srv.Close() })
+		opts.SignalCtx(ctx, shutdown)
 	} else {
 		sigCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
 		go func() {
 			<-sigCtx.Done()
-			srv.Close()
+			shutdown()
 		}()
 	}
 
