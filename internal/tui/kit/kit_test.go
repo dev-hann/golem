@@ -151,36 +151,60 @@ func TestKit_ModalRendersTitleAndFrame(t *testing.T) {
 	}
 }
 
-func TestKit_OverlayCentersModal(t *testing.T) {
+func TestKit_OverlayMergesModalOverBase(t *testing.T) {
 	t.Parallel()
 
 	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	placed := k.Overlay(40, 10, "X")
+	base := strings.Repeat("background line\n", 12)
+	placed := k.Overlay(40, 12, base, "MODAL")
 
 	lines := strings.Split(strings.TrimRight(placed, "\n"), "\n")
-	if len(lines) != 10 {
-		t.Fatalf("overlay height = %d lines, want 10", len(lines))
+	if len(lines) != 12 {
+		t.Fatalf("overlay height = %d lines, want 12", len(lines))
 	}
 
-	var middle string
+	// The base survives above and below the modal.
+	if !strings.Contains(lines[0], "background line") {
+		t.Errorf("base missing above modal:\n%s", placed)
+	}
 
-	found := false
+	if !strings.Contains(lines[11], "background line") {
+		t.Errorf("base missing below modal:\n%s", placed)
+	}
+
+	// The modal sits centered with base text on both flanks.
+	var modalLine string
 
 	for _, line := range lines {
-		if strings.Contains(line, "X") {
-			middle, found = line, true
+		if strings.Contains(line, "MODAL") {
+			modalLine = line
 
 			break
 		}
 	}
 
-	if !found {
-		t.Fatalf("modal content missing from overlay:\n%s", placed)
+	if modalLine == "" {
+		t.Fatalf("modal missing:\n%s", placed)
 	}
 
-	if idx := strings.Index(middle, "X"); idx < 10 {
-		t.Errorf("modal not horizontally centered (prefix %d chars): %q", idx, middle)
+	if !strings.Contains(modalLine, "background line") {
+		t.Errorf("base flanks missing around modal: %q", modalLine)
+	}
+
+	if idx := strings.Index(modalLine, "MODAL"); idx < 10 {
+		t.Errorf("modal not centered (left flank %d): %q", idx, modalLine)
+	}
+}
+
+func TestKit_OverlayZeroSizeFallsBackToBase(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	got := k.Overlay(0, 0, "the base", "M")
+	if !strings.Contains(got, "the base") || !strings.Contains(got, "M") {
+		t.Errorf("zero-size overlay = %q, want base and modal stacked", got)
 	}
 }
 

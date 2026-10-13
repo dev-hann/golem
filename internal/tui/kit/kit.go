@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Kit derives cached styles from a theme and renders the shared
@@ -128,21 +129,81 @@ func (k *Kit) Box(content string) string {
 }
 
 // Modal renders the shared overlay panel: a title line over a padded,
-// framed body. Every overlay in the app (help, pickers, approvals) uses
-// this shape so their look cannot drift apart.
+// framed, background-filled body. Every overlay in the app (help,
+// pickers, approvals) uses this shape so their look cannot drift apart.
 func (k *Kit) Modal(title, body string) string {
+	content := k.Title(title) + "\n" + strings.TrimRight(body, "\n")
+
+	width := 0
+	for _, line := range strings.Split(content, "\n") {
+		if w := ansi.StringWidth(line); w > width {
+			width = w
+		}
+	}
+
 	return k.r.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(k.theme.Colors[Border]).
-		Padding(0, 2).
-		Render(k.Title(title) + "\n" + strings.TrimRight(body, "\n"))
+		Background(k.theme.Colors[Bg]).
+		Padding(0, modalPaddingH).
+		Width(width + 2*modalPaddingH).
+		Render(content)
 }
 
-// Overlay centers a modal on a clear canvas of the given size. The base
-// view hides behind the modal — ANSI-safe by construction, and closing
-// (esc/enter) restores it.
-func (k *Kit) Overlay(width, height int, modal string) string {
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal)
+// modalPaddingH is the modal's inner horizontal padding in cells.
+const modalPaddingH = 2
+
+// Overlay merges a modal over the base view, centered, leaving the base
+// visible around it. ANSI-aware: styled base lines are cut at the modal
+// bounds and reset codes keep color state from bleeding across the seam.
+func (k *Kit) Overlay(width, height int, base, modal string) string {
+	if width <= 0 || height <= 0 {
+		// Pre-resize frame: stack the modal under the base rather than
+		// dropping it.
+		return base + "\n" + modal
+	}
+
+	baseLines := strings.Split(base, "\n")
+	modalLines := strings.Split(strings.TrimRight(modal, "\n"), "\n")
+
+	modalWidth := 0
+	for _, line := range modalLines {
+		if w := ansi.StringWidth(line); w > modalWidth {
+			modalWidth = w
+		}
+	}
+
+	x0 := max((width-modalWidth)/2, 0)
+	y0 := max((height-len(modalLines))/2, 0)
+
+	lines := make([]string, 0, height)
+	for y := range height {
+		baseLine := ""
+		if y < len(baseLines) {
+			baseLine = baseLines[y]
+		}
+
+		if y < y0 || y >= y0+len(modalLines) {
+			lines = append(lines, baseLine)
+
+			continue
+		}
+
+		modalLine := modalLines[y-y0]
+
+		prefix := ansi.Truncate(baseLine, x0, "")
+		suffix := ansi.TruncateLeft(baseLine, x0+ansi.StringWidth(modalLine), "")
+
+		lines = append(lines, prefix+"\x1b[0m"+modalLine+"\x1b[0m"+suffix)
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// Fade renders escape-free plain text in the theme's dim color — the
+// monochrome backdrop tone behind an open modal.
+func (k *Kit) Fade(plain string) string {
+	return k.styles[Dim].Render(plain)
 }
 
 // Selection renders the picker cursor marker.
