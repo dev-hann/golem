@@ -60,7 +60,7 @@ func TestPreview_TruncatesAtBoundary(t *testing.T) {
 
 func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 	t.Parallel()
-	got, lastUserEnd := renderBlocks(testKit(), []block{
+	got, spans := renderBlocks(testKit(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},
@@ -71,17 +71,16 @@ func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 			t.Errorf("renderBlocks missing %q in:\n%s", want, got)
 		}
 	}
-	// The user bar is a single line at the top of the transcript, so the
-	// span ends before line 1.
-	if lastUserEnd != 1 {
-		t.Errorf("lastUserEnd = %d, want 1 (single bar line):\n%s", lastUserEnd, got)
+	// The user bar is a single line at the top of the transcript.
+	if len(spans) != 1 || spans[0].start != 0 || spans[0].end != 1 || spans[0].text != "q" {
+		t.Errorf("user spans = %+v, want one span [0,1) with text q:\n%s", spans, got)
 	}
 }
 
-func TestRenderBlocks_NoUserBlockReportsMinusOne(t *testing.T) {
+func TestRenderBlocks_NoUserBlockNoSpans(t *testing.T) {
 	t.Parallel()
-	if _, lastUserEnd := renderBlocks(testKit(), []block{{kind: blockAssistant, text: "a"}}, 80); lastUserEnd != -1 {
-		t.Errorf("lastUserEnd = %d, want -1 without a user block", lastUserEnd)
+	if _, spans := renderBlocks(testKit(), []block{{kind: blockAssistant, text: "a"}}, 80); len(spans) != 0 {
+		t.Errorf("spans = %+v, want none without a user block", spans)
 	}
 }
 
@@ -99,15 +98,21 @@ func TestRenderBlocks_BlankLineBetweenBlocks(t *testing.T) {
 	}
 }
 
-func TestRenderBlocks_TracksLastUserBlock(t *testing.T) {
+func TestRenderBlocks_TracksEveryUserBlock(t *testing.T) {
 	t.Parallel()
-	got, lastUserEnd := renderBlocks(testKit(), []block{
+	got, spans := renderBlocks(testKit(), []block{
 		{kind: blockUser, text: "first"},
 		{kind: blockAssistant, text: strings.Repeat("x", 100)},
 		{kind: blockUser, text: "second"},
 	}, 80)
 	_ = got
-	if lastUserEnd <= 4 {
-		t.Errorf("lastUserEnd = %d, should track the second user block past the first exchange", lastUserEnd)
+	if len(spans) != 2 {
+		t.Fatalf("spans = %+v, want one per user block", spans)
+	}
+	if spans[0].text != "first" || spans[1].text != "second" {
+		t.Errorf("span texts = %+v", spans)
+	}
+	if spans[1].start < spans[0].end {
+		t.Errorf("second span must sit past the first exchange: %+v", spans)
 	}
 }

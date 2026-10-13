@@ -423,6 +423,38 @@ func TestModel_MouseWheelScrollsTranscript(t *testing.T) {
 	}
 }
 
+func TestModel_StickyTracksScrollRegion(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	answer := strings.Repeat("answer line\n", 200)
+	m.blocks = []block{
+		{kind: blockUser, text: "first question"},
+		{kind: blockAssistant, text: answer},
+		{kind: blockUser, text: "second question"},
+		{kind: blockAssistant, text: answer},
+	}
+	m.refreshView()
+
+	// Reading the first answer's middle: the sticky names its question.
+	m.vp.YOffset = 100
+	if got := m.stickyText(); got != "first question" {
+		t.Errorf("sticky in first-answer region = %q, want first question", got)
+	}
+
+	// Reading the second answer: the sticky switches questions.
+	m.vp.YOffset = 300
+	if got := m.stickyText(); got != "second question" {
+		t.Errorf("sticky in second-answer region = %q, want second question", got)
+	}
+
+	// A question fully visible in the viewport needs no sticky.
+	m.vp.YOffset = 0
+	if got := m.stickyText(); got != "" {
+		t.Errorf("sticky with the question visible = %q, want none", got)
+	}
+}
+
 func TestModel_ConnectFailureShowsError(t *testing.T) {
 	t.Parallel()
 	m := New("/dev/null")

@@ -38,7 +38,7 @@ type Model struct {
 	turnActive  bool
 	follow      bool
 	blocks      []block
-	lastUserEnd int
+	userSpans   []userSpan
 	pending     *golemclient.ApprovalRequest
 	sessions    []golemclient.SessionSummary
 	pickIndex   int
@@ -77,15 +77,14 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 	vp := viewport.New(startWidth, startHeight-headerLines-footerLines-minInputHeight-inputBorderRows)
 
 	return Model{
-		dial:        realDial,
-		socket:      socketPath,
-		kit:         k,
-		vp:          vp,
-		input:       input,
-		mode:        modeChat,
-		inputRows:   minInputHeight,
-		lastUserEnd: -1,
-		follow:      true,
+		dial:      realDial,
+		socket:    socketPath,
+		kit:       k,
+		vp:        vp,
+		input:     input,
+		mode:      modeChat,
+		inputRows: minInputHeight,
+		follow:    true,
 	}
 }
 
@@ -717,8 +716,8 @@ func (m *Model) replayHistory(hist golemclient.History) {
 // paged back (follow=false until they reach the bottom again or send a
 // new message).
 func (m *Model) refreshView() {
-	content, lastUserEnd := renderBlocks(m.kit, m.blocks, m.vp.Width)
-	m.lastUserEnd = lastUserEnd
+	content, spans := renderBlocks(m.kit, m.blocks, m.vp.Width)
+	m.userSpans = spans
 	m.vp.SetContent(content)
 
 	if m.turnActive && m.follow {
@@ -775,21 +774,31 @@ func (m Model) layout() string {
 	return b.String()
 }
 
-// stickyText returns the pinned text for the most recent user message
-// when it has scrolled fully above the viewport, or "" when the box is
-// still visible (or no user message exists).
+// stickyText returns the question governing the visible region — the
+// latest user message whose block starts above the viewport's bottom
+// line, i.e. the question the content on screen is answering — or ""
+// when that question is already fully visible (or none exists).
 func (m Model) stickyText() string {
-	if m.lastUserEnd < 0 || m.lastUserEnd > m.vp.YOffset {
-		return ""
-	}
+	bottom := m.vp.YOffset + m.vp.Height
 
-	for i := len(m.blocks) - 1; i >= 0; i-- {
-		if m.blocks[i].kind == blockUser {
-			return m.blocks[i].text
+	governing := -1
+
+	for i, span := range m.userSpans {
+		if span.start < bottom {
+			governing = i
 		}
 	}
 
-	return ""
+	if governing < 0 {
+		return ""
+	}
+
+	span := m.userSpans[governing]
+	if span.start >= m.vp.YOffset && span.end <= bottom {
+		return "" // fully visible: the transcript itself shows it
+	}
+
+	return span.text
 }
 
 // shrunkViewport renders one viewport row shorter, paying for the sticky

@@ -92,15 +92,22 @@ func preview(s string, limit int) string {
 	return s[:limit] + "…"
 }
 
+// userSpan locates one user block inside the rendered transcript: the
+// half-open line range [start, end) and the message text. The sticky
+// header uses the spans to name the question governing the visible
+// region.
+type userSpan struct {
+	start int
+	end   int
+	text  string
+}
+
 // renderBlocks renders the whole transcript through the kit theme,
 // separating blocks with a blank line (tool lines attach to the block
-// they follow). It also reports lastUserEnd: the line index one past the
-// final user block in the joined output, or -1 with no user block — the
-// scroll position the sticky header keys off.
-func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, lastUserEnd int) {
+// they follow) and reporting every user block's line span.
+func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, spans []userSpan) {
 	var b strings.Builder
 
-	lastUserEnd = -1
 	line := 0
 
 	for i, blk := range blocks {
@@ -122,7 +129,7 @@ func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, lastUserEn
 		lines := strings.Count(rendered, "\n") + 1
 
 		if blk.kind == blockUser {
-			lastUserEnd = line + lines
+			spans = append(spans, userSpan{start: line, end: line + lines, text: blk.text})
 		}
 
 		b.WriteString(rendered)
@@ -130,5 +137,5 @@ func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, lastUserEn
 		line += lines
 	}
 
-	return b.String(), lastUserEnd
+	return b.String(), spans
 }
