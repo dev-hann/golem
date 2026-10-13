@@ -27,7 +27,10 @@ const defaultApprovalTimeout = 120 // seconds
 
 // Config wires a Server's dependencies.
 type Config struct {
-	Provider         llm.Provider
+	Provider llm.Provider
+	// ProviderID labels turn_start events (e.g. "zai"); "" renders as
+	// "custom" for test-injected providers.
+	ProviderID       string
 	Model            string
 	Root             string
 	Store            *session.Store
@@ -336,7 +339,7 @@ func (s *Server) wireEvent(sessionID, turnID string, event agent.Event) any {
 	case agent.EventTurnStart:
 		return golemclient.TurnStart{
 			Type: golemclient.TypeTurnStart, Session: sessionID, Turn: turnID,
-			Provider: providerLabel(s.cfg.Provider), Model: s.cfg.Model,
+			Provider: providerLabel(s.cfg.ProviderID), Model: s.cfg.Model,
 		}
 	case agent.EventTextDelta:
 		return golemclient.TextDelta{
@@ -461,9 +464,14 @@ func metaOf(sess *session.Session) golemclient.SessionMeta {
 	}
 }
 
-// providerLabel names the provider kind for turn_start events.
-func providerLabel(_ llm.Provider) string {
-	return "anthropic" // single provider in phase 2; extended in phase 5
+// providerLabel names the provider for turn_start events; unknown or
+// test-injected providers render as "custom".
+func providerLabel(id string) string {
+	if id == "" {
+		return "custom"
+	}
+
+	return id
 }
 
 // firstNonEmpty returns the first non-empty string.

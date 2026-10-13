@@ -35,6 +35,15 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — config-driven provider wiring (2026-10-13)
+
+- `golem serve` and `golem ask` resolve their provider through
+  `cli.ResolveProvider`: GOLEM_PROVIDER > config `provider.default` >
+  single-detected-env-key inference > the built-in default. Models follow
+  GOLEM_MODEL > config > preset default; keys follow config `ref:` > the
+  provider's env var. `turn_start` events now carry the real provider id
+  (test-injected providers render as `custom`).
+
 ### Added — first-run provider onboarding (2026-10-13)
 
 - Bare `golem` (and `golem setup`) runs a setup wizard when no config file

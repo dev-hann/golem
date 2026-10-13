@@ -17,8 +17,8 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-// defaultProviderID matches docs/CONFIG.md [provider].default.
-const defaultProviderID = "anthropic"
+// DefaultProviderID matches docs/CONFIG.md [provider].default.
+const DefaultProviderID = "anthropic"
 
 // ProviderSettings is one [provider.<id>] table.
 type ProviderSettings struct {
@@ -55,7 +55,7 @@ func DefaultPath() string {
 // GOLEM_PROVIDER override. A missing file is not an error: defaults apply.
 // A file that fails to parse aborts startup with the path in the error.
 func Load(path string) (*Config, error) {
-	cfg := &Config{Default: defaultProviderID, Providers: map[string]ProviderSettings{}}
+	cfg := &Config{Default: DefaultProviderID, Providers: map[string]ProviderSettings{}}
 
 	raw, err := os.ReadFile(path) //nolint:gosec // golem's own config path, not user-supplied input
 	if errors.Is(err, fs.ErrNotExist) {

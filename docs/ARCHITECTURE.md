@@ -115,7 +115,7 @@ Adapters normalize each SDK's stream into the common event channel (text deltas,
 | Z.ai (GLM) | `openai-go` + `WithBaseURL` against OpenAI-compatible endpoint | No official Go SDK exists |
 | Ollama | `openai-go` + `WithBaseURL` against `:11434/v1` (ADR-0014) | Local models; no API key |
 
-Status: only the `anthropic` adapter exists today (phase 1); the remaining adapters arrive with the config system in phase 5, which is also when provider selection becomes config-driven. Until then `cmd/golem` wires Anthropic directly, with `GOLEM_MODEL` as the only model override.
+Status: `anthropic` and one `openai`-compat adapter are implemented (ADR-0014 — zai and ollama ride the compat adapter via `base_url`). Provider selection is config-driven (`provider.default`, `GOLEM_PROVIDER`, single-key inference when no config exists); models resolve as `GOLEM_MODEL` > config > preset default. The `/model` runtime switch lands with the rest of phase 5.
 
 ## Approval gate
 

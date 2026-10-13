@@ -15,14 +15,15 @@ import (
 
 // ServeOptions configures a golem server run.
 type ServeOptions struct {
-	Provider  llm.Provider
-	Model     string
-	Root      string
-	Socket    string
-	Sessions  string
-	Store     *session.Store
-	OnReady   func(addr string)
-	SignalCtx func(ctx context.Context, stop context.CancelFunc)
+	Provider   llm.Provider
+	ProviderID string
+	Model      string
+	Root       string
+	Socket     string
+	Sessions   string
+	Store      *session.Store
+	OnReady    func(addr string)
+	SignalCtx  func(ctx context.Context, stop context.CancelFunc)
 }
 
 // Serve runs the agent server until ctx is cancelled (default: SIGINT).
@@ -39,10 +40,11 @@ func Serve(ctx context.Context, opts ServeOptions) error {
 	}
 
 	srv, err := server.New(server.Config{
-		Provider: opts.Provider,
-		Model:    opts.Model,
-		Root:     opts.Root,
-		Store:    store,
+		Provider:   opts.Provider,
+		ProviderID: opts.ProviderID,
+		Model:      opts.Model,
+		Root:       opts.Root,
+		Store:      store,
 	})
 	if err != nil {
 		return fmt.Errorf("cli: server: %w", err)

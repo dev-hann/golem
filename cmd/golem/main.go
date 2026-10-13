@@ -15,12 +15,7 @@ import (
 
 	"github.com/dev-hann/golem/internal/cli"
 	"github.com/dev-hann/golem/internal/config"
-	anthropicgo "github.com/dev-hann/golem/internal/llm/anthropic"
 )
-
-// defaultModel is used when GOLEM_MODEL is unset (config file lands in
-// roadmap phase 5).
-const defaultModel = "claude-opus-5"
 
 // deps injects the app launcher and setup wizard so the TUI path is
 // testable without a terminal.
@@ -105,6 +100,18 @@ func launchApp(rest []string, d deps) int {
 	return 0
 }
 
+// providerFor resolves the configured provider for this process.
+func providerFor() (cli.ProviderChoice, error) {
+	choice, err := cli.ResolveProvider(config.DefaultPath(), os.Stderr)
+	if err != nil {
+		return choice, err
+	}
+
+	fmt.Fprintf(os.Stderr, "golem provider: %s (model %s)\n", choice.ID, choice.Model) //nolint:errcheck // terminal output
+
+	return choice, nil
+}
+
 // runAsk runs the one-shot prompt subcommand.
 func runAsk(ctx context.Context, rest []string) int {
 	if len(rest) == 0 {
@@ -118,10 +125,15 @@ func runAsk(ctx context.Context, rest []string) int {
 		return 1
 	}
 
-	provider := anthropicgo.NewProvider(os.Getenv("ANTHROPIC_API_KEY"), "")
+	choice, err := providerFor()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
+		return 1
+	}
+
 	if err := cli.Ask(ctx, cli.AskOptions{
-		Provider: provider,
-		Model:    model(),
+		Provider: choice.Provider,
+		Model:    choice.Model,
 		Root:     root,
 		Prompt:   strings.Join(rest, " "),
 		Stdout:   os.Stdout,
@@ -142,12 +154,19 @@ func runServe(ctx context.Context) int {
 		return 1
 	}
 
+	choice, err := providerFor()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
+		return 1
+	}
+
 	if err := cli.Serve(ctx, cli.ServeOptions{
-		Provider: anthropicgo.NewProvider(os.Getenv("ANTHROPIC_API_KEY"), ""),
-		Model:    model(),
-		Root:     root,
-		Socket:   cli.DefaultSocketPath(),
-		Sessions: cli.DefaultSessionsDir(),
+		Provider:   choice.Provider,
+		ProviderID: choice.ID,
+		Model:      choice.Model,
+		Root:       root,
+		Socket:     cli.DefaultSocketPath(),
+		Sessions:   cli.DefaultSessionsDir(),
 		OnReady: func(addr string) {
 			fmt.Fprintf(os.Stderr, "golem serving on %s\n", addr) //nolint:errcheck // terminal output
 		},
@@ -172,15 +191,6 @@ func runChat(ctx context.Context) int {
 	}
 
 	return 0
-}
-
-// model resolves the model override.
-func model() string {
-	if m := os.Getenv("GOLEM_MODEL"); m != "" {
-		return m
-	}
-
-	return defaultModel
 }
 
 // usage prints the CLI help.
