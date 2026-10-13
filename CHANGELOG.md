@@ -35,6 +35,25 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Changed — transcript readability (2026-10-13, v0.1.9)
+
+- Chat turns are visually separated: user messages carry a colored left
+  bar (`kit.MessageBar` — wrapping keeps the bar on every line), assistant
+  output stays plain, and blocks are split by blank lines with tool lines
+  attached. The `you>`/`golem>` labels are gone.
+- The most recent user message pins as a one-line sticky reminder under
+  the header once it scrolls fully above the viewport (the viewport yields
+  one row to keep the layout constant); scrolling back unpins it.
+
+### Fixed — transcript scrolling (2026-10-13, v0.1.9)
+
+- PgUp/PgDn no longer snap back to the tail while a turn streams: manual
+  scrollback suspends the auto-follow, which resumes on reaching the
+  bottom again or when a new message/turn starts.
+- The mouse wheel scrolls the transcript (three lines per notch through
+  the same path). Mouse cell motion is now enabled, so terminal-native
+  text selection requires shift while the TUI runs.
+
 ### Added — centered modal system, model picker, help (2026-10-13, v0.1.8)
 
 - Every overlay shares one shape: a background-filled `kit.Modal` panel
