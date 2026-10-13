@@ -35,6 +35,22 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Added — resilient serve, arrow-key picker, self-update (2026-10-13, v0.1.3)
+
+- `golem update`: verified self-update from GitHub releases (platform
+  tarball, sha256 against checksums.txt, atomic replace). Release builds
+  no-op when current; snapshots always update.
+- The wizard's model selector is a real arrow-key picker on terminals
+  (bubbletea, no new dependency), falling back to numbered input without
+  a TTY.
+- Provider health: one background probe per registered provider at boot
+  (ready / no key / key rejected / unreachable), held in a status
+  registry; blocked providers fail turns with an actionable error.
+  Credential problems never stop the server from booting.
+- The spawned daemon logs to `~/.local/share/golem/serve.log`; every
+  not-ready failure names it. The wizard warns when a running server
+  predates the config it just wrote.
+
 ### Changed — API keys stored in config by default (2026-10-13)
 
 - The setup wizard now writes the validated key as plaintext into the

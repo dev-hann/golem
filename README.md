@@ -42,7 +42,7 @@ cd golem
 make build
 ```
 
-`golem version` reports the build; on launch golem checks for a newer release once a day and prints an upgrade hint (`GOLEM_DISABLE_UPDATE_CHECK=1` silences it).
+`golem version` reports the build; on launch golem checks for a newer release once a day and prints an upgrade hint (`GOLEM_DISABLE_UPDATE_CHECK=1` silences it). `golem update` performs the upgrade: it downloads the release tarball for your platform, verifies the sha256 against the release checksums, and replaces the binaries in place.
 
 ## Usage
 
