@@ -16,11 +16,11 @@ func TestBlockRender_UserAndAssistant(t *testing.T) {
 	if got := (block{kind: blockUser, text: "hello"}).render(testKit(), 80); got != "▎ hello" {
 		t.Errorf("user block should be a user-colored bar line, got %q", got)
 	}
-	if got := (block{kind: blockAssistant}).render(testKit(), 80); got != "▎ …" {
-		t.Errorf("empty assistant block should be a bar and ellipsis, got %q", got)
+	if got := (block{kind: blockAssistant}).render(testKit(), 80); got != "…" {
+		t.Errorf("empty assistant block should be a bare ellipsis, got %q", got)
 	}
-	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit(), 80); got != "▎ hi" {
-		t.Errorf("assistant block should be a bar line without a label, got %q", got)
+	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit(), 80); got != "hi" {
+		t.Errorf("assistant block should be plain text without a bar, got %q", got)
 	}
 	if got := (block{kind: blockError, text: "boom"}).render(testKit(), 80); !strings.Contains(got, "error: boom") {
 		t.Errorf("error block = %q", got)
@@ -66,7 +66,7 @@ func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 		{kind: blockTool, tool: "read", done: true, ok: true},
 		{kind: blockError, text: "bad"},
 	}, 80)
-	for _, want := range []string{"▎ q", "▎ a", "✓ read", "error: bad"} {
+	for _, want := range []string{"▎ q", "a", "✓ read", "error: bad"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("renderBlocks missing %q in:\n%s", want, got)
 		}
@@ -92,9 +92,9 @@ func TestRenderBlocks_BlankLineBetweenBlocks(t *testing.T) {
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},
 	}, 80)
-	// A blank line separates the user bar from the assistant bar; tool
-	// lines attach to the block they follow without a blank line.
-	if !strings.Contains(got, "▎ q\n\n▎ a\n  ✓ read") {
+	// A blank line separates the user bar from the plain assistant text;
+	// tool lines attach to the block they follow without a blank line.
+	if !strings.Contains(got, "▎ q\n\na\n  ✓ read") {
 		t.Errorf("blocks should be separated by blank lines, tool lines attached:\n%s", got)
 	}
 }
