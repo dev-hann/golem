@@ -125,6 +125,19 @@ func TestKit_UserBoldAssistantPlain(t *testing.T) {
 	}
 }
 
+func TestKit_BoxRendersRoundedFrame(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	boxed := k.Box("hello")
+	for _, want := range []string{"╭", "╮", "╰", "╯", "hello"} {
+		if !strings.Contains(boxed, want) {
+			t.Errorf("box missing %q:\n%s", want, boxed)
+		}
+	}
+}
+
 func TestKit_StatusBarJoinsWithAccent(t *testing.T) {
 	t.Parallel()
 

@@ -59,16 +59,14 @@ func New(socketPath string) Model {
 func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
 	input.Placeholder = "message… (enter send · alt+enter newline · ctrl+c interrupt)"
-	input.Prompt = "you> "
-	input.FocusedStyle.Prompt = k.Style(kit.User).Bold(true)
 	input.FocusedStyle.Text = k.Style(kit.Fg)
 	input.FocusedStyle.Placeholder = k.Style(kit.Dim)
 	input.BlurredStyle = input.FocusedStyle
 	input.SetHeight(minInputHeight)
-	input.SetWidth(80)
+	input.SetWidth(startWidth - inputBorderCols)
 	input.Focus()
 
-	vp := viewport.New(startWidth, startHeight-headerLines-footerLines-minInputHeight)
+	vp := viewport.New(startWidth, startHeight-headerLines-footerLines-minInputHeight-inputBorderRows)
 
 	return Model{
 		dial:      realDial,
@@ -88,7 +86,10 @@ const sessionIDShortLen = 8
 // box grows with its content between minInputHeight and a share of the
 // terminal (inputMaxShareNumerator/inputMaxShareDenominator).
 const (
-	minInputHeight = 2
+	minInputHeight = 1
+	// The composer frame adds a rounded border: two rows and two columns.
+	inputBorderRows = 2
+	inputBorderCols = 2
 	// Growing past 40% of the terminal would starve the transcript.
 	inputMaxShareNumerator   = 2
 	inputMaxShareDenominator = 5
@@ -366,8 +367,8 @@ func (m Model) send(event any) tea.Cmd {
 func (m *Model) resize(width, height int) {
 	m.width, m.height = width, height
 	m.vp.Width = max(width, viewportMinWidth)
-	m.vp.Height = max(height-m.inputRows-headerLines-footerLines, viewportMinHeight)
-	m.input.SetWidth(max(width, viewportMinWidth))
+	m.vp.Height = max(height-m.inputRows-inputBorderRows-headerLines-footerLines, viewportMinHeight)
+	m.input.SetWidth(max(width-inputBorderCols, viewportMinWidth))
 	m.syncInputHeight()
 }
 
@@ -393,7 +394,7 @@ func (m *Model) syncInputHeight() {
 	m.input.SetHeight(rows)
 
 	if m.height > 0 {
-		m.vp.Height = max(m.height-rows-headerLines-footerLines, viewportMinHeight)
+		m.vp.Height = max(m.height-rows-inputBorderRows-headerLines-footerLines, viewportMinHeight)
 	}
 }
 
@@ -540,7 +541,7 @@ func (m Model) View() string {
 	b.WriteString(header(m) + "\n")
 	b.WriteString(m.vp.View() + "\n")
 	b.WriteString(m.footer() + "\n")
-	b.WriteString(m.input.View())
+	b.WriteString(m.kit.Box(m.input.View()))
 
 	return b.String()
 }

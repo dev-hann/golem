@@ -119,6 +119,14 @@ func (k *Kit) Prompt(text string) string {
 	return k.styles[Accent].Bold(true).Render(text)
 }
 
+// Box renders content inside a rounded border frame (the composer frame).
+func (k *Kit) Box(content string) string {
+	return k.r.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(k.theme.Colors[Border]).
+		Render(content)
+}
+
 // Selection renders the picker cursor marker.
 func (k *Kit) Selection(line string) string {
 	return k.styles[Selection].Reverse(true).Render(" " + line + " ")
