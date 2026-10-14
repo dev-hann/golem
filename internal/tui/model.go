@@ -66,6 +66,12 @@ type Model struct {
 	inputRows      int
 	quitting       bool
 	listRequest    bool
+	activeTool     string            // tool name of the in-flight ToolCallStart
+	activeArgs     string            // raw args of the in-flight tool call
+	turnStart      time.Time         // when the active turn began (elapsed display)
+	statusGen      int               // status ticker generation (stale-tick guard)
+	lastUsage      golemclient.Usage // usage of the most recent completed turn
+	streamedText   bool              // any TextDelta seen this turn (thinking vs responding)
 }
 
 // New builds the model for a socket path.
@@ -166,6 +172,15 @@ type (
 // newer sequence.
 type leaderTimeoutMsg struct{ gen int }
 
+// statusTickMsg advances the status line's elapsed-seconds counter; gen
+// identifies the turn the tick belongs to so a stale tick (a turn ended
+// since it was armed) cannot resurrect the timer.
+type statusTickMsg struct{ gen int }
+
+// statusTickInterval is how often the status line's clock re-renders
+// while a turn is active.
+const statusTickInterval = time.Second
+
 // leaderTimeout bounds how long a ctrl+x sequence waits for its key.
 const leaderTimeout = 2 * time.Second
 
@@ -173,6 +188,13 @@ const leaderTimeout = 2 * time.Second
 func armLeader(gen int) tea.Cmd {
 	return tea.Tick(leaderTimeout, func(time.Time) tea.Msg {
 		return leaderTimeoutMsg{gen: gen}
+	})
+}
+
+// armStatus schedules the next elapsed-seconds tick for the active turn.
+func armStatus(gen int) tea.Cmd {
+	return tea.Tick(statusTickInterval, func(time.Time) tea.Msg {
+		return statusTickMsg{gen: gen}
 	})
 }
 
@@ -199,6 +221,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 	case leaderTimeoutMsg:
 		if m.leaderArmed && m.leaderGen == msg.gen {
 			m.setLeader(false)
+		}
+
+		return m, nil
+	case statusTickMsg:
+		if m.turnActive && m.statusGen == msg.gen {
+			return m, armStatus(m.statusGen)
 		}
 
 		return m, nil
@@ -362,7 +390,8 @@ func (m Model) newSessionCmd() (tea.Model, tea.Cmd) {
 	m.clearSelection()
 	m.blocks = nil
 	m.provider, m.modelName = "", ""
-	m.turnActive = false
+	m.endTurn()
+	m.lastUsage = golemclient.Usage{}
 	m.refreshView()
 
 	return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
@@ -903,7 +932,7 @@ func (m *Model) resize(width, height int) {
 	m.clearSelection()
 	m.width, m.height = width, height
 	m.vp.Width = max(width, viewportMinWidth)
-	m.vp.Height = max(height-m.inputRows-inputBorderRows, viewportMinHeight)
+	m.vp.Height = max(height-m.inputRows-inputBorderRows-statusRows, viewportMinHeight)
 	m.input.SetWidth(max(width-inputBorderCols, viewportMinWidth))
 	m.syncInputHeight()
 }
@@ -931,7 +960,7 @@ func (m *Model) syncInputHeight() {
 	m.input.SetHeight(rows)
 
 	if m.height > 0 {
-		m.vp.Height = max(m.height-rows-inputBorderRows, viewportMinHeight)
+		m.vp.Height = max(m.height-rows-inputBorderRows-statusRows, viewportMinHeight)
 	}
 }
 
@@ -940,6 +969,10 @@ const (
 	viewportMinWidth  = 20
 	viewportMinHeight = 3
 )
+
+// statusRows is the height the status line borrows from the viewport —
+// always rendered, so the layout never jumps between idle and active.
+const statusRows = 1
 
 // applyEvent folds one server event into the model, returning the next cmd.
 // sessionOf extracts the session a streaming event belongs to; "" for
@@ -990,6 +1023,8 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		return cmd
 	}
 
+	var tick tea.Cmd
+
 	switch e := ev.(type) {
 	case golemclient.SessionMeta:
 		m.sessionID = e.Session
@@ -998,19 +1033,28 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.follow = true
 		m.provider = e.Provider
 		m.modelName = e.Model
+		m.streamedText = false
+		m.activeTool, m.activeArgs = "", ""
+		m.turnStart = time.Now()
+		m.statusGen++
+		tick = armStatus(m.statusGen)
 	case golemclient.TextDelta:
 		m.appendToAssistant(e.Delta)
+		m.streamedText = true
 	case golemclient.ToolCallStart:
 		m.blocks = append(m.blocks, block{
 			kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
 		})
+		m.activeTool, m.activeArgs = e.Tool, string(e.Args)
 	case golemclient.ToolCallEnd:
 		m.finishToolBlock(e)
+		m.activeTool, m.activeArgs = "", ""
 	case golemclient.ErrorEvent:
 		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
-		m.turnActive = false
+		m.endTurn()
 	case golemclient.TurnEnd:
-		m.turnActive = false
+		m.lastUsage = e.Usage
+		m.endTurn()
 	case golemclient.SessionList:
 		m.applySessionList(e)
 	case golemclient.SessionTitle:
@@ -1026,11 +1070,26 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 
 	m.refreshView()
 
-	if m.client != nil {
-		return m.listen()
+	// tea.Batch skips nil cmds, so a pre-connect event or a non-lifecycle
+	// event needs no nil plumbing here.
+	return tea.Batch(tick, m.listenCmd())
+}
+
+// listenCmd returns the keep-listening command when a connection exists.
+func (m *Model) listenCmd() tea.Cmd {
+	if m.client == nil {
+		return nil
 	}
 
-	return nil
+	return m.listen()
+}
+
+// endTurn clears the active-turn bookkeeping shared by turn_end and
+// error events.
+func (m *Model) endTurn() {
+	m.turnActive = false
+	m.activeTool, m.activeArgs = "", ""
+	m.streamedText = false
 }
 
 // applySessionList stores a session list and, when it was explicitly
@@ -1154,6 +1213,8 @@ func (m Model) layout() string {
 		b.WriteString(m.vp.View() + "\n")
 	}
 
+	b.WriteString(m.statusLine() + "\n")
+
 	edge := kit.Border
 	if m.leaderArmed {
 		edge = kit.Accent
@@ -1162,6 +1223,61 @@ func (m Model) layout() string {
 	b.WriteString(m.kit.Box(m.input.View(), edge))
 
 	return b.String()
+}
+
+// statusLine renders the agent-state strip: what the turn is doing (or
+// the model and last usage while idle) on the left, the interrupt hint
+// on the right while a turn runs.
+func (m Model) statusLine() string {
+	left, token := "● idle", kit.Dim
+
+	switch {
+	case m.turnActive && m.activeTool != "":
+		left = "◆ " + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs) + " " + m.elapsed()
+		token = kit.Tool
+	case m.turnActive && m.streamedText:
+		left = "● responding " + m.elapsed()
+		token = kit.Accent
+	case m.turnActive:
+		left = "● thinking " + m.elapsed()
+		token = kit.Accent
+	case m.modelName != "":
+		left = "● " + m.modelName + usageSummary(m.lastUsage)
+	}
+
+	right := ""
+	if m.turnActive {
+		right = "esc 중단"
+	}
+
+	return m.kit.StatusBar(m.vp.Width, left, right, token)
+}
+
+// elapsed renders the active turn's age in whole seconds.
+func (m Model) elapsed() string {
+	return fmt.Sprintf("%ds", max(int(time.Since(m.turnStart).Seconds()), 0))
+}
+
+// usageSummary renders the last turn's token counts, or "" before the
+// first turn reports usage.
+func usageSummary(u golemclient.Usage) string {
+	if u.InputTokens == 0 && u.OutputTokens == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf(" · ↑%s ↓%s", tokenCount(u.InputTokens), tokenCount(u.OutputTokens))
+}
+
+// tokenCount shortens a token count (1.2k, 15k, 2.1M).
+func tokenCount(n int64) string {
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.1fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // stickyText returns the question governing the visible region — the

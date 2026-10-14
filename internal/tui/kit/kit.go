@@ -147,6 +147,34 @@ func (k *Kit) StickyUser(width int, text string) string {
 	return k.styles[User].Render("▎ " + ansi.Truncate(first, limit, "…"))
 }
 
+// StatusBar renders the one-line status strip between the transcript and
+// the composer: a token-colored left segment (the agent phase) and a dim
+// right hint (the interrupt key), padded to width. On overflow the left
+// segment truncates first so the hint survives.
+func (k *Kit) StatusBar(width int, left, right string, token Token) string {
+	if width < 1 {
+		return ""
+	}
+
+	right = truncateTo(right, width)
+	rightW := ansi.StringWidth(right)
+
+	left = truncateTo(left, max(width-rightW, 0))
+	gap := max(width-ansi.StringWidth(left)-rightW, 0)
+
+	return k.styles[token].Render(left) + strings.Repeat(" ", gap) + k.styles[Dim].Render(right)
+}
+
+// truncateTo cuts s to limit cells with an ellipsis, tolerating a zero
+// limit where ansi.Truncate's tail would not fit.
+func truncateTo(s string, limit int) string {
+	if limit < 1 {
+		return ""
+	}
+
+	return ansi.Truncate(s, limit, "\u2026")
+}
+
 // Modal renders the shared overlay panel: a title line over a padded,
 // framed, background-filled body. Every overlay in the app (help,
 // pickers) uses this shape so their look cannot drift apart.

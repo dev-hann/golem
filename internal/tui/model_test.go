@@ -921,3 +921,28 @@ func TestToolBlock_ClickParityWithRenderedRows(t *testing.T) {
 		}
 	}
 }
+
+func TestLayout_HeightConstantWithAndWithoutStatus(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+
+	idle := strings.Count(m.View(), "\n") + 1
+
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.ToolCallStart{
+		Type: golemclient.TypeToolCallStart, CallID: "c1", Tool: "bash",
+		Args: []byte(`{"command":"go test ./..."}`),
+	})
+
+	if active := strings.Count(m.View(), "\n") + 1; active != idle {
+		t.Errorf("layout height changed: idle=%d active=%d", idle, active)
+	}
+
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+	m = deliver(t, m, golemclient.UserMessage{Type: golemclient.TypeUserMessage, Text: "long question over many lines"})
+
+	if scrolled := strings.Count(m.View(), "\n") + 1; scrolled != idle {
+		t.Errorf("layout height changed with sticky header: idle=%d sticky=%d", idle, scrolled)
+	}
+}
