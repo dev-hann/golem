@@ -9,6 +9,7 @@ import (
 	"github.com/dev-hann/golem/internal/tui/kit"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/muesli/termenv"
 )
 
 func pickKey(s string) tea.KeyMsg {
@@ -87,14 +88,42 @@ func TestKitPicker_CancelYieldsNoSelection(t *testing.T) {
 func TestKitPicker_ViewMarksCursor(t *testing.T) {
 	t.Parallel()
 
-	p := kit.NewPicker(kit.New(kit.DefaultTheme()), "pick", []string{"a", "b"}, 1)
+	// TrueColor pins reverse video into the output so the cursor row is
+	// assertable (Ascii strips every escape).
+	p := kit.NewPicker(
+		kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor)),
+		"pick", []string{"a", "b"}, 1,
+	)
 
 	view := p.View()
-	if !strings.Contains(view, "pick") || !strings.Contains(view, "▶ b") {
-		t.Errorf("view missing title or cursor:\n%s", view)
+	if !strings.Contains(view, "pick") {
+		t.Errorf("view missing title:\n%s", view)
 	}
-	if strings.Contains(view, "▶ a") {
-		t.Errorf("wrong cursor marked:\n%s", view)
+
+	for _, line := range strings.Split(view, "\n") {
+		if !strings.Contains(line, "b") {
+			continue
+		}
+
+		if !strings.Contains(line, "\x1b[7") {
+			t.Errorf("cursor row must carry reverse video:\n%q", line)
+		}
+
+		if !strings.Contains(line, " b ") {
+			t.Errorf("cursor row keeps its gutter padding around the item:\n%q", line)
+		}
+
+		break
+	}
+
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "a") && strings.Contains(line, "\x1b[7") {
+			t.Errorf("wrong cursor marked:\n%s", view)
+		}
+	}
+
+	if strings.Contains(view, "▶") {
+		t.Errorf("picker rows must not carry a cursor arrow:\n%s", view)
 	}
 }
 

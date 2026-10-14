@@ -353,8 +353,8 @@ func TestModel_SessionPickerListsAndSwitches(t *testing.T) {
 	if m.mode != modeSessions {
 		t.Fatalf("mode = %v, want sessions picker", m.mode)
 	}
-	if line := pickerLine(m.View(), "a"); !strings.Contains(line, "▶") {
-		t.Errorf("picker cursor row missing:\n%s", m.View())
+	if m.pickIndex != 0 {
+		t.Errorf("pickIndex = %d, want the cursor on the first row", m.pickIndex)
 	}
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -447,8 +447,8 @@ func TestModel_SessionPickerMarksCurrentSession(t *testing.T) {
 	if m.pickIndex != 0 {
 		t.Errorf("pickIndex = %d, want 0 (cursor starts on the current session)", m.pickIndex)
 	}
-	if line := pickerLine(view, "This one"); !strings.Contains(line, "▶") {
-		t.Errorf("cursor must sit on the current session row, got %q", line)
+	if strings.Contains(ansi.Strip(view), "▶") {
+		t.Errorf("picker rows must not carry a cursor arrow (reverse video is the cursor):\n%s", view)
 	}
 }
 
@@ -543,6 +543,67 @@ func TestModel_SessionPickerLocalTurnOverridesStaleBusyFlag(t *testing.T) {
 
 	if spinnerIn(ansi.Strip(m.View()), "Mine") {
 		t.Errorf("stale busy flag must not spin the idle local session:\n%s", m.View())
+	}
+}
+
+// TestModel_SessionPickerCursorDoesNotShiftRows verifies moving the
+// cursor is a pure highlight change: every picker row keeps its exact
+// rendered width (no arrow prefix swelling the selected row, no panel
+// re-centering shake).
+func TestModel_SessionPickerCursorDoesNotShiftRows(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 80, 30)
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "Alpha task", Cwd: "/a"},
+			{ID: "s2", Title: "Beta task with a much much longer title", Cwd: "/b"},
+			{ID: "s3", Title: "Gamma", Cwd: "/c"},
+		},
+	})
+
+	// rowCells maps each title to (line width, text offset) — both must
+	// survive a cursor move untouched.
+	rowCells := func(m Model) map[string][2]int {
+		cells := map[string][2]int{}
+		for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+			for _, title := range []string{"Alpha", "Beta", "Gamma"} {
+				if at := strings.Index(line, title); at >= 0 {
+					cells[title] = [2]int{len([]rune(line)), at}
+				}
+			}
+		}
+
+		return cells
+	}
+
+	before := rowCells(m)
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	after := rowCells(m)
+
+	if len(before) != 3 || len(after) != 3 {
+		t.Fatalf("rows not found: before=%v after=%v", before, after)
+	}
+
+	for title, cell := range before {
+		got := after[title]
+		if got[0] != cell[0] {
+			t.Errorf("row %q width changed with the cursor moved: %d -> %d (panel shake)",
+				title, cell[0], got[0])
+		}
+
+		if got[1] != cell[1] {
+			t.Errorf("row %q text shifted with the cursor moved: offset %d -> %d",
+				title, cell[1], got[1])
+		}
+	}
+
+	if strings.Contains(ansi.Strip(m.View()), "▶") {
+		t.Errorf("picker rows must not carry a cursor arrow:\n%s", m.View())
 	}
 }
 

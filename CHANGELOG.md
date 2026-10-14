@@ -57,6 +57,12 @@ config schema may change without notice.
   generation-guarded so a closed picker's ticks drop); for the current
   session the client's own turn state wins over the (possibly stale) list
   snapshot, other sessions use the server's flag.
+- The cursor arrow (`▶`) is gone from every list — session picker, model
+  picker, command palette, kit.Picker, and the wizard's numbered
+  fallback. The cursor is reverse video alone, and every row now renders
+  in one shared gutter (`kit.Row`: one flanking cell, cursor row and
+  plain rows alike), so moving the cursor highlights without shifting a
+  single cell — the panel no longer re-widths and re-centers per move.
 
 ### Added
 

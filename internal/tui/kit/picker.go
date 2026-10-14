@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/x/ansi"
 )
 
 // Picker is a list selector model rendered through the kit theme.
@@ -71,28 +70,15 @@ func (p *Picker) SetWidth(width int) {
 	p.width = width
 }
 
-// selectionPad is the one space Selection() adds on each flank of the
-// cursor row.
-const selectionPad = 2
-
-// row renders one capped row: the cap accounts for the marker prefix
-// (and the cursor row's Selection padding) so the whole row stays within
-// width. A zero cap disables truncation.
-func (p *Picker) row(marker, text string) string {
-	inner := p.width
-	if inner > 0 {
-		inner -= ansi.StringWidth(marker)
+// row renders one capped row in the shared gutter: truncation counts
+// the gutter cells so every row spans the same width whether or not
+// the cursor highlights it.
+func (p *Picker) row(text string, selected bool) string {
+	if inner := p.width - 2*RowGutter; inner > 0 {
+		text = truncateTo(text, inner)
 	}
 
-	if p.kit != nil && inner > 0 {
-		inner -= selectionPad
-	}
-
-	if inner < 1 {
-		return marker + text
-	}
-
-	return marker + truncateTo(text, inner)
+	return p.kit.Row(text, selected)
 }
 
 // View implements tea.Model.
@@ -108,14 +94,7 @@ func (p *Picker) View() string {
 	body.WriteString("\n")
 
 	for i, item := range p.Items {
-		if i == p.Cursor {
-			body.WriteString(p.kit.Selection(p.row("▶ ", item)))
-			body.WriteString("\n")
-
-			continue
-		}
-
-		body.WriteString(p.row("  ", item))
+		body.WriteString(p.row(item, i == p.Cursor))
 		body.WriteString("\n")
 	}
 

@@ -346,14 +346,7 @@ func pickModelFromList(
 	fmt.Fprintln(out, k.Title(titleFor(id, listed))) //nolint:errcheck // terminal output
 
 	for i, m := range listed {
-		line := fmt.Sprintf("%2d) %s", i+1, m)
-		if i == cursor {
-			fmt.Fprintln(out, k.Selection("▶ "+line)) //nolint:errcheck // terminal output
-
-			continue
-		}
-
-		fmt.Fprintln(out, "  "+line) //nolint:errcheck // terminal output
+		fmt.Fprintln(out, k.Row(fmt.Sprintf("%2d) %s", i+1, m), i == cursor)) //nolint:errcheck // terminal output
 	}
 
 	fmt.Fprint(out, k.Prompt( //nolint:errcheck // terminal output

@@ -617,13 +617,7 @@ func (m Model) commandBody() string {
 
 	for i, c := range cmds {
 		row := fmt.Sprintf("%-13s %s", c.name, c.keys)
-		if i == m.cmdCursor {
-			fmt.Fprintf(&b, "%s\n", m.kit.Selection("▶ "+row)) //nolint:errcheck // strings.Builder
-
-			continue
-		}
-
-		fmt.Fprintf(&b, "  %s\n", row) //nolint:errcheck // strings.Builder
+		fmt.Fprintf(&b, "%s\n", m.kit.Row(row, i == m.cmdCursor)) //nolint:errcheck // strings.Builder
 	}
 
 	b.WriteString("\n" + m.kit.Prompt("› "+m.cmdQuery+"_") + "\n")
@@ -1484,13 +1478,7 @@ func (m Model) modelsBody() string {
 	var b strings.Builder
 
 	for i, model := range m.models {
-		if i == m.modelCursor {
-			fmt.Fprintf(&b, "%s\n", m.kit.Selection("▶ "+model)) //nolint:errcheck // strings.Builder
-
-			continue
-		}
-
-		fmt.Fprintf(&b, "  %s\n", model) //nolint:errcheck // strings.Builder
+		fmt.Fprintf(&b, "%s\n", m.kit.Row(model, i == m.modelCursor)) //nolint:errcheck // strings.Builder
 	}
 
 	b.WriteString(m.kit.DimLine("↑↓ select · enter apply · esc cancel"))
@@ -1512,19 +1500,13 @@ func (m Model) sessionsBody() string {
 	}
 
 	for i, s := range filtered {
-		if i == m.pickIndex {
-			row := m.sessionRow(s, time.Now(), m.sessRowWidth())
+		row := m.sessionRow(s, time.Now(), m.sessRowWidth())
 
-			if m.sessRenaming {
-				row = m.kit.Prompt("› " + m.sessRenameText + "_")
-			}
-
-			fmt.Fprintf(&b, "%s\n", m.kit.Selection("▶ "+row)) //nolint:errcheck // strings.Builder
-
-			continue
+		if i == m.pickIndex && m.sessRenaming {
+			row = m.kit.Prompt("› " + m.sessRenameText + "_")
 		}
 
-		fmt.Fprintf(&b, "  %s\n", m.sessionRow(s, time.Now(), m.sessRowWidth())) //nolint:errcheck // strings.Builder
+		fmt.Fprintf(&b, "%s\n", m.kit.Row(row, i == m.pickIndex)) //nolint:errcheck // strings.Builder
 	}
 
 	b.WriteString("\n" + m.kit.DimLine("type to filter · ctrl+r rename · enter open · esc cancel"))
@@ -1541,22 +1523,21 @@ const (
 	sessAgeGap     = 2 // spaces between title and age
 )
 
-// sessRowWidth is the cell budget one picker row may span. The modal
-// caps its body at vp.Width minus the frame; the widest row is the
-// highlighted one, whose Selection padding and cursor prefix eat four
-// cells every other row must reserve to keep the columns aligned. The
-// floor keeps a narrow terminal readable.
+// sessRowWidth is the cell budget one picker row may span: the modal
+// body's inner width (viewport minus the frame) minus the shared
+// two-cell gutter (one on each flank, every row alike). The floor keeps
+// a narrow terminal readable.
 func (m Model) sessRowWidth() int {
-	return max(m.vp.Width-modalChromeTotal-sessCursorCols, 20)
+	return max(m.vp.Width-modalChromeTotal-sessGutterCols, 20)
 }
 
 // modalChromeTotal mirrors kit's modal frame cost (two border columns
 // plus horizontal padding on both flanks) for width budgeting here.
 const modalChromeTotal = 6
 
-// sessCursorCols is the selection padding (one cell each side) plus the
-// cursor prefix the highlighted row spends before its columns.
-const sessCursorCols = 4
+// sessGutterCols is the gutter every row spends: one cell per flank
+// (kit.RowGutter), cursor row and plain rows alike.
+const sessGutterCols = 2 * kit.RowGutter
 
 // sessionRow renders one picker row as aligned visual columns —
 //
