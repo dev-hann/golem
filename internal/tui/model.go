@@ -48,6 +48,8 @@ type Model struct {
 	sessions       []golemclient.SessionSummary
 	pickIndex      int
 	sessQuery      string
+	sessSpinFrame  int // picker spinner frame (braille loader for live turns)
+	sessTickGen    int // spinner ticker generation (stale-tick guard)
 	sessRenaming   bool
 	sessRenameText string
 	vp             viewport.Model
@@ -177,6 +179,43 @@ type leaderTimeoutMsg struct{ gen int }
 // since it was armed) cannot resurrect the timer.
 type statusTickMsg struct{ gen int }
 
+// sessTickMsg advances the session picker's spinner frame; gen guards
+// against a stale tick from a previously opened picker.
+type sessTickMsg struct{ gen int }
+
+// sessTickInterval is the session picker's spinner animation rate —
+// fast enough to read as motion, slow enough not to churn redraws.
+const sessTickInterval = 100 * time.Millisecond
+
+// armSessTick schedules the picker spinner's next frame.
+func armSessTick(gen int) tea.Cmd {
+	return tea.Tick(sessTickInterval, func(time.Time) tea.Msg {
+		return sessTickMsg{gen: gen}
+	})
+}
+
+// statusTick advances the status line's clock while its turn runs; a
+// stale generation tick is dropped.
+func (m Model) statusTick(msg statusTickMsg) (tea.Model, tea.Cmd) {
+	if m.turnActive && m.statusGen == msg.gen {
+		return m, armStatus(m.statusGen)
+	}
+
+	return m, nil
+}
+
+// sessTick advances the picker spinner: only an open picker animates —
+// a tick from a closed one (or a stale generation) is dropped.
+func (m Model) sessTick(msg sessTickMsg) (tea.Model, tea.Cmd) {
+	if m.mode == modeSessions && m.sessTickGen == msg.gen {
+		m.sessSpinFrame++
+
+		return m, armSessTick(m.sessTickGen)
+	}
+
+	return m, nil
+}
+
 // statusTickInterval is how often the status line's clock re-renders
 // while a turn is active.
 const statusTickInterval = time.Second
@@ -225,11 +264,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 
 		return m, nil
 	case statusTickMsg:
-		if m.turnActive && m.statusGen == msg.gen {
-			return m, armStatus(m.statusGen)
-		}
-
-		return m, nil
+		return m.statusTick(msg)
+	case sessTickMsg:
+		return m.sessTick(msg)
 	case tea.MouseMsg:
 		m.handleMouse(msg)
 
@@ -1083,7 +1120,7 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.lastUsage = e.Usage
 		m.endTurn()
 	case golemclient.SessionList:
-		m.applySessionList(e)
+		tick = m.applySessionList(e)
 	case golemclient.SessionTitle:
 		if i := chosenIndex(m.sessions, e.Session); i >= 0 {
 			m.sessions[i].Title = e.Title
@@ -1121,8 +1158,9 @@ func (m *Model) endTurn() {
 
 // applySessionList stores a session list and, when it was explicitly
 // requested, opens the picker on it with fresh search state, the cursor
-// starting on the session this client is in.
-func (m *Model) applySessionList(e golemclient.SessionList) {
+// starting on the session this client is in. Opening arms the spinner
+// ticker; closing the picker orphans its generation (stale ticks drop).
+func (m *Model) applySessionList(e golemclient.SessionList) tea.Cmd {
 	m.sessions = e.Sessions
 
 	m.sessQuery = ""
@@ -1133,7 +1171,28 @@ func (m *Model) applySessionList(e golemclient.SessionList) {
 	if m.listRequest {
 		m.listRequest = false
 		m.mode = modeSessions
+
+		if anyRunning(m) {
+			m.sessSpinFrame = 0
+			m.sessTickGen++
+
+			return armSessTick(m.sessTickGen)
+		}
 	}
+
+	return nil
+}
+
+// anyRunning reports whether any listed session has a live turn — the
+// cue to spend ticks on the picker's spinner.
+func anyRunning(m *Model) bool {
+	for _, s := range m.sessions {
+		if m.sessionRunning(s) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // cursorOnSession prepositions the picker cursor on the current session;
@@ -1409,7 +1468,7 @@ func (m Model) sessionsBody() string {
 
 	for i, s := range filtered {
 		if i == m.pickIndex {
-			row := m.sessionRow(s, time.Now())
+			row := m.sessionRow(s, time.Now(), m.sessRowWidth())
 
 			if m.sessRenaming {
 				row = m.kit.Prompt("› " + m.sessRenameText + "_")
@@ -1420,7 +1479,7 @@ func (m Model) sessionsBody() string {
 			continue
 		}
 
-		fmt.Fprintf(&b, "  %s\n", m.sessionRow(s, time.Now())) //nolint:errcheck // strings.Builder
+		fmt.Fprintf(&b, "  %s\n", m.sessionRow(s, time.Now(), m.sessRowWidth())) //nolint:errcheck // strings.Builder
 	}
 
 	b.WriteString("\n" + m.kit.DimLine("type to filter · ctrl+r rename · enter open · esc cancel"))
@@ -1428,11 +1487,41 @@ func (m Model) sessionsBody() string {
 	return b.String()
 }
 
-// sessionRow renders one picker row: the title (or the working directory
-// while untitled), its date, and status markers — · current for the
-// session this client is in, · running when a turn is live in it. The
-// raw session id never shows.
-func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time) string {
+// Session-row geometry: the current-session bar (one cell plus a space),
+// the status column (the spinner glyph or its blank), the title gap
+// before the right-aligned age, and the row indent under the cursor.
+const (
+	sessBarCols    = 2 // "▎ "
+	sessStatusCols = 2 // glyph + space
+	sessAgeGap     = 2 // spaces between title and age
+)
+
+// sessRowWidth is the cell budget one picker row may span. The modal
+// caps its body at vp.Width minus the frame; the widest row is the
+// highlighted one, whose Selection padding and cursor prefix eat four
+// cells every other row must reserve to keep the columns aligned. The
+// floor keeps a narrow terminal readable.
+func (m Model) sessRowWidth() int {
+	return max(m.vp.Width-modalChromeTotal-sessCursorCols, 20)
+}
+
+// modalChromeTotal mirrors kit's modal frame cost (two border columns
+// plus horizontal padding on both flanks) for width budgeting here.
+const modalChromeTotal = 6
+
+// sessCursorCols is the selection padding (one cell each side) plus the
+// cursor prefix the highlighted row spends before its columns.
+const sessCursorCols = 4
+
+// sessionRow renders one picker row as aligned visual columns —
+//
+//	▎ ⠋ Fix auth middleware    2h ago
+//
+// the bar marks the session this client is in, the spinner (animated by
+// sessTickMsg) marks a live turn, and the dim age stays right. No text
+// markers: state reads from color and glyphs, not words. The raw
+// session id never shows.
+func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time, width int) string {
 	name := s.Title
 
 	if name == "" {
@@ -1443,21 +1532,27 @@ func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time) string {
 		}
 	}
 
-	row := name
-
+	bar := strings.Repeat(" ", sessBarCols)
 	if s.ID == m.sessionID {
-		row += " · current"
+		bar = m.kit.Marker(kit.User, "▎ ")
 	}
 
+	status := strings.Repeat(" ", sessStatusCols)
 	if m.sessionRunning(s) {
-		row += " · running"
+		status = m.kit.Spinner(m.sessSpinFrame) + " "
 	}
 
+	age := ""
 	if rel, ok := relTime(now, s.LastActive); ok {
-		row += " · " + rel
+		age = rel
 	}
 
-	return row
+	// The title absorbs truncation: fixed columns (bar, status, age)
+	// never lose cells to a long title.
+	titleCols := max(width-sessBarCols-sessStatusCols-len(age)-sessAgeGap, 1)
+	name = ansi.Truncate(name, titleCols, "…")
+
+	return bar + status + name + strings.Repeat(" ", sessAgeGap) + m.kit.DimLine(age)
 }
 
 // sessionRunning reports whether a turn is live in the listed session.

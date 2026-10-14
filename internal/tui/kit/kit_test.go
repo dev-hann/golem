@@ -462,3 +462,51 @@ func TestKit_OverlayModalWiderThanScreen(t *testing.T) {
 		t.Errorf("modal content truncated away:\n%s", placed)
 	}
 }
+
+// TestKit_SpinnerCyclesFrames verifies the spinner renders its frame
+// sequence cyclically (negative and past-end frames wrap, not panic) in
+// the accent token's color.
+func TestKit_SpinnerCyclesFrames(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+
+	got := make([]string, 0, len(kit.SpinnerFrames)+2)
+	for i := range len(kit.SpinnerFrames) + 1 {
+		got = append(got, k.Spinner(i))
+	}
+
+	if got[0] != got[len(kit.SpinnerFrames)] {
+		t.Errorf("frame %d = %q, want the cycle to wrap to frame 0 (%q)",
+			len(kit.SpinnerFrames), got[len(kit.SpinnerFrames)], got[0])
+	}
+
+	for i, frame := range got[:len(kit.SpinnerFrames)] {
+		if !strings.Contains(frame, kit.SpinnerFrames[i]) {
+			t.Errorf("Spinner(%d) = %q, want it to render frame %q", i, frame, kit.SpinnerFrames[i])
+		}
+	}
+
+	if plain := k.Spinner(-1); plain == "" {
+		t.Error("Spinner(-1) must not be empty (frames wrap, not fail)")
+	}
+}
+
+// TestKit_SpinnerColoredPerProfile verifies the spinner glyph carries the
+// accent color on color terminals and degrades to the bare glyph on
+// NO_COLOR (ascii) ones.
+func TestKit_SpinnerColoredPerProfile(t *testing.T) {
+	t.Parallel()
+
+	glyph := kit.SpinnerFrames[0]
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+	if !strings.Contains(k.Spinner(0), "\x1b[") {
+		t.Errorf("truecolor spinner = %q, want ANSI styling", k.Spinner(0))
+	}
+
+	k = kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	if got := k.Spinner(0); got != glyph {
+		t.Errorf("ascii spinner = %q, want the bare glyph %q", got, glyph)
+	}
+}

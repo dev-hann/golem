@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/dev-hann/golem/internal/tui/kit"
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
@@ -352,8 +353,8 @@ func TestModel_SessionPickerListsAndSwitches(t *testing.T) {
 	if m.mode != modeSessions {
 		t.Fatalf("mode = %v, want sessions picker", m.mode)
 	}
-	if !strings.Contains(m.View(), "▶ a") {
-		t.Errorf("picker rows missing:\n%s", m.View())
+	if line := pickerLine(m.View(), "a"); !strings.Contains(line, "▶") {
+		t.Errorf("picker cursor row missing:\n%s", m.View())
 	}
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
@@ -395,17 +396,23 @@ func TestModel_SessionPickerShowsTitleAndRelativeTime(t *testing.T) {
 		}},
 	})
 
-	view := m.View()
-	if !strings.Contains(view, "Fix auth middleware · 2h ago") {
-		t.Errorf("picker row should show title and date only:\n%s", view)
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "Fix auth middleware") || !strings.Contains(plain, "2h ago") {
+		t.Errorf("picker row should show the title and its relative age:\n%s", plain)
 	}
 
-	if strings.Contains(view, "golem · 3 turns") {
-		t.Errorf("dir and turns are noise on the row:\n%s", view)
+	for _, line := range strings.Split(plain, "\n") {
+		if strings.Contains(line, "Fix auth middleware") && strings.Contains(line, "·") {
+			t.Errorf("picker rows carry visual markers now — no · separators:\n%s", line)
+		}
 	}
 
-	if strings.Contains(view, "01JTESTSESSIONID") {
-		t.Errorf("raw session id must not render when a title exists:\n%s", view)
+	if strings.Contains(plain, "golem · 3 turns") || strings.Contains(plain, "3 turns") {
+		t.Errorf("dir and turns are noise on the row:\n%s", plain)
+	}
+
+	if strings.Contains(plain, "01JTESTSESSIONID") {
+		t.Errorf("raw session id must not render when a title exists:\n%s", plain)
 	}
 }
 
@@ -428,17 +435,20 @@ func TestModel_SessionPickerMarksCurrentSession(t *testing.T) {
 	})
 
 	view := m.View()
-	if !strings.Contains(view, "This one · current") {
-		t.Errorf("picker must mark the client's session as current:\n%s", view)
+	if n := strings.Count(ansi.Strip(view), "▎"); n != 1 {
+		t.Errorf("current-session bar must mark exactly one row, got %d:\n%s", n, view)
 	}
-	if strings.Contains(view, "Another · current") {
-		t.Errorf("only the client's session may carry the current marker:\n%s", view)
+	if line := pickerLine(view, "This one"); !strings.Contains(line, "▎") {
+		t.Errorf("picker must bar-mark the client's session row, got %q", line)
+	}
+	if line := pickerLine(view, "Another"); strings.Contains(line, "▎") {
+		t.Errorf("only the client's session may carry the bar, got %q", line)
 	}
 	if m.pickIndex != 0 {
 		t.Errorf("pickIndex = %d, want 0 (cursor starts on the current session)", m.pickIndex)
 	}
-	if !strings.Contains(view, "▶ This one") {
-		t.Errorf("cursor must sit on the current session row:\n%s", view)
+	if line := pickerLine(view, "This one"); !strings.Contains(line, "▶") {
+		t.Errorf("cursor must sit on the current session row, got %q", line)
 	}
 }
 
@@ -460,26 +470,59 @@ func TestModel_SessionPickerShowsRunningStatus(t *testing.T) {
 		},
 	})
 
-	view := m.View()
-	if !strings.Contains(view, "Elsewhere · running") {
-		t.Errorf("server-reported busy session must show · running:\n%s", view)
+	// Server-reported busy sessions carry the spinner glyph.
+	plain := ansi.Strip(m.View())
+	if !strings.Contains(plain, "Elsewhere") || !spinnerIn(plain, "Elsewhere") {
+		t.Errorf("busy session row must carry a spinner glyph:\n%s", plain)
+	}
+	if spinnerIn(plain, "Mine") {
+		t.Errorf("idle current session must not carry a spinner:\n%s", plain)
 	}
 
-	// A local turn active in this client's session shows running even
-	// when the list snapshot predates the turn.
+	// A local turn active in this client's session spins even when the
+	// list snapshot predates the turn.
 	m = deliver(t, m, golemclient.TurnStart{
 		Type: golemclient.TypeTurnStart, Session: "s1", Turn: "t1",
 		Provider: "zai", Model: "glm-5.3",
 	})
-	if !strings.Contains(m.View(), "Mine · current · running") {
-		t.Errorf("locally active session must show · running:\n%s", m.View())
+	plain = ansi.Strip(m.View())
+	if !spinnerIn(plain, "Mine") {
+		t.Errorf("locally active session row must carry a spinner:\n%s", plain)
 	}
 
 	// Turn end clears it.
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd, Session: "s1", Turn: "t1"})
-	if strings.Contains(m.View(), "Mine · current · running") {
-		t.Errorf("turn end must clear the local running marker:\n%s", m.View())
+	if spinnerIn(ansi.Strip(m.View()), "Mine") {
+		t.Errorf("turn end must clear the spinner:\n%s", m.View())
 	}
+}
+
+// pickerLine returns the picker row containing title ("" when absent),
+// ANSI-stripped — assertions target the row, not the whole view.
+func pickerLine(view, title string) string {
+	for _, line := range strings.Split(ansi.Strip(view), "\n") {
+		if strings.Contains(line, title) {
+			return line
+		}
+	}
+
+	return ""
+}
+
+// spinnerIn reports whether the row containing title carries a spinner
+// frame glyph in its status column.
+func spinnerIn(plainView, title string) bool {
+	for _, line := range strings.Split(plainView, "\n") {
+		if strings.Contains(line, title) {
+			for _, frame := range kit.SpinnerFrames {
+				if strings.Contains(line, frame) {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
 }
 
 // TestModel_SessionPickerLocalTurnOverridesStaleBusyFlag verifies that
@@ -498,8 +541,70 @@ func TestModel_SessionPickerLocalTurnOverridesStaleBusyFlag(t *testing.T) {
 		Sessions: []golemclient.SessionSummary{{ID: "s1", Title: "Mine", Cwd: "/a", Busy: true}},
 	})
 
-	if strings.Contains(m.View(), "running") {
-		t.Errorf("stale busy flag must not mark the idle local session running:\n%s", m.View())
+	if spinnerIn(ansi.Strip(m.View()), "Mine") {
+		t.Errorf("stale busy flag must not spin the idle local session:\n%s", m.View())
+	}
+}
+
+// TestModel_SessionPickerSpinnerTicks verifies the picker's spinner
+// animates: a tick advances the frame, and ticks stop mattering once the
+// picker closes (a stale-generation tick is ignored).
+func TestModel_SessionPickerSpinnerTicks(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s2", Title: "Elsewhere", Cwd: "/b", Turns: 2, Busy: true},
+		},
+	})
+
+	// The row spins from frame 0 while the picker is open.
+	if !strings.Contains(ansi.Strip(m.View()), kit.SpinnerFrames[0]) {
+		t.Errorf("picker spinner must start at frame 0:\n%s", m.View())
+	}
+
+	next, _ := m.Update(sessTickMsg{gen: m.sessTickGen})
+	m2 := next.(Model)
+	if m2.sessSpinFrame != 1 {
+		t.Errorf("sessSpinFrame after tick = %d, want 1", m2.sessSpinFrame)
+	}
+	if !strings.Contains(ansi.Strip(m2.View()), kit.SpinnerFrames[1]) {
+		t.Errorf("picker spinner must advance to frame 1:\n%s", m2.View())
+	}
+
+	// A stale-generation tick (picker reopened since) must not advance.
+	next, _ = m2.Update(sessTickMsg{gen: m2.sessTickGen + 5})
+	if got := next.(Model).sessSpinFrame; got != 1 {
+		t.Errorf("stale tick advanced the frame to %d, want it ignored", got)
+	}
+}
+
+// TestModel_SessionPickerSpinnerStopsWhenClosed verifies the spinner
+// frame stops advancing once the picker closed (no animation while the
+// chat view owns the screen).
+func TestModel_SessionPickerSpinnerStopsWhenClosed(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s2", Title: "Elsewhere", Cwd: "/b", Turns: 2, Busy: true},
+		},
+	})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // opens the session, closes the picker
+
+	next, _ := m.Update(sessTickMsg{gen: m.sessTickGen})
+	if got := next.(Model).sessSpinFrame; got != 0 {
+		t.Errorf("tick advanced a closed picker's frame to %d, want it ignored", got)
 	}
 }
 

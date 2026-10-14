@@ -82,6 +82,18 @@ func (k *Kit) Marker(token Token, glyph string) string {
 	return k.styles[token].Render(glyph)
 }
 
+// SpinnerFrames is the braille spinner's frame sequence (⠋⠙⠹…) — one
+// glyph per render tick while a turn runs.
+var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// Spinner renders the spinner's frame (any int; the sequence cycles) in
+// the accent token's color — a live-turn marker that needs no words.
+func (k *Kit) Spinner(frame int) string {
+	n := len(SpinnerFrames)
+
+	return k.Marker(Accent, SpinnerFrames[((frame%n)+n)%n])
+}
+
 // --- structure ---------------------------------------------------------
 
 // Title renders a section title.
