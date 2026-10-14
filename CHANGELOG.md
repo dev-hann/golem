@@ -7,6 +7,16 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — screen padding (2026-10-14)
+
+- The chat screen now sits inside a padding margin instead of touching
+  the terminal edges: two blank columns each side, one blank row top and
+  bottom, and one blank row between the transcript and the composer. The
+  viewport and composer shrink by exactly that chrome (plus the status
+  row) so the screen still fills the terminal height (no alt-screen
+  jitter); mouse selection and tool-row clicks track the shifted
+  transcript origin.
+
 ### Removed — no 50-round turn cap (2026-10-14)
 
 - Turns are no longer capped at 50 tool rounds (`max tool rounds (50)

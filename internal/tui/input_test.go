@@ -108,8 +108,8 @@ func TestInput_HeightGrowsWithSoftWrap(t *testing.T) {
 		want  int
 	}{
 		{"short line stays one row", 40, "hello", 1},
-		{"long single line wraps by columns", 40, strings.Repeat("a", 100), 3}, // usable 36
-		{"hangul wraps nine syllables per row", 24, strings.Repeat("가", 40), 5},
+		{"long single line wraps by columns", 40, strings.Repeat("a", 100), 4}, // usable 32
+		{"hangul wraps fewer syllables per row", 24, strings.Repeat("가", 40), 6},
 		{"word boundary moves whole words", 12, "aaaaaaaaaa bbbbbbbbbb", 2},
 		{"explicit newline plus wrap", 12, "aaaa\n" + strings.Repeat("b", 30), 3},
 		{"trailing space at the boundary anchors a row", 22, strings.Repeat("a", 17) + " ", 2},
@@ -144,8 +144,8 @@ func TestInput_HeightShrinksAsWrapDisappears(t *testing.T) {
 	m.input.SetValue(strings.Repeat("a", 100))
 	m.syncInputHeight()
 
-	if m.inputRows != 3 {
-		t.Fatalf("inputRows = %d, want 3 while wrapped", m.inputRows)
+	if m.inputRows != 4 {
+		t.Fatalf("inputRows = %d, want 4 while wrapped", m.inputRows)
 	}
 
 	m.input.SetValue("short")
@@ -181,13 +181,14 @@ func TestInput_WrappedCapHoldsAndRewrapOnResize(t *testing.T) {
 		t.Errorf("inputRows = %d after narrowing, want cap %d", m.inputRows, want)
 	}
 
-	// A taller terminal lifts the cap; width 38 needs 3 rows for 100 columns.
+	// A taller terminal lifts the cap; width 40 (usable 32) needs 4 rows
+	// for 100 columns.
 	m.resize(40, 30)
 	m.input.SetValue(strings.Repeat("a", 100))
 	m.syncInputHeight()
 
-	if m.inputRows != 3 {
-		t.Errorf("inputRows = %d, want 3 after rewrap", m.inputRows)
+	if m.inputRows != 4 {
+		t.Errorf("inputRows = %d, want 4 after rewrap", m.inputRows)
 	}
 }
 

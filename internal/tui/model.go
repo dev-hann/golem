@@ -977,9 +977,11 @@ func (m Model) send(event any) tea.Cmd {
 func (m *Model) resize(width, height int) {
 	m.clearSelection()
 	m.width, m.height = width, height
-	m.vp.Width = max(width, viewportMinWidth)
-	setViewportHeightKeepingFollow(&m.vp, max(height-m.inputRows-inputBorderRows-statusRows, viewportMinHeight))
-	m.input.SetWidth(max(width-inputBorderCols, viewportMinWidth))
+	m.vp.Width = max(width-2*screenPadH, viewportMinWidth)
+	setViewportHeightKeepingFollow(&m.vp, max(
+		height-m.inputRows-inputBorderRows-statusRows-layoutChromeRows, viewportMinHeight,
+	))
+	m.input.SetWidth(max(width-2*screenPadH-inputBorderCols, viewportMinWidth))
 	m.syncInputHeight()
 }
 
@@ -1006,7 +1008,9 @@ func (m *Model) syncInputHeight() {
 	m.input.SetHeight(rows)
 
 	if m.height > 0 {
-		setViewportHeightKeepingFollow(&m.vp, max(m.height-rows-inputBorderRows-statusRows, viewportMinHeight))
+		setViewportHeightKeepingFollow(&m.vp, max(
+			m.height-rows-inputBorderRows-statusRows-layoutChromeRows, viewportMinHeight,
+		))
 	}
 }
 
@@ -1027,6 +1031,21 @@ func setViewportHeightKeepingFollow(vp *viewport.Model, height int) {
 		vp.GotoBottom()
 	}
 }
+
+// Screen padding: the chat screen sits inside a margin instead of
+// touching the terminal edges. screenPadH indents both sides, screenPadV
+// blanks rows above and below, and composerGapRows separates the
+// transcript from the composer. layoutChromeRows totals the rows the
+// padding claims so the viewport can shrink by exactly that much — the
+// screen must still fill the terminal height exactly (jitter guard).
+const (
+	screenPadH = 2
+	screenPadV = 1
+
+	composerGapRows = 1
+
+	layoutChromeRows = 2*screenPadV + composerGapRows
+)
 
 // Layout minimums so tiny terminals still render.
 const (
@@ -1326,9 +1345,35 @@ func (m Model) layout() string {
 		edge = kit.Accent
 	}
 
+	b.WriteString("\n") // the gap between transcript and composer
 	b.WriteString(m.kit.Box(m.input.View(), edge))
 
-	return b.String()
+	return padScreen(b.String())
+}
+
+// padScreen frames the composed screen with its padding: every row gets
+// the left pad, blank rows sit above and below. The caller already
+// shrunk the viewport by layoutChromeRows so the padded result still
+// fills the terminal height exactly.
+func padScreen(body string) string {
+	pad := strings.Repeat(" ", screenPadH)
+
+	rows := strings.Split(body, "\n")
+	for i := range rows {
+		rows[i] = pad + rows[i]
+	}
+
+	blank := make([]string, screenPadV)
+	for i := range blank {
+		blank[i] = pad
+	}
+
+	out := make([]string, 0, len(rows)+2*screenPadV)
+	out = append(out, blank...)
+	out = append(out, rows...)
+	out = append(out, blank...)
+
+	return strings.Join(out, "\n")
 }
 
 // statusLine renders the agent-state strip: what the turn is doing (or
