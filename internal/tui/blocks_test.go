@@ -60,7 +60,7 @@ func TestPreview_TruncatesAtBoundary(t *testing.T) {
 
 func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 	t.Parallel()
-	got, spans := renderBlocks(testKit(), []block{
+	got, spans, _ := renderBlocks(testKit(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},
@@ -79,28 +79,28 @@ func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 
 func TestRenderBlocks_NoUserBlockNoSpans(t *testing.T) {
 	t.Parallel()
-	if _, spans := renderBlocks(testKit(), []block{{kind: blockAssistant, text: "a"}}, 80); len(spans) != 0 {
+	if _, spans, _ := renderBlocks(testKit(), []block{{kind: blockAssistant, text: "a"}}, 80); len(spans) != 0 {
 		t.Errorf("spans = %+v, want none without a user block", spans)
 	}
 }
 
 func TestRenderBlocks_BlankLineBetweenBlocks(t *testing.T) {
 	t.Parallel()
-	got, _ := renderBlocks(testKit(), []block{
+	got, _, _ := renderBlocks(testKit(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},
 	}, 80)
 	// A blank line separates the user bar from the plain assistant text;
 	// tool lines attach to the block they follow without a blank line.
-	if !strings.Contains(got, "▎ q\n\na\n  ✓ read") {
+	if !strings.Contains(got, "▎ q\n\na\n  ▸ ✓ read") {
 		t.Errorf("blocks should be separated by blank lines, tool lines attached:\n%s", got)
 	}
 }
 
 func TestRenderBlocks_TracksEveryUserBlock(t *testing.T) {
 	t.Parallel()
-	got, spans := renderBlocks(testKit(), []block{
+	got, spans, _ := renderBlocks(testKit(), []block{
 		{kind: blockUser, text: "first"},
 		{kind: blockAssistant, text: strings.Repeat("x", 100)},
 		{kind: blockUser, text: "second"},

@@ -90,31 +90,19 @@ func (k *Kit) Divider(width int) string {
 // defaultDividerWidth is used when a width is unknown.
 const defaultDividerWidth = 40
 
-// StatusBar renders a one-line status bar: dim join of parts with the
-// first part emphasized.
-func (k *Kit) StatusBar(parts ...string) string {
-	if len(parts) == 0 {
-		return ""
-	}
-
-	out := k.styles[Accent].Render(parts[0])
-	for _, part := range parts[1:] {
-		out += k.styles[Dim].Render(" · ") + part
-	}
-
-	return out
-}
-
 // Prompt renders an input prompt label (the colored "API key:" style).
 func (k *Kit) Prompt(text string) string {
 	return k.styles[Accent].Bold(true).Render(text)
 }
 
 // Box renders content inside a rounded border frame (the composer frame).
-func (k *Kit) Box(content string) string {
+// leftBorder colors the left rail — the composer's mode edge — while the
+// rest of the frame stays in the border token.
+func (k *Kit) Box(content string, leftBorder Token) string {
 	return k.r.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(k.theme.Colors[Border]).
+		BorderLeftForeground(k.theme.Colors[leftBorder]).
 		Render(content)
 }
 

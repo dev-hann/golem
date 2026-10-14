@@ -39,6 +39,26 @@ func TestInput_PlainEnterStillSubmits(t *testing.T) {
 	}
 }
 
+func TestInput_CtrlJNewline(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m.input.SetValue("first")
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+
+	if got := m.input.Value(); got != "first\n" {
+		t.Fatalf("value = %q, want newline inserted", got)
+	}
+
+	if m.inputRows != 2 {
+		t.Errorf("inputRows = %d, want 2 for two content lines", m.inputRows)
+	}
+
+	if len(fc.sent) != 0 {
+		t.Errorf("ctrl+j must not submit: %+v", fc.sent)
+	}
+}
+
 func TestInput_HeightGrowsWithContentAndResets(t *testing.T) {
 	t.Parallel()
 

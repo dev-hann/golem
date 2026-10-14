@@ -170,11 +170,28 @@ func TestKit_BoxRendersRoundedFrame(t *testing.T) {
 
 	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	boxed := k.Box("hello")
+	boxed := k.Box("hello", kit.Border)
 	for _, want := range []string{"╭", "╮", "╰", "╯", "hello"} {
 		if !strings.Contains(boxed, want) {
 			t.Errorf("box missing %q:\n%s", want, boxed)
 		}
+	}
+}
+
+func TestKit_BoxLeftRailCarriesTokenColor(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+
+	// The accent-styled rail glyph is exactly what the left edge must emit.
+	rail := k.Style(kit.Accent).Render("│")
+
+	if out := k.Box("hi", kit.Accent); !strings.Contains(out, rail) {
+		t.Errorf("left rail missing accent color:\n%q", out)
+	}
+
+	if out := k.Box("hi", kit.Border); strings.Contains(out, rail) {
+		t.Errorf("plain box leaked the accent color:\n%q", out)
 	}
 }
 
@@ -245,17 +262,6 @@ func TestKit_OverlayZeroSizeFallsBackToBase(t *testing.T) {
 	got := k.Overlay(0, 0, "the base", "M")
 	if !strings.Contains(got, "the base") || !strings.Contains(got, "M") {
 		t.Errorf("zero-size overlay = %q, want base and modal stacked", got)
-	}
-}
-
-func TestKit_StatusBarJoinsWithAccent(t *testing.T) {
-	t.Parallel()
-
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
-
-	bar := k.StatusBar("zai", "glm-5.3", "session 01J…")
-	if !strings.Contains(bar, "zai") || !strings.Contains(bar, "glm-5.3") {
-		t.Errorf("status bar lost parts: %q", bar)
 	}
 }
 
