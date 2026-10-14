@@ -92,12 +92,16 @@ type History struct {
 
 // SessionSummary is one row in SessionList.
 type SessionSummary struct {
-	ID         string `json:"id"`
-	Title      string `json:"title,omitempty"`
-	Cwd        string `json:"cwd"`
-	Created    string `json:"created"`
-	Turns      int    `json:"turns"`
+	ID      string `json:"id"`
+	Title   string `json:"title,omitempty"`
+	Cwd     string `json:"cwd"`
+	Created string `json:"created"`
+	Turns   int    `json:"turns"`
+	// LastActive is the session's most recent activity timestamp.
 	LastActive string `json:"last_active"`
+	// Busy reports a turn currently running in this session (live server
+	// state; false on idle or replay).
+	Busy bool `json:"busy"`
 }
 
 // SessionList enumerates sessions, most recently active first.

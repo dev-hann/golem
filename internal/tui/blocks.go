@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
 )
@@ -37,9 +40,17 @@ type block struct {
 // cannot flood the viewport.
 const maxResultPreview = 2000
 
+// Tool line geometry: the summary's two-space indent and the expanded
+// preview's gutter, kept aligned under the first row while wrapping.
+const (
+	toolSummaryIndent = "  "
+	toolPreviewIndent = "  │ "
+)
+
 // render turns one block into display lines through the kit theme. User
 // messages carry the left bar in the user color; assistant output stays
-// plain so the bar itself marks what the human wrote.
+// plain so the bar itself marks what the human wrote. Every text kind is
+// hard-wrapped to width so nothing depends on terminal line wrapping.
 func (b block) render(k *kit.Kit, width int) string {
 	switch b.kind {
 	case blockUser:
@@ -49,11 +60,11 @@ func (b block) render(k *kit.Kit, width int) string {
 			return k.DimLine("…")
 		}
 
-		return b.text
+		return k.WrapPlain(width, b.text)
 	case blockError:
-		return k.ErrLine(b.text)
+		return k.ErrLine(width, b.text)
 	case blockTool:
-		return b.renderTool(k)
+		return b.renderTool(k, width)
 	default:
 		return ""
 	}
@@ -62,7 +73,7 @@ func (b block) render(k *kit.Kit, width int) string {
 // renderTool renders a tool block: the summary line (chevron, status,
 // tool, parsed argument) always, plus the result preview while expanded.
 // Results hide behind a click — the transcript stays scannable.
-func (b block) renderTool(k *kit.Kit) string {
+func (b block) renderTool(k *kit.Kit, width int) string {
 	status := "…"
 
 	if b.done {
@@ -81,11 +92,25 @@ func (b block) renderTool(k *kit.Kit) string {
 	summary := fmt.Sprintf("%s %s %s %s", chevron, status, b.tool, argSummary(b.tool, b.args))
 
 	if !b.done || !b.expanded {
-		return k.ToolLine("  " + summary)
+		return k.ToolLine(indentWrap(k, width, toolSummaryIndent, summary))
 	}
 
-	return k.ToolLine("  "+summary) + "\n" +
-		k.ToolLine("  │ "+preview(b.result, maxResultPreview))
+	return k.ToolLine(indentWrap(k, width, toolSummaryIndent, summary)) + "\n" +
+		k.ToolLine(indentWrap(k, width, toolPreviewIndent, preview(b.result, maxResultPreview)))
+}
+
+// indentWrap wraps text to fit width minus the indent's cells, then
+// prefixes the indent to every resulting row so continuations stay
+// aligned under the first.
+func indentWrap(k *kit.Kit, width int, indent, text string) string {
+	inner := max(width-ansi.StringWidth(indent), 1)
+
+	lines := strings.Split(k.WrapPlain(inner, text), "\n")
+	for i, line := range lines {
+		lines[i] = indent + line
+	}
+
+	return strings.Join(lines, "\n")
 }
 
 // argSummary renders the one argument that identifies what a tool acted
@@ -123,13 +148,20 @@ func firstLine(s string) string {
 	return strings.TrimSpace(strings.SplitN(s, "\n", 2)[0])
 }
 
-// preview trims s to limit bytes with an ellipsis marker.
+// preview trims s to limit bytes with an ellipsis marker, backing off to
+// a rune boundary so multi-byte glyphs are never split.
 func preview(s string, limit int) string {
 	if len(s) <= limit {
 		return s
 	}
 
-	return s[:limit] + "…"
+	cut := limit
+
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+
+	return s[:cut] + "…"
 }
 
 // userSpan locates one user block inside the rendered transcript: the

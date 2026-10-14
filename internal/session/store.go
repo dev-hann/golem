@@ -31,6 +31,11 @@ type Session struct {
 	Created  time.Time
 	Turns    int
 	Messages []llm.Message
+
+	// FirstUserText is the session's opening user message, used by the
+	// server's title side call (and its retries — whichever turn they
+	// follow). Empty when storage holds no user message.
+	FirstUserText string
 }
 
 // Store is an append-only session store with a bounded LRU cache.
@@ -326,6 +331,7 @@ func (s *Store) load(id string) (*Session, error) {
 	sess.Messages = fold.history()
 	sess.Turns = fold.turns
 	sess.Title = fold.title
+	sess.FirstUserText = fold.firstUserText
 
 	return sess, nil
 }

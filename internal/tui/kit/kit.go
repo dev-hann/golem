@@ -46,9 +46,20 @@ func (k *Kit) ToolLine(text string) string {
 	return k.styles[Tool].Render(text)
 }
 
-// ErrLine renders an error message.
-func (k *Kit) ErrLine(text string) string {
-	return k.styles[Error].Render("error: ") + k.styles[Error].Render(text)
+// errPrefix labels every error line.
+const errPrefix = "error: "
+
+// ErrLine renders an error message. A positive width wraps the labeled
+// message to fit; width <= 0 leaves it unwrapped (callers printing to a
+// terminal without knowing its width).
+func (k *Kit) ErrLine(width int, text string) string {
+	s := errPrefix + text
+
+	if width > 0 {
+		s = k.WrapPlain(width, s)
+	}
+
+	return k.styles[Error].Render(s)
 }
 
 // OKLine renders a success message.
@@ -106,6 +117,33 @@ func (k *Kit) Box(content string, leftBorder Token) string {
 		Render(content)
 }
 
+// WrapPlain hard-wraps text so no display row exceeds width cells,
+// preserving ANSI escapes and accounting for wide glyphs (CJK). Rows
+// already within width pass through untouched; width < 1 disables
+// wrapping. Trailing spaces dropped at a wrap point never carried
+// content, so wrapped rows are trimmed right to honor the cap.
+func (k *Kit) WrapPlain(width int, text string) string {
+	if width < 1 {
+		return text
+	}
+
+	rows := make([]string, 0, strings.Count(text, "\n")+1)
+
+	for _, line := range strings.Split(text, "\n") {
+		if ansi.StringWidth(line) <= width {
+			rows = append(rows, line)
+
+			continue
+		}
+
+		for _, seg := range strings.Split(ansi.Wrap(line, width, ""), "\n") {
+			rows = append(rows, strings.TrimRight(seg, " "))
+		}
+	}
+
+	return strings.Join(rows, "\n")
+}
+
 // Bar geometry: the "▎" bar, its space, and a floor for narrow terminals.
 const (
 	barCols    = 2
@@ -117,19 +155,13 @@ const (
 // text stays in the default foreground for readability.
 func (k *Kit) MessageBar(token Token, width int, text string) string {
 	inner := max(width-barCols, minBarText)
-	lines := strings.Split(text, "\n")
 
 	bar := k.styles[token].Render("▎")
 
-	barred := make([]string, 0, len(lines))
-	for _, line := range lines {
-		if ansi.StringWidth(line) > inner {
-			line = ansi.Wrap(line, inner, "")
-		}
+	barred := make([]string, 0, 8)
 
-		for _, seg := range strings.Split(line, "\n") {
-			barred = append(barred, bar+" "+seg)
-		}
+	for _, seg := range strings.Split(k.WrapPlain(inner, text), "\n") {
+		barred = append(barred, bar+" "+seg)
 	}
 
 	return strings.Join(barred, "\n")
@@ -175,30 +207,51 @@ func truncateTo(s string, limit int) string {
 	return ansi.Truncate(s, limit, "\u2026")
 }
 
+// modalPaddingH is the modal's inner horizontal padding in cells.
+const modalPaddingH = 2
+
+// modalChrome is the frame a modal adds around its body: the two border
+// columns plus the horizontal padding on both flanks.
+const modalChrome = 2 + 2*modalPaddingH
+
 // Modal renders the shared overlay panel: a title line over a padded,
 // framed, background-filled body. Every overlay in the app (help,
 // pickers) uses this shape so their look cannot drift apart.
-func (k *Kit) Modal(title, body string) string {
+//
+// A positive width caps the panel at the terminal: body rows wrap at
+// the inner width and the title truncates. width <= 0 sizes the panel
+// to its content (callers without a terminal width).
+func (k *Kit) Modal(width int, title, body string) string {
+	if width > modalChrome {
+		inner := width - modalChrome
+		body = k.WrapPlain(inner, body)
+		title = ansi.Truncate(title, inner, "…")
+	} else {
+		width = 0
+	}
+
 	content := k.Title(title) + "\n" + strings.TrimRight(body, "\n")
 
-	width := 0
+	panel := 0
 	for _, line := range strings.Split(content, "\n") {
-		if w := ansi.StringWidth(line); w > width {
-			width = w
+		if w := ansi.StringWidth(line); w > panel {
+			panel = w
 		}
 	}
 
-	return k.r.NewStyle().
+	style := k.r.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(k.theme.Colors[Border]).
 		Background(k.theme.Colors[Bg]).
 		Padding(0, modalPaddingH).
-		Width(width + 2*modalPaddingH).
-		Render(content)
-}
+		Width(panel + 2*modalPaddingH)
 
-// modalPaddingH is the modal's inner horizontal padding in cells.
-const modalPaddingH = 2
+	if width > 0 {
+		style = style.MaxWidth(width)
+	}
+
+	return style.Render(content)
+}
 
 // Overlay merges a modal over the base view, centered, leaving the base
 // visible around it. ANSI-aware: styled base lines are cut at the modal
@@ -236,7 +289,7 @@ func (k *Kit) Overlay(width, height int, base, modal string) string {
 			continue
 		}
 
-		modalLine := modalLines[y-y0]
+		modalLine := ansi.Truncate(modalLines[y-y0], width-x0, "")
 
 		prefix := ansi.Truncate(baseLine, x0, "")
 		suffix := ansi.TruncateLeft(baseLine, x0+ansi.StringWidth(modalLine), "")

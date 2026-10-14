@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -408,6 +409,100 @@ func TestModel_SessionPickerShowsTitleAndRelativeTime(t *testing.T) {
 	}
 }
 
+// TestModel_SessionPickerMarksCurrentSession verifies the picker tags the
+// row of the session this client is in with · current and prepositions
+// the cursor on it.
+func TestModel_SessionPickerMarksCurrentSession(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "This one", Cwd: "/a", Turns: 1},
+			{ID: "s2", Title: "Another", Cwd: "/b", Turns: 2},
+		},
+	})
+
+	view := m.View()
+	if !strings.Contains(view, "This one · current") {
+		t.Errorf("picker must mark the client's session as current:\n%s", view)
+	}
+	if strings.Contains(view, "Another · current") {
+		t.Errorf("only the client's session may carry the current marker:\n%s", view)
+	}
+	if m.pickIndex != 0 {
+		t.Errorf("pickIndex = %d, want 0 (cursor starts on the current session)", m.pickIndex)
+	}
+	if !strings.Contains(view, "▶ This one") {
+		t.Errorf("cursor must sit on the current session row:\n%s", view)
+	}
+}
+
+// TestModel_SessionPickerShowsRunningStatus verifies the picker renders
+// · running for sessions the server reports busy (the flag arrives on the
+// wire) and reflects a locally active turn even when the flag is stale.
+func TestModel_SessionPickerShowsRunningStatus(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "Mine", Cwd: "/a", Turns: 1},
+			{ID: "s2", Title: "Elsewhere", Cwd: "/b", Turns: 2, Busy: true},
+		},
+	})
+
+	view := m.View()
+	if !strings.Contains(view, "Elsewhere · running") {
+		t.Errorf("server-reported busy session must show · running:\n%s", view)
+	}
+
+	// A local turn active in this client's session shows running even
+	// when the list snapshot predates the turn.
+	m = deliver(t, m, golemclient.TurnStart{
+		Type: golemclient.TypeTurnStart, Session: "s1", Turn: "t1",
+		Provider: "zai", Model: "glm-5.3",
+	})
+	if !strings.Contains(m.View(), "Mine · current · running") {
+		t.Errorf("locally active session must show · running:\n%s", m.View())
+	}
+
+	// Turn end clears it.
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd, Session: "s1", Turn: "t1"})
+	if strings.Contains(m.View(), "Mine · current · running") {
+		t.Errorf("turn end must clear the local running marker:\n%s", m.View())
+	}
+}
+
+// TestModel_SessionPickerLocalTurnOverridesStaleBusyFlag verifies that
+// for the session this client is in, the local turn state wins over the
+// busy flag snapshotted at list time: an idle local turn clears a stale
+// server busy marker.
+func TestModel_SessionPickerLocalTurnOverridesStaleBusyFlag(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type:     golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{{ID: "s1", Title: "Mine", Cwd: "/a", Busy: true}},
+	})
+
+	if strings.Contains(m.View(), "running") {
+		t.Errorf("stale busy flag must not mark the idle local session running:\n%s", m.View())
+	}
+}
+
 func TestModel_SessionPickerSearchFilters(t *testing.T) {
 	t.Parallel()
 
@@ -584,6 +679,47 @@ func TestModel_HistoryReplayRendersTranscript(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Errorf("replayed transcript missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestModel_HistoryReplayOpensAtBottom(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+
+	// Long transcript (well over the viewport height), bookended by
+	// markers only visible from one end.
+	const deltaLines = 300
+	raw := make([]json.RawMessage, 0, deltaLines+3)
+	raw = append(raw,
+		json.RawMessage(`{"type":"user_message","session":"s1","text":"old question"}`),
+		json.RawMessage(`{"type":"text_delta","session":"s1","delta":"head-marker\n"}`),
+	)
+	for range deltaLines {
+		raw = append(raw, json.RawMessage(
+			`{"type":"text_delta","session":"s1","delta":"`+strings.Repeat("x", 60)+`\n"}`,
+		))
+	}
+	raw = append(raw, json.RawMessage(
+		`{"type":"text_delta","session":"s1","delta":"tail-marker\n"}`,
+	))
+
+	m = deliver(t, m, golemclient.History{Type: golemclient.TypeHistory, Session: "s1", Events: raw})
+
+	if !m.follow {
+		t.Error("history replay should restore auto-follow (open at the bottom)")
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "tail-marker") {
+		t.Errorf("replayed transcript should open showing its tail:\n%s", view)
+	}
+	// Content cannot distinguish top from bottom here (the x block fills
+	// both ends and the sticky header pins the opening question by
+	// design), so assert the scroll position itself.
+	if !m.vp.AtBottom() {
+		t.Errorf("history replay should open at the bottom: YOffset=%d height=%d",
+			m.vp.YOffset, m.vp.Height)
 	}
 }
 
@@ -944,5 +1080,95 @@ func TestLayout_HeightConstantWithAndWithoutStatus(t *testing.T) {
 
 	if scrolled := strings.Count(m.View(), "\n") + 1; scrolled != idle {
 		t.Errorf("layout height changed with sticky header: idle=%d sticky=%d", idle, scrolled)
+	}
+}
+
+func TestModalViews_FitTerminalWidth(t *testing.T) {
+	t.Parallel()
+
+	long := strings.Repeat("session-title-", 8)
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) Model
+		width int
+	}{
+		{
+			name: "command palette with long query",
+			setup: func(t *testing.T) Model {
+				t.Helper()
+
+				m, _ := wired(t)
+				m = resize(m, 40, 20)
+				m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+				m = key(t, m, rkey('n'))
+				m = key(t, m, rkey('e'))
+				m = key(t, m, rkey('w'))
+
+				return m
+			},
+			width: 40,
+		},
+		{
+			name: "model picker with long ids",
+			setup: func(t *testing.T) Model {
+				t.Helper()
+
+				m, _ := wired(t)
+				m = resize(m, 36, 20)
+				m = m.WithModels([]string{
+					"provider/" + strings.Repeat("long-model-name/", 4),
+					"short",
+				})
+				m = deliver(t, m, golemclient.TurnStart{
+					Type: golemclient.TypeTurnStart, Provider: "p", Model: "short",
+				})
+				m = arm(m)
+				m = key(t, m, rkey('m'))
+
+				return m
+			},
+			width: 36,
+		},
+		{
+			name: "session picker with long titles and rename input",
+			setup: func(t *testing.T) Model {
+				t.Helper()
+
+				m, _ := wired(t)
+				m = resize(m, 38, 24)
+				m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+				m = arm(m)
+				m = key(t, m, rkey('l'))
+				m = deliver(t, m, golemclient.SessionList{
+					Type: golemclient.TypeSessionList,
+					Sessions: []golemclient.SessionSummary{
+						{ID: "s1", Title: long, Cwd: "/work/very/deeply/nested/project/directory"},
+						{ID: "s2", Title: long + "-second", LastActive: "2025-01-01T00:00:00Z"},
+					},
+				})
+				m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
+				for range 30 {
+					m = key(t, m, rkey('x'))
+				}
+
+				return m
+			},
+			width: 38,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := tt.setup(t)
+
+			for i, line := range strings.Split(m.View(), "\n") {
+				if w := ansi.StringWidth(line); w > tt.width {
+					t.Fatalf("row %d width %d exceeds %d:\n%s", i, w, tt.width, m.View())
+				}
+			}
+		})
 	}
 }

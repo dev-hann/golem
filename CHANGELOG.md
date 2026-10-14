@@ -7,6 +7,26 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed — history replay opens at the bottom (2026-10-14)
+
+- Loading a session (session picker → enter, or a TUI restart reconnecting
+  to a live server) rebuilt the transcript but left the viewport at its
+  previous offset — usually the top. Replay now restores auto-follow and
+  pins the viewport to the tail, matching where a live stream would have
+  left the view: the conversation continues from the end.
+
+### Added — session picker current/status markers (2026-10-14)
+
+- `session_list` rows carry a `busy` flag — live server state: true while a
+  turn runs in that session, false on idle. A list-time snapshot, not a
+  subscription.
+- The session picker marks the session this client is in with `· current`
+  and prepositions the cursor on it, so opening the picker lands on "where
+  you are" instead of row zero.
+- Sessions with a live turn show `· running` in the picker. For the current
+  session the client's own turn state wins over the (possibly stale) list
+  snapshot; other sessions use the server's flag.
+
 ### Added
 
 - Agent status line in the TUI: a one-row strip between transcript and
@@ -96,6 +116,9 @@ config schema may change without notice.
   markers (status-based; status-less errors count as network drops).
   Each retry leaves a line in serve.log. Applies to every consumer —
   turns, the session-title side call, chat, ask.
+- The title side call's deadline now covers the retry ladder (90s vs
+  the ladder's ~61s worst case): a rate-limited provider that would
+  recover no longer loses the race against its own timeout.
 
 ### Added — session picker search/rename, server version handshake (2026-10-14)
 
@@ -122,8 +145,10 @@ config schema may change without notice.
   (opencode-style prompt: one line, ≤50 chars, the user's language) and
   persists the result as a `session_title` record (folded back on load,
   listed in `session_list` via the new optional `title` field). Failures
-  leave the session untitled — no fallback, no retry. The title is
-  never streamed mid-turn; the picker sees it on its next list.
+  leave the session untitled within a turn — no fallback — but every
+  later turn of an untitled session retries generation with the
+  session's first user message. The title is never streamed mid-turn;
+  the picker sees it on its next list.
 - The session picker row is now `title · dir · N turns · 2h ago` — the
   raw ULID no longer renders. `sessionRow`/`relTime` in the TUI derive
   the row from `SessionSummary` (`last_active` was already on the wire,

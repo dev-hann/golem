@@ -3,10 +3,10 @@
 package kit
 
 import (
-	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // Picker is a list selector model rendered through the kit theme.
@@ -18,6 +18,7 @@ type Picker struct {
 	kit    *Kit
 	chosen int
 	cancel bool
+	width  int
 }
 
 // NewPicker builds a picker with the cursor prepositioned.
@@ -63,27 +64,69 @@ func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // done marks the picker finished (kept as a seam for future animations).
 func (p *Picker) done() {}
 
+// SetWidth caps every rendered row at width cells: titles, items, and
+// the hint line truncate so a narrow terminal never wraps the panel.
+// Zero or negative disables the cap (unbounded, content-sized).
+func (p *Picker) SetWidth(width int) {
+	p.width = width
+}
+
+// selectionPad is the one space Selection() adds on each flank of the
+// cursor row.
+const selectionPad = 2
+
+// row renders one capped row: the cap accounts for the marker prefix
+// (and the cursor row's Selection padding) so the whole row stays within
+// width. A zero cap disables truncation.
+func (p *Picker) row(marker, text string) string {
+	inner := p.width
+	if inner > 0 {
+		inner -= ansi.StringWidth(marker)
+	}
+
+	if p.kit != nil && inner > 0 {
+		inner -= selectionPad
+	}
+
+	if inner < 1 {
+		return marker + text
+	}
+
+	return marker + truncateTo(text, inner)
+}
+
 // View implements tea.Model.
 func (p *Picker) View() string {
 	var body strings.Builder
 
-	body.WriteString(p.kit.Title(p.Title))
+	title := p.Title
+	if p.width > 0 {
+		title = truncateTo(title, p.width)
+	}
+
+	body.WriteString(p.kit.Title(title))
 	body.WriteString("\n")
 
 	for i, item := range p.Items {
 		if i == p.Cursor {
-			body.WriteString(p.kit.Selection(fmt.Sprintf("%s %s", "▶", item)))
+			body.WriteString(p.kit.Selection(p.row("▶ ", item)))
 			body.WriteString("\n")
 
 			continue
 		}
 
-		body.WriteString("  " + item)
+		body.WriteString(p.row("  ", item))
 		body.WriteString("\n")
 	}
 
 	body.WriteString("\n")
-	body.WriteString(p.kit.DimLine("↑↓ move · enter select · q cancel"))
+
+	hint := "↑↓ move · enter select · q cancel"
+	if p.width > 0 {
+		hint = truncateTo(hint, p.width)
+	}
+
+	body.WriteString(p.kit.DimLine(hint))
 
 	return body.String()
 }

@@ -51,7 +51,7 @@ func TestKit_ComponentOutputPerProfile(t *testing.T) {
 
 			k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(tt.profile))
 
-			out := k.ErrLine("boom")
+			out := k.ErrLine(0, "boom")
 			if !strings.Contains(out, "boom") {
 				t.Errorf("message lost: %q", out)
 			}
@@ -101,7 +101,7 @@ func TestKit_TokensUseTheirOwnColor(t *testing.T) {
 
 	k := kit.NewWithRenderer(theme, forcedRenderer(termenv.ANSI))
 
-	if out := k.ErrLine("x"); !strings.Contains(out, "\x1b[31") {
+	if out := k.ErrLine(0, "x"); !strings.Contains(out, "\x1b[31") {
 		t.Errorf("error line not red: %q", out)
 	}
 
@@ -134,6 +134,86 @@ func TestKit_MessageBarWrapsWithinWidth(t *testing.T) {
 		}
 		if !strings.HasPrefix(line, "▎") {
 			t.Errorf("bar line %d missing bar:\n%s", i, barred)
+		}
+	}
+}
+
+func TestKit_WrapPlainWithinWidth(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	tests := []struct {
+		name  string
+		in    string
+		width int
+	}{
+		{name: "ascii words", in: strings.Repeat("word ", 12), width: 20},
+		{name: "cjk unbroken run", in: strings.Repeat("한글", 40), width: 20},
+		{name: "multiline wraps per row", in: strings.Repeat("a", 30) + "\nshort\n" + strings.Repeat("글", 30), width: 21},
+		{name: "long path token", in: "/" + strings.Repeat("verylongdirname/", 10), width: 18},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			for i, line := range strings.Split(k.WrapPlain(tt.width, tt.in), "\n") {
+				if w := ansi.StringWidth(line); w > tt.width {
+					t.Errorf("row %d width %d exceeds %d:\n%q", i, w, tt.width, k.WrapPlain(tt.width, tt.in))
+				}
+			}
+		})
+	}
+}
+
+func TestKit_WrapPlainNarrowWidthPassthrough(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	if got := k.WrapPlain(0, "unchanged"); got != "unchanged" {
+		t.Errorf("width 0 must not wrap, got %q", got)
+	}
+
+	if got := k.WrapPlain(-3, "x"); got != "x" {
+		t.Errorf("negative width must not wrap, got %q", got)
+	}
+}
+
+func TestKit_WrapPlainPreservesANSI(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+
+	wrapped := k.WrapPlain(20, k.Style(kit.Error).Render(strings.Repeat("e", 60)))
+
+	if !strings.Contains(wrapped, "\x1b[") {
+		t.Errorf("wrap lost style escapes: %q", wrapped)
+	}
+
+	assertRows := strings.Split(wrapped, "\n")
+	for i, line := range assertRows {
+		if w := ansi.StringWidth(line); w > 20 {
+			t.Errorf("row %d width %d exceeds 20:\n%q", i, w, wrapped)
+		}
+	}
+}
+
+func TestKit_ErrLineWrapsWithinWidth(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	out := k.ErrLine(20, strings.Repeat("e", 60))
+
+	if !strings.Contains(out, "error: ") {
+		t.Errorf("wrap lost the error prefix: %q", out)
+	}
+
+	for i, line := range strings.Split(out, "\n") {
+		if w := ansi.StringWidth(line); w > 20 {
+			t.Errorf("row %d width %d exceeds 20:\n%s", i, w, out)
 		}
 	}
 }
@@ -200,7 +280,7 @@ func TestKit_ModalRendersTitleAndFrame(t *testing.T) {
 
 	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	modal := k.Modal("keys", "ctrl+n new session\nglm-5.3")
+	modal := k.Modal(0, "keys", "ctrl+n new session\nglm-5.3")
 	for _, want := range []string{"╭", "╮", "╰", "╯", "keys", "ctrl+n new session", "glm-5.3"} {
 		if !strings.Contains(modal, want) {
 			t.Errorf("modal missing %q:\n%s", want, modal)
@@ -318,5 +398,86 @@ func TestKit_StatusBarZeroWidthNoPanic(t *testing.T) {
 
 	if bar := k.StatusBar(0, "left", "right", kit.Tool); strings.Contains(bar, "\n") {
 		t.Errorf("zero width must not produce newlines:\n%s", bar)
+	}
+}
+
+func TestKit_ModalCapsWidth(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	tests := []struct {
+		name  string
+		title string
+		body  string
+		width int
+	}{
+		{
+			name:  "long body line wraps",
+			title: "sessions",
+			body:  "▶ " + strings.Repeat("long-session-title-", 8) + " · 2h ago",
+			width: 40,
+		},
+		{
+			name:  "long title truncates",
+			title: "models · provider-with-a-very-long-identifier",
+			body:  "glm-5.3",
+			width: 30,
+		},
+		{
+			name:  "live query grows the modal",
+			title: "commands",
+			body:  "new session    ctrl+x n\n\n› " + strings.Repeat("query-", 20) + "_",
+			width: 44,
+		},
+		{
+			name:  "wide glyphs count double",
+			title: "세션 목록",
+			body:  strings.Repeat("한", 40),
+			width: 24,
+		},
+		{
+			name:  "zero width stays unbounded",
+			title: "tiny",
+			body:  strings.Repeat("x", 200),
+			width: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// width 0 means unbounded (content-sized): the row cap only
+			// applies to a positive width.
+			if tt.width < 1 {
+				return
+			}
+
+			for i, line := range strings.Split(k.Modal(tt.width, tt.title, tt.body), "\n") {
+				if w := ansi.StringWidth(line); w > tt.width {
+					t.Errorf("row %d width %d exceeds %d:\n%s", i, w, tt.width, k.Modal(tt.width, tt.title, tt.body))
+				}
+			}
+		})
+	}
+}
+
+func TestKit_OverlayModalWiderThanScreen(t *testing.T) {
+	t.Parallel()
+
+	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+
+	modal := strings.Repeat("M", 60)
+	placed := k.Overlay(30, 5, "base", modal)
+
+	for i, line := range strings.Split(placed, "\n") {
+		if w := ansi.StringWidth(line); w > 30 {
+			t.Errorf("row %d width %d exceeds 30:\n%s", i, w, placed)
+		}
+	}
+
+	if !strings.Contains(placed, strings.Repeat("M", 30)) {
+		t.Errorf("modal content truncated away:\n%s", placed)
 	}
 }

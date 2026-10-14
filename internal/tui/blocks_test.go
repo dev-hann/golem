@@ -3,6 +3,9 @@ package tui
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
 )
@@ -95,6 +98,95 @@ func TestRenderBlocks_BlankLineBetweenBlocks(t *testing.T) {
 	// tool lines attach to the block they follow without a blank line.
 	if !strings.Contains(got, "▎ q\n\na\n  ▸ ✓ read") {
 		t.Errorf("blocks should be separated by blank lines, tool lines attached:\n%s", got)
+	}
+}
+
+// assertRowsWithin fails when any display row of got exceeds width cells.
+func assertRowsWithin(t *testing.T, got string, width int) {
+	t.Helper()
+
+	for i, line := range strings.Split(got, "\n") {
+		if w := ansi.StringWidth(line); w > width {
+			t.Errorf("row %d width %d exceeds %d:\n%s", i, w, width, got)
+
+			return
+		}
+	}
+}
+
+func TestBlockRender_WrapsToViewportWidth(t *testing.T) {
+	t.Parallel()
+
+	const width = 20
+
+	tests := []struct {
+		name  string
+		block block
+	}{
+		{name: "assistant ascii", block: block{kind: blockAssistant, text: strings.Repeat("word ", 15)}},
+		{name: "assistant cjk unbroken", block: block{kind: blockAssistant, text: strings.Repeat("한글", 40)}},
+		{name: "error", block: block{kind: blockError, text: strings.Repeat("bad thing ", 10)}},
+		{name: "tool summary running", block: block{kind: blockTool, tool: "bash", args: `{"command":"` + strings.Repeat("ls -la ", 8) + `"}`}},
+		{name: "tool preview expanded", block: block{
+			kind: blockTool, tool: "bash", done: true, ok: true, expanded: true,
+			result: strings.Repeat("output ", 20),
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			assertRowsWithin(t, tt.block.render(testKit(), width), width)
+		})
+	}
+}
+
+func TestBlockRender_ToolPreviewGutterAligned(t *testing.T) {
+	t.Parallel()
+
+	blk := block{kind: blockTool, tool: "bash", done: true, ok: true, expanded: true, result: strings.Repeat("x", 60)}
+	lines := strings.Split(blk.render(testKit(), 20), "\n")
+
+	if len(lines) < 3 {
+		t.Fatalf("wrapped preview must span several rows, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
+	}
+
+	for i, line := range lines[1:] {
+		if !strings.HasPrefix(line, "  │ ") {
+			t.Errorf("preview row %d missing gutter prefix:\n%s", i, strings.Join(lines, "\n"))
+		}
+	}
+}
+
+func TestPreview_CutRespectsRuneBoundary(t *testing.T) {
+	t.Parallel()
+
+	s := strings.Repeat("가", 700) // 3-byte runes: byte 2000 lands mid-glyph (666 runes = 1998 bytes)
+	got := preview(s, 2000)
+
+	if !utf8.ValidString(got) {
+		t.Errorf("preview split a multi-byte rune: %q", got)
+	}
+
+	if !strings.HasSuffix(got, "…") {
+		t.Errorf("truncated preview missing ellipsis: %q", got)
+	}
+}
+
+func TestRenderBlocks_WrappedRowsCountedInSpans(t *testing.T) {
+	t.Parallel()
+
+	_, spans, _ := renderBlocks(testKit(), []block{
+		{kind: blockUser, text: "q"},
+		{kind: blockAssistant, text: strings.Repeat("x", 100)},
+		{kind: blockUser, text: "r"},
+	}, 20)
+
+	// 1 user row + 1 blank + 5 wrapped rows (100/20) + 1 blank: the second
+	// user span must start at row 8 — wrapping may not desync click spans.
+	if len(spans) != 2 || spans[1].start != 8 {
+		t.Errorf("spans = %+v, want second user span starting at 8", spans)
 	}
 }
 

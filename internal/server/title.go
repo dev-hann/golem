@@ -23,9 +23,11 @@ Rules:
 - Never mention tools, tests, or that you are generating a title.
 - Output the title alone: no quotes, no explanation.`
 
-// Title generation bounds.
+// Title generation bounds. The timeout must cover the provider retry
+// ladder (six backoffs, ~61s worst case — see llm.DefaultRetryPolicy);
+// TestTitleTimeoutCoversRetryLadder pins that relationship.
 const (
-	titleTimeout  = 15 * time.Second
+	titleTimeout  = 90 * time.Second
 	titleMaxRunes = 60
 )
 

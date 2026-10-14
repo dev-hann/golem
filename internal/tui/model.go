@@ -1093,19 +1093,32 @@ func (m *Model) endTurn() {
 }
 
 // applySessionList stores a session list and, when it was explicitly
-// requested, opens the picker on it with fresh search state.
+// requested, opens the picker on it with fresh search state, the cursor
+// starting on the session this client is in.
 func (m *Model) applySessionList(e golemclient.SessionList) {
 	m.sessions = e.Sessions
 
-	m.pickIndex = 0
 	m.sessQuery = ""
 	m.sessRenaming = false
 	m.sessRenameText = ""
+	m.pickIndex = m.cursorOnSession()
 
 	if m.listRequest {
 		m.listRequest = false
 		m.mode = modeSessions
 	}
+}
+
+// cursorOnSession prepositions the picker cursor on the current session;
+// 0 when it is absent from the list.
+func (m *Model) cursorOnSession() int {
+	for i := range m.sessions {
+		if m.sessions[i].ID == m.sessionID {
+			return i
+		}
+	}
+
+	return 0
 }
 
 // appendToAssistant streams deltas into the trailing assistant block.
@@ -1132,8 +1145,12 @@ func (m *Model) finishToolBlock(end golemclient.ToolCallEnd) {
 }
 
 // replayHistory rebuilds the transcript from a history event batch.
+// Resuming a session opens at its end — follow is restored so the tail
+// (where the conversation continues) is on screen, matching what a live
+// stream would leave behind.
 func (m *Model) replayHistory(hist golemclient.History) {
 	m.blocks = nil
+	m.follow = true
 
 	for _, raw := range hist.Events {
 		ev, err := golemclient.Decode(raw)
@@ -1158,6 +1175,9 @@ func (m *Model) replayHistory(hist golemclient.History) {
 			// turn lifecycle events are implicit in the transcript
 		}
 	}
+
+	m.refreshView()
+	m.vp.GotoBottom()
 }
 
 // refreshView pushes the rendered transcript into the viewport. While a
@@ -1189,11 +1209,11 @@ func (m Model) View() string {
 
 	switch m.mode {
 	case modeCommand:
-		return m.modalized(m.kit.Modal("commands", m.commandBody()))
+		return m.modalized(m.kit.Modal(m.vp.Width, "commands", m.commandBody()))
 	case modeModels:
-		return m.modalized(m.kit.Modal("models · "+m.provider, m.modelsBody()))
+		return m.modalized(m.kit.Modal(m.vp.Width, "models · "+m.provider, m.modelsBody()))
 	case modeSessions:
-		return m.modalized(m.kit.Modal("sessions", m.sessionsBody()))
+		return m.modalized(m.kit.Modal(m.vp.Width, "sessions", m.sessionsBody()))
 	case modeChat:
 		// The full layout below.
 	default:
@@ -1353,7 +1373,9 @@ func (m Model) modelsBody() string {
 }
 
 // sessionsBody renders the session picker: matching rows, the live query
-// (or the rename input), and the key hints.
+// (or the rename input), and the key hints. Rows carry a · current marker
+// for the session this client is in and · running for sessions with a
+// live turn.
 func (m Model) sessionsBody() string {
 	var b strings.Builder
 
@@ -1365,7 +1387,7 @@ func (m Model) sessionsBody() string {
 
 	for i, s := range filtered {
 		if i == m.pickIndex {
-			row := sessionRow(s, time.Now())
+			row := m.sessionRow(s, time.Now())
 
 			if m.sessRenaming {
 				row = m.kit.Prompt("› " + m.sessRenameText + "_")
@@ -1376,7 +1398,7 @@ func (m Model) sessionsBody() string {
 			continue
 		}
 
-		fmt.Fprintf(&b, "  %s\n", sessionRow(s, time.Now())) //nolint:errcheck // strings.Builder
+		fmt.Fprintf(&b, "  %s\n", m.sessionRow(s, time.Now())) //nolint:errcheck // strings.Builder
 	}
 
 	b.WriteString("\n" + m.kit.DimLine("type to filter · ctrl+r rename · enter open · esc cancel"))
@@ -1385,8 +1407,10 @@ func (m Model) sessionsBody() string {
 }
 
 // sessionRow renders one picker row: the title (or the working directory
-// while untitled) and its date. The raw session id never shows.
-func sessionRow(s golemclient.SessionSummary, now time.Time) string {
+// while untitled), its date, and status markers — · current for the
+// session this client is in, · running when a turn is live in it. The
+// raw session id never shows.
+func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time) string {
 	name := s.Title
 
 	if name == "" {
@@ -1397,11 +1421,32 @@ func sessionRow(s golemclient.SessionSummary, now time.Time) string {
 		}
 	}
 
-	if rel, ok := relTime(now, s.LastActive); ok {
-		return name + " · " + rel
+	row := name
+
+	if s.ID == m.sessionID {
+		row += " · current"
 	}
 
-	return name
+	if m.sessionRunning(s) {
+		row += " · running"
+	}
+
+	if rel, ok := relTime(now, s.LastActive); ok {
+		row += " · " + rel
+	}
+
+	return row
+}
+
+// sessionRunning reports whether a turn is live in the listed session.
+// The server flag is a list-time snapshot; for the session this client is
+// in, the local turn state is fresher and overrides it.
+func (m Model) sessionRunning(s golemclient.SessionSummary) bool {
+	if s.ID == m.sessionID {
+		return m.turnActive
+	}
+
+	return s.Busy
 }
 
 // dirName is the final path segment of a working directory.

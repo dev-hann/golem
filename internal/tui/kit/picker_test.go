@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/dev-hann/golem/internal/tui/kit"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -93,5 +95,69 @@ func TestKitPicker_ViewMarksCursor(t *testing.T) {
 	}
 	if strings.Contains(view, "▶ a") {
 		t.Errorf("wrong cursor marked:\n%s", view)
+	}
+}
+
+func TestKitPicker_ViewRespectsWidth(t *testing.T) {
+	t.Parallel()
+
+	k := kit.New(kit.DefaultTheme())
+
+	tests := []struct {
+		name  string
+		title string
+		items []string
+		width int
+	}{
+		{
+			name:  "long title truncates",
+			title: "models for zai-coding (30) — ↑↓ move, enter select, q to type an id",
+			items: []string{"glm-5.3", "glm-5.3-air"},
+			width: 40,
+		},
+		{
+			name:  "long item truncates",
+			title: "models",
+			items: []string{"openrouter/" + strings.Repeat("very-long-model-name/", 8)},
+			width: 40,
+		},
+		{
+			name:  "wide glyphs count double",
+			title: "모델 선택",
+			items: []string{strings.Repeat("한", 30)},
+			width: 20,
+		},
+		{
+			name:  "hint line truncates",
+			title: "models",
+			items: []string{"a"},
+			width: 24, // the hint alone is 38 cells
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			p := kit.NewPicker(k, tt.title, tt.items, 0)
+			p.SetWidth(tt.width)
+
+			for i, line := range strings.Split(p.View(), "\n") {
+				if w := ansi.StringWidth(line); w > tt.width {
+					t.Errorf("row %d width %d exceeds %d:\n%s", i, w, tt.width, p.View())
+				}
+			}
+		})
+	}
+}
+
+func TestKitPicker_ZeroWidthRendersUnbounded(t *testing.T) {
+	t.Parallel()
+
+	p := kit.NewPicker(kit.New(kit.DefaultTheme()), "pick", []string{"a"}, 0)
+	p.SetWidth(0)
+
+	if !strings.Contains(p.View(), "a") {
+		t.Errorf("zero width must not drop items:\n%s", p.View())
 	}
 }

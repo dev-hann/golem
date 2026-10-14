@@ -40,6 +40,7 @@ func TestRoundTrip_AllServerEvents(t *testing.T) {
 		},
 		golemclient.SessionList{Type: golemclient.TypeSessionList, Sessions: []golemclient.SessionSummary{
 			{ID: "s1", Cwd: "/tmp", Created: "now", Turns: 1, LastActive: "now"},
+			{ID: "s2", Cwd: "/tmp", Created: "now", Turns: 1, LastActive: "now", Busy: true},
 		}},
 		golemclient.TurnStart{
 			Type: golemclient.TypeTurnStart, Session: "s1", Turn: "t1",

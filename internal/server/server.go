@@ -177,15 +177,32 @@ func (s *Server) handleList(writer *connWriter) {
 		return
 	}
 
+	busy := s.busySessions()
+
 	list := golemclient.SessionList{Type: golemclient.TypeSessionList}
 	for _, sum := range summaries {
 		list.Sessions = append(list.Sessions, golemclient.SessionSummary{
 			ID: sum.ID, Title: sum.Title, Cwd: sum.Cwd, Created: sum.Created.UTC().Format(rfc3339),
 			Turns: sum.Turns, LastActive: sum.LastActive.UTC().Format(rfc3339),
+			Busy: busy[sum.ID],
 		})
 	}
 
 	writer.send(list)
+}
+
+// busySessions snapshots the ids with a turn currently running — the
+// live state behind session_list's busy flags.
+func (s *Server) busySessions() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	busy := make(map[string]bool, len(s.turns))
+	for id := range s.turns {
+		busy[id] = true
+	}
+
+	return busy
 }
 
 // handleLoad replays a session as meta plus history.
@@ -360,6 +377,16 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 
 	firstTurn := sess.Turns == 0 && sess.Title == ""
 
+	// The title side call retries on later turns until one lands: every
+	// turn of an untitled session gets a chance (the first user message
+	// names the task regardless of which turn succeeds).
+	needTitle := sess.Title == ""
+
+	titleText := sess.FirstUserText
+	if firstTurn {
+		titleText = msg.Text
+	}
+
 	for event := range ag.Run(ctx, sess.Messages, msg.Text) {
 		wire := s.wireEvent(msg.Session, turnID, model, event)
 		if wire == nil {
@@ -375,9 +402,9 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 		writer.send(wire)
 	}
 
-	if firstTurn {
+	if needTitle && titleText != "" {
 		//nolint:gosec // the title side call must outlive the request-scoped turn context
-		go s.generateTitle(msg.Session, msg.Text, model)
+		go s.generateTitle(msg.Session, titleText, model)
 	}
 }
 

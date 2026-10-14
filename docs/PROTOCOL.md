@@ -80,10 +80,10 @@ Replay batch after `load_session`. Contains zero or more compacted prior events 
 ### `session_list`
 
 ```json
-{"type":"session_list","sessions":[{"id":"01J...","title":"Fix auth middleware","cwd":"/p","created":"2026-09-27T10:00:00Z","turns":12,"last_active":"2026-09-27T12:30:00Z"}]}
+{"type":"session_list","sessions":[{"id":"01J...","title":"Fix auth middleware","cwd":"/p","created":"2026-09-27T10:00:00Z","turns":12,"last_active":"2026-09-27T12:30:00Z","busy":false}]}
 ```
 
-`title` is optional: the server generates it with a model side call after a session's first turn (persisted as a `session_title` record) and omits it while absent or failed.
+`title` is optional: the server generates it with a model side call after a session's turn ends while the session is still untitled (persisted as a `session_title` record) and omits it while absent or failed. A failed generation is retried on the next turn's completion until one lands. `busy` is live server state: true while a turn is running in that session, false on idle — a snapshot at list time, not a subscription.
 
 ### `session_title`
 

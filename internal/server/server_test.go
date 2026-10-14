@@ -21,12 +21,15 @@ import (
 // scriptedProvider streams queued rounds; streamFn overrides per-round
 // behavior (used for hang/gate scenarios). Title side calls get a canned
 // stream without consuming a round — titleEvents overrides that stream
-// (failure scenarios).
+// (failure scenarios), and titleFailures fails the first N title calls
+// before that override applies (retry scenarios).
 type scriptedProvider struct {
-	next        int
-	rounds      [][]llm.Event
-	titleEvents []llm.Event
-	streamFn    func(ctx context.Context, round int) <-chan llm.Event
+	next          int
+	rounds        [][]llm.Event
+	titleEvents   []llm.Event
+	titleFailures int
+	titleCalls    int
+	streamFn      func(ctx context.Context, round int) <-chan llm.Event
 }
 
 func (p *scriptedProvider) Stream(
@@ -34,6 +37,17 @@ func (p *scriptedProvider) Stream(
 	req llm.Request,
 ) (<-chan llm.Event, error) {
 	if req.SystemPrompt == server.TitleSystemPrompt {
+		call := p.titleCalls
+		p.titleCalls++
+
+		if call < p.titleFailures {
+			out := make(chan llm.Event, 1)
+			out <- llm.Event{Type: llm.EventError, Err: fmt.Errorf("title call %d failed", call+1)}
+			close(out)
+
+			return out, nil
+		}
+
 		events := p.titleEvents
 		if events == nil {
 			events = []llm.Event{{Type: llm.EventTextDelta, Delta: "Test title"}}
@@ -397,6 +411,66 @@ func TestServer_BusySessionRejectsSecondTurn(t *testing.T) {
 	h.expectType(golemclient.TypeError) // cancellation error from the turn
 }
 
+// TestServer_SessionListReportsBusyDuringTurn verifies the session_list
+// marks sessions with an in-flight turn busy: a second connection listing
+// mid-turn must see busy=true on the running session and busy=false once
+// the turn ends.
+func TestServer_SessionListReportsBusyDuringTurn(t *testing.T) {
+	t.Parallel()
+
+	gate := make(chan struct{})
+	provider := &scriptedProvider{}
+	provider.streamFn = func(_ context.Context, _ int) <-chan llm.Event {
+		out := make(chan llm.Event, 2)
+		out <- llm.Event{Type: llm.EventTextDelta, Delta: "working"}
+		go func() {
+			defer close(out)
+			<-gate
+			out <- llm.Event{Type: llm.EventUsage, InputTokens: 1, OutputTokens: 1}
+		}()
+		return out
+	}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "hi",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	h.expectType(golemclient.TypeTextDelta)
+
+	busy := h.listSessionByID(t, sess)
+	if !busy {
+		t.Errorf("busy = false mid-turn, want true")
+	}
+
+	close(gate)
+	h.expectType(golemclient.TypeTurnEnd)
+
+	if busy := h.listSessionByID(t, sess); busy {
+		t.Errorf("busy = true after turn end, want false")
+	}
+}
+
+// listSessionByID lists sessions and returns the busy flag of the wanted
+// one; missing sessions fail the test.
+func (h *harness) listSessionByID(t *testing.T, id string) bool {
+	t.Helper()
+
+	if err := h.client.Send(golemclient.ListSessions{Type: golemclient.TypeListSessions}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	list := h.expectType(golemclient.TypeSessionList).(golemclient.SessionList)
+	for _, s := range list.Sessions {
+		if s.ID == id {
+			return s.Busy
+		}
+	}
+	t.Fatalf("session %s missing from list: %+v", id, list.Sessions)
+	return false
+}
+
 func TestServer_SessionListOrdersByLastActive(t *testing.T) {
 	t.Parallel()
 	provider := &scriptedProvider{rounds: [][]llm.Event{
@@ -640,8 +714,11 @@ func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 	t.Parallel()
 
 	provider := &scriptedProvider{
-		rounds:      [][]llm.Event{{{Type: llm.EventTextDelta, Delta: "hi"}, {Type: llm.EventUsage}}},
-		titleEvents: []llm.Event{{Type: llm.EventError, Err: errors.New("boom")}},
+		rounds: [][]llm.Event{
+			{{Type: llm.EventTextDelta, Delta: "hi"}, {Type: llm.EventUsage}},
+			{{Type: llm.EventTextDelta, Delta: "retry turn"}, {Type: llm.EventUsage}},
+		},
+		titleFailures: 1,
 	}
 	h := newHarness(t, provider)
 	sess := h.createSession()
@@ -655,7 +732,7 @@ func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 	h.expectType(golemclient.TypeTurnStart)
 	h.expectType(golemclient.TypeTurnEnd)
 
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(100 * time.Millisecond)
 
 	raw, err := os.ReadFile(filepath.Join(h.storeDir, sess+".jsonl"))
 	if err != nil {
@@ -664,5 +741,74 @@ func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 
 	if strings.Contains(string(raw), "session_title") {
 		t.Errorf("failed title generation must not persist a record:\n%s", raw)
+	}
+
+	// The failed side call schedules a retry: the next turn's completion
+	// must attempt generation again (the session is still untitled).
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "second turn",
+	}); err != nil {
+		t.Fatalf("send second turn: %v", err)
+	}
+
+	h.expectType(golemclient.TypeTurnStart)
+	h.expectType(golemclient.TypeTurnEnd)
+
+	// Poll for the retried title. The scripted provider fails only the
+	// first title stream; the retry must succeed and persist.
+	deadline := time.Now().Add(2 * time.Second)
+
+	for time.Now().Before(deadline) {
+		summaries, err := h.store.List()
+		if err == nil && len(summaries) == 1 && summaries[0].Title == "Test title" {
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	summaries, err := h.store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(summaries) != 1 || summaries[0].Title != "Test title" {
+		t.Fatalf("summaries = %+v, want the retried title", summaries)
+	}
+}
+
+func TestServer_TitleRetryFailsAgainStaysUntitled(t *testing.T) {
+	t.Parallel()
+
+	provider := &scriptedProvider{
+		rounds: [][]llm.Event{
+			{{Type: llm.EventTextDelta, Delta: "one"}, {Type: llm.EventUsage}},
+			{{Type: llm.EventTextDelta, Delta: "two"}, {Type: llm.EventUsage}},
+		},
+		titleEvents: []llm.Event{{Type: llm.EventError, Err: errors.New("always down")}},
+	}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+
+	for i, text := range []string{"first", "second"} {
+		if err := h.client.Send(golemclient.UserMessage{
+			Type: golemclient.TypeUserMessage, Session: sess, Text: text,
+		}); err != nil {
+			t.Fatalf("send turn %d: %v", i+1, err)
+		}
+
+		h.expectType(golemclient.TypeTurnStart)
+		h.expectType(golemclient.TypeTurnEnd)
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(h.storeDir, sess+".jsonl"))
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+
+	if strings.Contains(string(raw), "session_title") {
+		t.Errorf("permanently failing title generation must never persist a record:\n%s", raw)
 	}
 }

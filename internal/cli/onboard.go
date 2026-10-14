@@ -171,7 +171,7 @@ func promptProvider(out io.Writer, reader *bufio.Scanner, k *kit.Kit) (string, e
 			return id, nil
 		}
 
-		fmt.Fprintln(out, k.ErrLine("invalid selection — enter 1-5 or a provider id")) //nolint:errcheck // terminal output
+		fmt.Fprintln(out, k.ErrLine(0, "invalid selection — enter 1-5 or a provider id")) //nolint:errcheck // terminal output
 	}
 
 	return "", errors.New("too many invalid selections")
@@ -252,7 +252,7 @@ func promptKeyAndList(
 
 			return key, models, nil
 		case errors.Is(err, llm.ErrAuth):
-			fmt.Fprintln(out, k.ErrLine(fmt.Sprintf("key rejected: %v", err))) //nolint:errcheck // terminal output
+			fmt.Fprintln(out, k.ErrLine(0, fmt.Sprintf("key rejected: %v", err))) //nolint:errcheck // terminal output
 
 			if hint := planHint(id); hint != "" {
 				fmt.Fprintln(out, k.WarnLine("hint: "+hint)) //nolint:errcheck // terminal output
@@ -311,7 +311,7 @@ func promptModel(
 	}
 
 	if model == "" {
-		fmt.Fprintln(out, k.ErrLine("a model id is required for this provider")) //nolint:errcheck // terminal output
+		fmt.Fprintln(out, k.ErrLine(0, "a model id is required for this provider")) //nolint:errcheck // terminal output
 
 		return "", errors.New("missing model")
 	}

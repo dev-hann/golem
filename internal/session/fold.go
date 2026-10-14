@@ -9,9 +9,10 @@ import (
 // folder incrementally rebuilds conversation state from stored wire events.
 // See docs/PROTOCOL.md: storage lines are the wire events themselves.
 type folder struct {
-	messages []llm.Message
-	turns    int
-	title    string
+	messages      []llm.Message
+	turns         int
+	title         string
+	firstUserText string
 
 	// per-turn accumulation
 	turnUser    *llm.Message
@@ -37,14 +38,7 @@ func (f *folder) feed(line []byte) {
 
 	switch env.Type {
 	case "user_message":
-		var ev struct {
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(line, &ev); err != nil || ev.Text == "" {
-			return
-		}
-
-		f.turnUser = &llm.Message{Role: llm.RoleUser, Text: ev.Text}
+		f.feedUserMessage(line)
 	case "text_delta":
 		var ev struct {
 			Delta string `json:"delta"`
@@ -93,6 +87,24 @@ func (f *folder) feed(line []byte) {
 	default:
 		// session_meta / error / interrupt events do not change
 		// conversation state.
+	}
+}
+
+// feedUserMessage folds one user_message line: it opens the current turn
+// and, as the session's opening message, names the task for title
+// generation.
+func (f *folder) feedUserMessage(line []byte) {
+	var ev struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(line, &ev); err != nil || ev.Text == "" {
+		return
+	}
+
+	f.turnUser = &llm.Message{Role: llm.RoleUser, Text: ev.Text}
+
+	if f.firstUserText == "" {
+		f.firstUserText = ev.Text
 	}
 }
 
