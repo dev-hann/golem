@@ -23,9 +23,11 @@ import (
 const fileSuffix = ".jsonl"
 
 // Session is a conversation: identity plus folded message history.
+// Session is the folded state of one stored session.
 type Session struct {
 	ID       string
 	Cwd      string
+	Title    string
 	Created  time.Time
 	Turns    int
 	Messages []llm.Message
@@ -232,6 +234,7 @@ func (s *Store) FinishTurn(id string) error {
 // Summary describes one session for listings.
 type Summary struct {
 	ID         string
+	Title      string
 	Cwd        string
 	Created    time.Time
 	Turns      int
@@ -289,6 +292,7 @@ func (s *Store) summarize(id string) (Summary, error) {
 
 	return Summary{
 		ID:         id,
+		Title:      sess.Title,
 		Cwd:        sess.Cwd,
 		Created:    sess.Created,
 		Turns:      sess.Turns,
@@ -321,6 +325,7 @@ func (s *Store) load(id string) (*Session, error) {
 
 	sess.Messages = fold.history()
 	sess.Turns = fold.turns
+	sess.Title = fold.title
 
 	return sess, nil
 }

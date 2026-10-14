@@ -17,6 +17,8 @@ const (
 	TypeCreateSession    = "create_session"
 	TypeListSessions     = "list_sessions"
 	TypeLoadSession      = "load_session"
+	TypeRenameSession    = "rename_session"
+	TypeVersionQuery     = "version_query"
 )
 
 // Event type names (server → client).
@@ -31,6 +33,8 @@ const (
 	TypeApprovalRequest = "approval_request"
 	TypeError           = "error"
 	TypeTurnEnd         = "turn_end"
+	TypeSessionTitle    = "session_title"
+	TypeServerHello     = "server_hello"
 )
 
 // Envelope is the minimal shape every message shares. Unknown types must be
@@ -100,6 +104,7 @@ type History struct {
 // SessionSummary is one row in SessionList.
 type SessionSummary struct {
 	ID         string `json:"id"`
+	Title      string `json:"title,omitempty"`
 	Cwd        string `json:"cwd"`
 	Created    string `json:"created"`
 	Turns      int    `json:"turns"`
@@ -183,6 +188,33 @@ type TurnEnd struct {
 	Usage   Usage  `json:"usage"`
 }
 
+// SessionTitle is a server-generated short title for a session, derived
+// from its first exchange. It is persisted as a session record and
+// surfaced through SessionList.
+type SessionTitle struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Title   string `json:"title"`
+}
+
+// RenameSession asks the server to replace a session's title.
+type RenameSession struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Title   string `json:"title"`
+}
+
+// VersionQuery asks the server to identify its build (ServerHello).
+type VersionQuery struct {
+	Type string `json:"type"`
+}
+
+// ServerHello answers VersionQuery with the server's build version.
+type ServerHello struct {
+	Type    string `json:"type"`
+	Version string `json:"version"`
+}
+
 // TypeSetModel labels a client set_model event.
 const TypeSetModel = "set_model"
 
@@ -216,6 +248,10 @@ var decoders = map[string]decoder{
 	TypeApprovalRequest:  typed[ApprovalRequest],
 	TypeError:            typed[ErrorEvent],
 	TypeTurnEnd:          typed[TurnEnd],
+	TypeSessionTitle:     typed[SessionTitle],
+	TypeServerHello:      typed[ServerHello],
+	TypeRenameSession:    typed[RenameSession],
+	TypeVersionQuery:     typed[VersionQuery],
 }
 
 // Decode classifies one raw NDJSON line into a typed event. It returns the

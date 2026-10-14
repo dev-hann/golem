@@ -11,6 +11,7 @@ import (
 type folder struct {
 	messages []llm.Message
 	turns    int
+	title    string
 
 	// per-turn accumulation
 	turnUser    *llm.Message
@@ -80,6 +81,15 @@ func (f *folder) feed(line []byte) {
 		})
 	case "turn_end":
 		f.closeTurn(true)
+	case "session_title":
+		var ev struct {
+			Title string `json:"title"`
+		}
+		if err := json.Unmarshal(line, &ev); err != nil || ev.Title == "" {
+			return
+		}
+
+		f.title = ev.Title
 	default:
 		// session_meta / approval / error / interrupt events do not change
 		// conversation state.

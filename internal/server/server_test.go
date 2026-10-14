@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -18,17 +19,37 @@ import (
 )
 
 // scriptedProvider streams queued rounds; streamFn overrides per-round
-// behavior (used for hang/gate scenarios).
+// behavior (used for hang/gate scenarios). Title side calls get a canned
+// stream without consuming a round — titleEvents overrides that stream
+// (failure scenarios).
 type scriptedProvider struct {
-	next     int
-	rounds   [][]llm.Event
-	streamFn func(ctx context.Context, round int) <-chan llm.Event
+	next        int
+	rounds      [][]llm.Event
+	titleEvents []llm.Event
+	streamFn    func(ctx context.Context, round int) <-chan llm.Event
 }
 
 func (p *scriptedProvider) Stream(
 	ctx context.Context,
-	_ llm.Request,
+	req llm.Request,
 ) (<-chan llm.Event, error) {
+	if req.SystemPrompt == server.TitleSystemPrompt {
+		events := p.titleEvents
+		if events == nil {
+			events = []llm.Event{{Type: llm.EventTextDelta, Delta: "Test title"}}
+		}
+
+		out := make(chan llm.Event, len(events)+1)
+
+		for _, ev := range events {
+			out <- ev
+		}
+
+		close(out)
+
+		return out, nil
+	}
+
 	round := p.next
 	p.next++
 	if p.streamFn != nil {
@@ -53,6 +74,7 @@ type harness struct {
 	client   *golemclient.Client
 	sockDir  string
 	storeDir string
+	store    *session.Store
 	root     string
 }
 
@@ -82,7 +104,7 @@ func newHarness(t *testing.T, provider llm.Provider, approvalTimeoutS int) *harn
 	}
 	cfg := server.Config{
 		Provider: provider, Model: "stub-model", Root: root,
-		Store: store, ApprovalTimeoutS: approvalTimeoutS,
+		Store: store, ApprovalTimeoutS: approvalTimeoutS, Version: "test-version",
 	}
 	srv, err := server.New(cfg)
 	if err != nil {
@@ -99,7 +121,8 @@ func newHarness(t *testing.T, provider llm.Provider, approvalTimeoutS int) *harn
 		t.Fatalf("dial: %v", err)
 	}
 	h := &harness{
-		t: t, srv: srv, client: client, sockDir: sockDir, storeDir: storeDir, root: root,
+		t: t, srv: srv, client: client, sockDir: sockDir, storeDir: storeDir,
+		store: store, root: root,
 	}
 	t.Cleanup(func() {
 		_ = client.Close()
@@ -554,4 +577,167 @@ func TestServer_EventsPersistedBeforeEmission(t *testing.T) {
 	}
 	close(gate)
 	h.expectType(golemclient.TypeTurnEnd)
+}
+
+func TestServer_FirstTurnGeneratesTitleOnce(t *testing.T) {
+	t.Parallel()
+
+	provider := &scriptedProvider{rounds: [][]llm.Event{
+		{{Type: llm.EventTextDelta, Delta: "one"}, {Type: llm.EventUsage}},
+		{{Type: llm.EventTextDelta, Delta: "two"}, {Type: llm.EventUsage}},
+	}}
+	h := newHarness(t, provider, 5)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "fix the auth middleware",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	h.expectType(golemclient.TypeTurnStart)
+	h.expectType(golemclient.TypeTurnEnd)
+
+	// The title lands asynchronously; poll the store for the record.
+	deadline := time.Now().Add(2 * time.Second)
+
+	for time.Now().Before(deadline) {
+		summaries, err := h.store.List()
+		if err == nil && len(summaries) == 1 && summaries[0].Title == "Test title" {
+			break
+		}
+
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	summaries, err := h.store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(summaries) != 1 || summaries[0].Title != "Test title" {
+		t.Fatalf("summaries = %+v, want the generated title", summaries)
+	}
+
+	// A second turn must not regenerate: still exactly one title record.
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "again",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	h.expectType(golemclient.TypeTurnStart)
+	h.expectType(golemclient.TypeTurnEnd)
+
+	time.Sleep(100 * time.Millisecond)
+
+	raw, err := os.ReadFile(filepath.Join(h.storeDir, sess+".jsonl"))
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+
+	if n := strings.Count(string(raw), `"session_title"`); n != 1 {
+		t.Errorf("session_title records = %d, want 1:\n%s", n, raw)
+	}
+}
+
+func TestServer_RenameSession(t *testing.T) {
+	t.Parallel()
+
+	provider := &scriptedProvider{rounds: [][]llm.Event{}}
+	h := newHarness(t, provider, 5)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.RenameSession{
+		Type: golemclient.TypeRenameSession, Session: sess, Title: "  Manual title  ",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	title := h.expectType(golemclient.TypeSessionTitle).(golemclient.SessionTitle)
+	if title.Title != "Manual title" {
+		t.Errorf("title = %q, want the trimmed rename", title.Title)
+	}
+
+	summaries, err := h.store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(summaries) != 1 || summaries[0].Title != "Manual title" {
+		t.Errorf("summaries = %+v, want the renamed title persisted", summaries)
+	}
+}
+
+func TestServer_RenameSessionRejectsEmptyAndUnknownSession(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, &scriptedProvider{rounds: [][]llm.Event{}}, 5)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.RenameSession{
+		Type: golemclient.TypeRenameSession, Session: sess, Title: "   ",
+	}); err != nil {
+		t.Fatalf("send empty: %v", err)
+	}
+
+	if err := h.expectTypeError("invalid_request"); err != nil {
+		t.Fatalf("empty title: %v", err)
+	}
+
+	if err := h.client.Send(golemclient.RenameSession{
+		Type: golemclient.TypeRenameSession, Session: "01JUNKNOWNSESSION0000000", Title: "x",
+	}); err != nil {
+		t.Fatalf("send unknown: %v", err)
+	}
+
+	if err := h.expectTypeError("session_not_found"); err != nil {
+		t.Fatalf("unknown session: %v", err)
+	}
+}
+
+func TestServer_VersionQueryAnswersHello(t *testing.T) {
+	t.Parallel()
+
+	h := newHarness(t, &scriptedProvider{rounds: [][]llm.Event{}}, 5)
+
+	if err := h.client.Send(golemclient.VersionQuery{Type: golemclient.TypeVersionQuery}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	hello := h.expectType(golemclient.TypeServerHello).(golemclient.ServerHello)
+	if hello.Version != "test-version" {
+		t.Errorf("version = %q, want the configured build version", hello.Version)
+	}
+}
+
+func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
+	t.Parallel()
+
+	provider := &scriptedProvider{
+		rounds:      [][]llm.Event{{{Type: llm.EventTextDelta, Delta: "hi"}, {Type: llm.EventUsage}}},
+		titleEvents: []llm.Event{{Type: llm.EventError, Err: errors.New("boom")}},
+	}
+	h := newHarness(t, provider, 5)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "hello",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	h.expectType(golemclient.TypeTurnStart)
+	h.expectType(golemclient.TypeTurnEnd)
+
+	time.Sleep(200 * time.Millisecond)
+
+	raw, err := os.ReadFile(filepath.Join(h.storeDir, sess+".jsonl"))
+	if err != nil {
+		t.Fatalf("read session file: %v", err)
+	}
+
+	if strings.Contains(string(raw), "session_title") {
+		t.Errorf("failed title generation must not persist a record:\n%s", raw)
+	}
 }

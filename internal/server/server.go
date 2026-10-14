@@ -32,10 +32,13 @@ type Config struct {
 	Provider llm.Provider
 	// ProviderID labels turn_start events (e.g. "zai"); "" renders as
 	// "custom" for test-injected providers.
-	ProviderID       string
-	Model            string
-	Root             string
-	Store            *session.Store
+	ProviderID string
+	Model      string
+	Root       string
+	Store      *session.Store
+	// Version labels this build for client freshness checks; "" hides
+	// the server from version handshake (development default).
+	Version          string
 	ApprovalTimeoutS int
 }
 
@@ -156,6 +159,12 @@ func (s *Server) dispatch(_ net.Conn, writer *connWriter, event any) bool {
 		s.handleInterrupt(ev)
 	case golemclient.SetModel:
 		s.handleSetModel(writer, ev)
+	case golemclient.RenameSession:
+		s.handleRenameSession(writer, ev)
+	case golemclient.VersionQuery:
+		writer.send(golemclient.ServerHello{
+			Type: golemclient.TypeServerHello, Version: s.cfg.Version,
+		})
 	case golemclient.Envelope:
 		// Unknown types are ignored per PROTOCOL.md forward compatibility.
 	default:
@@ -187,7 +196,7 @@ func (s *Server) handleList(writer *connWriter) {
 	list := golemclient.SessionList{Type: golemclient.TypeSessionList}
 	for _, sum := range summaries {
 		list.Sessions = append(list.Sessions, golemclient.SessionSummary{
-			ID: sum.ID, Cwd: sum.Cwd, Created: sum.Created.UTC().Format(rfc3339),
+			ID: sum.ID, Title: sum.Title, Cwd: sum.Cwd, Created: sum.Created.UTC().Format(rfc3339),
 			Turns: sum.Turns, LastActive: sum.LastActive.UTC().Format(rfc3339),
 		})
 	}
@@ -293,6 +302,39 @@ func (s *Server) handleSetModel(writer *connWriter, ev golemclient.SetModel) {
 	s.mu.Unlock()
 }
 
+// handleRenameSession replaces a session's title: sanitized, persisted as
+// the newest session_title record (last one wins on fold), and confirmed
+// back to the requester.
+func (s *Server) handleRenameSession(writer *connWriter, ev golemclient.RenameSession) {
+	if _, err := s.cfg.Store.Get(ev.Session); err != nil {
+		writer.send(errorOf(ev.Session, "", "session_not_found", err))
+
+		return
+	}
+
+	title := sanitizeTitle(ev.Title)
+	if title == "" {
+		writer.send(errorOf(ev.Session, "", "invalid_request",
+			errors.New("rename_session: title must not be empty")))
+
+		return
+	}
+
+	if err := s.cfg.Store.Append(ev.Session, golemclient.SessionTitle{
+		Type: golemclient.TypeSessionTitle, Session: ev.Session, Title: title,
+	}); err != nil {
+		writer.send(errorOf(ev.Session, "", "internal", err))
+
+		return
+	}
+
+	s.cfg.Store.Invalidate(ev.Session)
+
+	writer.send(golemclient.SessionTitle{
+		Type: golemclient.TypeSessionTitle, Session: ev.Session, Title: title,
+	})
+}
+
 // turnModel resolves the model a session's next turn runs with.
 func (s *Server) turnModel(sessionID string) string {
 	s.mu.Lock()
@@ -359,6 +401,8 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 		return
 	}
 
+	firstTurn := sess.Turns == 0 && sess.Title == ""
+
 	for event := range ag.Run(ctx, sess.Messages, msg.Text) {
 		wire := s.wireEvent(msg.Session, turnID, model, event)
 		if wire == nil {
@@ -372,6 +416,11 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 		}
 
 		writer.send(wire)
+	}
+
+	if firstTurn {
+		//nolint:gosec // the title side call must outlive the request-scoped turn context
+		go s.generateTitle(msg.Session, msg.Text, model)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/session"
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // newStore opens a store in a temp dir for tests.
@@ -289,4 +290,82 @@ func TestAppend_LineFormatIsValidJSONPerLine(t *testing.T) {
 // storeDir returns the directory backing the store.
 func storeDir(_ *testing.T, store *session.Store) string {
 	return store.Dir()
+}
+
+func TestStore_TitleRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	store, err := session.NewStore(dir, 2)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	sess, err := store.Create("/proj")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	appendEvents(t, store, sess.ID, textTurn("fix the auth middleware", "done")...)
+	appendEvents(t, store, sess.ID, golemclient.SessionTitle{
+		Type: golemclient.TypeSessionTitle, Session: sess.ID, Title: "Auth middleware fix",
+	})
+
+	// The cached copy predates the append (the server invalidates after a
+	// turn); a reopened store proves the record folds back in.
+	reopened, err := session.NewStore(dir, 2)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+
+	got, err := reopened.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	if got.Title != "Auth middleware fix" {
+		t.Errorf("Title = %q, want the folded session_title record", got.Title)
+	}
+
+	summaries, err := reopened.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(summaries) != 1 || summaries[0].Title != "Auth middleware fix" {
+		t.Errorf("summaries = %+v, want the title surfaced", summaries)
+	}
+}
+
+func TestStore_TitleLastRecordWins(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	store, err := session.NewStore(dir, 2)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	sess, err := store.Create("/proj")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	appendEvents(t, store, sess.ID,
+		golemclient.SessionTitle{
+			Type: golemclient.TypeSessionTitle, Session: sess.ID, Title: "First title",
+		},
+		golemclient.SessionTitle{
+			Type: golemclient.TypeSessionTitle, Session: sess.ID, Title: "Renamed title",
+		},
+	)
+
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(summaries) != 1 || summaries[0].Title != "Renamed title" {
+		t.Errorf("summaries = %+v, want the latest title record to win", summaries)
+	}
 }
