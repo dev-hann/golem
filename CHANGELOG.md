@@ -7,6 +7,19 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed — the last transcript line stays visible under the sticky bar (2026-10-14)
+
+- With the sticky header pinned, the viewport bottom-pinned against its
+  full height while the render window ran one row shorter — the true
+  last line sat below the fold, hidden behind the composer. The window
+  math (`renderedWindow`) now pins the *rendered* window: at the tail it
+  advances one row under the sticky bar; scrolled-back windows keep
+  their top alignment (losing only the final row). Mouse mapping
+  (`lineAt`/`lineClamped`) reads the same window, so clicks land on the
+  row the user sees. Found in review: the earlier re-pin test's fixture
+  ended with a trailing newline, letting an empty line take the hit —
+  real streams end mid-line.
+
 ### Added — screen padding (2026-10-14)
 
 - The chat screen now sits inside a padding margin instead of touching

@@ -158,22 +158,27 @@ func (m *Model) clearSelection() {
 
 // lineAt maps a screen row to the transcript content line under it;
 // ok is false for the sticky bar, the composer, and off-screen rows.
+// It reads the window through renderedWindow — the same offset the
+// transcript renders with — so clicks land on what the user sees.
 func (m Model) lineAt(y int) (int, bool) {
 	top := stickyTopRow(m)
-	if y < top || y >= top+m.vp.Height {
+
+	offset, height := m.renderedWindow()
+	if y < top || y >= top+height {
 		return 0, false
 	}
 
-	return m.vp.YOffset + y - top, true
+	return offset + y - top, true
 }
 
 // lineClamped maps a screen row to a content line, clamped into the
 // visible transcript for drags pulled past its edges.
 func (m Model) lineClamped(y int) int {
 	top := stickyTopRow(m)
-	y = min(max(y, top), top+m.vp.Height-1)
+	offset, height := m.renderedWindow()
+	y = min(max(y, top), top+height-1)
 
-	return min(m.vp.YOffset+y-top, len(strings.Split(m.content, "\n"))-1)
+	return min(offset+y-top, m.totalLines()-1)
 }
 
 // stickyTopRow reports the screen row the transcript starts on: past the
