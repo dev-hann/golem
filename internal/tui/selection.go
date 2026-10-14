@@ -176,12 +176,13 @@ func (m Model) lineClamped(y int) int {
 	return min(m.vp.YOffset+y-top, len(strings.Split(m.content, "\n"))-1)
 }
 
-// stickyTopRow reports the screen row the transcript starts on: one
-// below the sticky bar while it is pinned, else the top row.
+// stickyTopRow reports the screen row the transcript starts on: past the
+// screen's top padding, then one more below the sticky bar while it is
+// pinned.
 func stickyTopRow(m Model) int {
 	if m.stickyText() != "" {
-		return 1
+		return screenPadV + 1
 	}
 
-	return 0
+	return screenPadV
 }

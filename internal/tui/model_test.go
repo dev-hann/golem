@@ -199,13 +199,13 @@ func TestModel_ToolBlock_ClickTogglesResult(t *testing.T) {
 		return next.(Model)
 	}
 
-	m = click(m.toolSpans[0].start)
+	m = click(stickyTopRow(m) + m.toolSpans[0].start - m.vp.YOffset)
 
 	if !strings.Contains(m.View(), "package main") {
 		t.Errorf("click on the tool row must expand the result:\n%s", m.View())
 	}
 
-	m = click(m.toolSpans[0].start)
+	m = click(stickyTopRow(m) + m.toolSpans[0].start - m.vp.YOffset)
 
 	if strings.Contains(m.View(), "package main") {
 		t.Errorf("second click must collapse the result:\n%s", m.View())
@@ -230,7 +230,7 @@ func TestModel_ToolBlock_ClickOutsideSpansIgnored(t *testing.T) {
 
 	// Clicks above and below the tool row (and on the composer area) do
 	// nothing.
-	for _, y := range []int{span.start - 1, span.end, m.vp.Height + 5} {
+	for _, y := range []int{stickyTopRow(m) + span.start - 1, stickyTopRow(m) + span.end, m.vp.Height + screenPadV + layoutChromeRows + 5} {
 		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: y})
 		m = next.(Model)
 
@@ -268,7 +268,7 @@ func TestModel_ToolBlock_ClickAccountsForStickyHeader(t *testing.T) {
 
 	// Screen row = sticky line (1) + content line - YOffset.
 	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: 1,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: stickyTopRow(m),
 	})
 	m = next.(Model)
 
@@ -852,13 +852,7 @@ func TestToolBlock_ClickParityWithRenderedRows(t *testing.T) {
 		return m
 	}
 
-	topRowOf := func(m Model) int {
-		if m.stickyText() != "" {
-			return 1
-		}
-
-		return 0
-	}
+	topRowOf := stickyTopRow // screen rows are padding + sticky aware
 
 	// Screen offsets: top, middle, and deep enough to pin the sticky bar.
 	for _, yOff := range []int{0, 3, 8} {

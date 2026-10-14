@@ -7,6 +7,15 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added
+
+- The chat screen now sits inside a padding margin instead of touching
+  the terminal edges: two blank columns each side, one blank row top and
+  bottom, and one blank row between the transcript and the composer. The
+  viewport and composer shrink by exactly that chrome so the screen still
+  fills the terminal height (no alt-screen jitter); mouse selection and
+  tool-row clicks track the shifted transcript origin.
+
 ### Fixed
 
 - The composer now grows with **soft-wrapped** lines too, not just explicit
