@@ -7,6 +7,13 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Removed — no 50-round turn cap (2026-10-14)
+
+- Turns are no longer capped at 50 tool rounds (`max tool rounds (50)
+  exceeded`). The loop runs until the model stops calling tools; the guard
+  against a runaway loop is cancellation (interrupt the turn), not a cap
+  (ADR-0017). Long tasks finish in one turn instead of dying mid-flight.
+
 ### Fixed — history replay opens at the bottom (2026-10-14)
 
 - Loading a session (session picker → enter, or a TUI restart reconnecting

@@ -12,9 +12,10 @@ import (
 	"github.com/dev-hann/golem/internal/tools"
 )
 
-// maxRounds bounds tool rounds per turn so a confused model cannot loop
-// forever.
-const maxRounds = 50
+// The turn loop is unbounded: it ends when the model stops calling tools
+// or the context is cancelled, not on a round cap. Rationale: a cap cut
+// long legitimate tasks mid-flight with no summary (ADR-0017); cancellation
+// is the guard against a confused model.
 
 // EventType enumerates agent turn events. The names mirror the wire events in
 // docs/PROTOCOL.md so the server can forward them without translation.
@@ -104,7 +105,7 @@ func (a *Agent) Run(ctx context.Context, history []llm.Message, userText string)
 	go func() {
 		defer close(out)
 
-		messages := make([]llm.Message, len(history), len(history)+2*maxRounds)
+		messages := make([]llm.Message, len(history), len(history)+2)
 		copy(messages, history)
 		messages = append(messages, llm.Message{Role: llm.RoleUser, Text: userText})
 		a.runTurn(ctx, messages, out)
@@ -141,7 +142,7 @@ func (a *Agent) runTurn(ctx context.Context, messages []llm.Message, out chan<- 
 		return
 	}
 
-	for range maxRounds {
+	for {
 		text, calls, usage, fatal := a.streamRound(ctx, messages, emit)
 		inTok += usage.input
 		outTok += usage.output
@@ -165,8 +166,6 @@ func (a *Agent) runTurn(ctx context.Context, messages []llm.Message, out chan<- 
 
 		messages = append(messages, llm.Message{Role: llm.RoleUser, ToolResults: results})
 	}
-
-	emit(Event{Type: EventError, Err: fmt.Errorf("max tool rounds (%d) exceeded", maxRounds)})
 }
 
 // roundUsage accumulates per-round token counts.

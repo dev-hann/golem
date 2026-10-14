@@ -56,7 +56,7 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
 
 ## The agent loop
 
-One **turn** = one user message → zero or more tool rounds → final assistant message.
+One **turn** = one user message → zero or more tool rounds → final assistant message. Rounds are unbounded (ADR-0017): the loop ends when the model stops calling tools or the context is cancelled.
 
 ```
 for {
