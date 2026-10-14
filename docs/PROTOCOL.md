@@ -62,7 +62,7 @@ Override the model this session uses for subsequent turns (same provider; switch
 
 ### `create_session` / `list_sessions` / `load_session`
 
-Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client.
+Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
 
 ```json
 {"type":"create_session","cwd":"/home/user/project"}
@@ -93,7 +93,26 @@ Replay batch after `load_session`. Contains zero or more compacted prior events 
 ### `session_list`
 
 ```json
-{"type":"session_list","sessions":[{"id":"01J...","cwd":"/p","created":"2026-09-27T10:00:00Z","turns":12,"last_active":"2026-09-27T12:30:00Z"}]}
+{"type":"session_list","sessions":[{"id":"01J...","title":"Fix auth middleware","cwd":"/p","created":"2026-09-27T10:00:00Z","turns":12,"last_active":"2026-09-27T12:30:00Z"}]}
+```
+
+`title` is optional: the server generates it with a model side call after a session's first turn (persisted as a `session_title` record) and omits it while absent or failed.
+
+### `session_title`
+
+Server-persisted record naming a session for listings. Emitted to a client after `rename_session` confirms; clients encounter stored titles through `session_list`.
+
+```json
+{"type":"session_title","session":"01J...","title":"Fix auth middleware"}
+```
+
+### Version handshake
+
+`version_query` asks the running server to identify its build; `server_hello` answers. The launcher uses this to detect (and restart) a stale detached server — a server that cannot answer is treated as outdated.
+
+```json
+{"type":"version_query"}
+{"type":"server_hello","version":"v0.1.9"}
 ```
 
 ### `turn` events

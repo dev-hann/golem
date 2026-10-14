@@ -35,6 +35,117 @@ config schema may change without notice.
   removed so the new listener can bind), then runs the TUI. Subsequent
   invocations reuse the running server.
 
+### Fixed — tool-row click targeting off by one per tool block (2026-10-14)
+
+- renderBlocks counted the tool attach separator ('\n' — a mere line
+  break, not a blank row) as a line, shifting every span below a tool
+  block by one row per tool call above it. Clicks landed on the row
+  above the chevron actually hit. A new parity test clicks every
+  rendered tool row across scroll offsets and asserts the toggled block
+  matches the row's visible text; it also caught the same skew in the
+  sticky-header's user spans.
+
+### Changed — tool results collapse behind clicks (2026-10-14)
+
+- Tool calls render one summary row — `▸ ✓ read main.go` — with the
+  argument parsed per tool (path, command, pattern) instead of raw JSON.
+  Results (success and failure alike) stay collapsed; clicking the row
+  toggles the `▾` expansion with the bounded preview. Hit-testing reuses
+  the sticky-header span tracking (toolSpans) and accounts for the
+  pinned question bar.
+
+### Added — provider retry with exponential backoff (2026-10-14)
+
+- Rate limits, overload, 5xx, and network drops no longer kill a turn on
+  first contact: `llm.Retrying` wraps every constructed provider and
+  retries transient failures before any content has streamed — 1s, 2s,
+  4s, 8s, 16s, 30s (six retries, ~61s worst case), then surfaces the
+  last error. Failures after content began are not retried: the
+  transcript already holds the partial output and a retry would
+  duplicate it. Auth failures and request errors (4xx) fail immediately.
+- Adapters classify SDK errors onto `llm.ErrTransient`/`llm.ErrAuth`
+  markers (status-based; status-less errors count as network drops).
+  Each retry leaves a line in serve.log. Applies to every consumer —
+  turns, the session-title side call, chat, ask.
+
+### Added — session picker search/rename, server version handshake (2026-10-14)
+
+- Session picker rows are minimal: `title · 2h ago` (directory name
+  until the LLM title lands); turn counts and paths are gone from the
+  row. Typing fuzzy-filters the open list; `esc` clears the filter
+  first, then closes.
+- `ctrl+r` in the picker renames the highlighted session inline
+  (opencode's binding): enter commits via the new `rename_session`
+  event — the server sanitizes, persists the newest `session_title`
+  record (last one wins), and confirms with `session_title`.
+- A stale detached server no longer serves a newer client silently:
+  `version_query`/`server_hello` handshake plus a pid file next to the
+  socket. The launcher restarts a mismatched server automatically — via
+  the pid file, or by resolving the socket's owner with `lsof` when the
+  pid file is absent (pre-pidfile servers). When neither yields a safe
+  kill target the launch fails fast with the restart instruction instead
+  of continuing degraded. Title-generation failures now leave a line in
+  serve.log instead of vanishing.
+
+### Added — LLM-generated session titles (2026-10-14)
+
+- After a session's first turn the server makes a title side call
+  (opencode-style prompt: one line, ≤50 chars, the user's language) and
+  persists the result as a `session_title` record (folded back on load,
+  listed in `session_list` via the new optional `title` field). Failures
+  leave the session untitled — no fallback, no retry. The title is
+  never streamed mid-turn; the picker sees it on its next list.
+- The session picker row is now `title · dir · N turns · 2h ago` — the
+  raw ULID no longer renders. `sessionRow`/`relTime` in the TUI derive
+  the row from `SessionSummary` (`last_active` was already on the wire,
+  now finally shown).
+
+### Removed — status footer (2026-10-14)
+
+- The one-line status bar above the composer is gone: no more
+  provider · model · thinking…/done (in=… out=…) line, and the
+  `statusParts` state with it (it accumulated across turns anyway).
+  The composer now meets the transcript directly and the viewport
+  reclaims the row. `provider`/`model` stay as state — the model
+  picker still shows them (`models · zai-coding`). `Kit.StatusBar`
+  lost its only caller and is removed. Status surface may return
+  later as a deliberate design, not as leftover chrome.
+
+### Changed — keymap follows opencode, command palette replaces help (2026-10-14)
+
+- `ctrl+p` opens a command palette (opencode `command_list`): type to
+  filter with fuzzy subsequence matching (`ns` hits "new session"),
+  `↑`/`↓` or `ctrl+p`/`ctrl+n` select, `enter` runs, `esc` closes. It
+  lists new session, session list, model list, and quit with their
+  shortcuts, doubling as the key reference.
+- The `ctrl+x ?` help modal is gone — the palette carries the
+  non-action hints (send, newline, jump keys) in its footer.
+- `ctrl+x l` now opens the session picker (opencode `session_list`;
+  was `ctrl+x p`). The clear-transcript-view command is removed —
+  opencode has no counterpart and the session list covers the need.
+- `ctrl+c` follows opencode's exit ladder: interrupt the active turn,
+  then clear the composer, quit only once it is empty. `ctrl+d` and
+  `ctrl+x q` also quit.
+- `ctrl+j` inserts a newline alongside `alt+enter` (opencode
+  `input_newline`).
+- `ctrl+g` / `ctrl+alt+g` jump the transcript to the top / bottom
+  (opencode `messages_first`/`messages_last`); plain home/end stay with
+  the composer as in opencode. Dialogs (sessions, models, palette)
+  navigate with `ctrl+p`/`ctrl+n` too.
+- Tool-call blocks always show their result preview inline; the
+  `ctrl+x x` expand/collapse toggle and the `expanded` block state are
+  removed.
+
+### Changed — leader mode marks the composer, not the status bar (2026-10-14)
+
+- Arming a `ctrl+x` sequence no longer prints the key cheat sheet into the
+  status bar above the composer. The mode now shows on the composer
+  itself: its left rail turns accent-colored, and the empty-input hint
+  swaps to "shortcut mode — press ? for the key list · esc cancels"
+  (idle hint stays the enter/alt+enter/ctrl+x reference). The rail is the
+  persistent indicator — the hint text only prints while the input is
+  empty.
+
 ### Changed — leader-key command namespace (2026-10-13)
 
 - Every command now rides a `ctrl+x` leader sequence: `ctrl+x n` new

@@ -58,26 +58,30 @@ Also available: `golem serve` runs just the agent server; `golem chat` is a line
 
 ### TUI keys
 
+The keymap mirrors [opencode's defaults](https://opencode.ai/docs/keybinds/) wherever golem has the feature.
+
 | Key | Action |
 |---|---|
+| `ctrl+p` | command palette — type to filter (`ns` fuzzy-matches "new session"), `↑`/`↓` or `ctrl+p`/`ctrl+n` select, `enter` run, `esc` close |
 | `ctrl+x` … `n` | new session (transcript resets, same connection) |
-| `ctrl+x` … `p` | session picker — `↑`/`↓` select, `enter` open, `esc` cancel |
+| `ctrl+x` … `l` | session picker — type to filter, `ctrl+r` rename, `↑`/`↓` select, `enter` open, `esc` clear filter/close |
 | `ctrl+x` … `m` | model picker — switches the session's model from the next turn (`set_model`) |
-| `ctrl+x` … `x` | expand/collapse the most recent tool-call block |
-| `ctrl+x` … `l` | clear the transcript view (session and context stay) |
-| `ctrl+x` … `?` | help — every binding in a centered modal |
+| `ctrl+x` … `q` / `ctrl+d` | quit |
 | `enter` | send message |
-| `alt+enter` (option+enter) | insert a newline — the input box grows with the message |
-| `ctrl+c` | interrupt the active turn; press again to quit |
+| `alt+enter` / `ctrl+j` | insert a newline — the input box grows with the message |
+| `ctrl+c` | interrupt the active turn; then clear the composer; quit once it is empty |
 | `esc` | interrupt the active turn |
 | `pgup` / `pgdn` | scroll the transcript |
+| `ctrl+g` / `ctrl+alt+g` | jump the transcript to the top / bottom |
 | `y` / `n` | allow / deny a pending command approval (any other key denies) |
+| click a tool row | expand / collapse that tool call's result — `▸ ✓ read main.go` summaries are collapsed by default (✗ marks failures) |
 
-All commands share the `ctrl+x` leader: press it, then the key within two
-seconds (the status bar lists the options while the sequence is pending).
-Direct chords like `ctrl+m` cannot be bound — terminals send them
-identically to `enter` — which is why the command namespace lives behind
-the leader.
+All leader commands share the `ctrl+x` prefix: press it, then the key
+within two seconds (the composer hint lists the options while the
+sequence is pending). Direct chords like `ctrl+m` cannot be bound —
+terminals send them identically to `enter` — which is why the command
+namespace lives behind the leader. The `ctrl+p` palette doubles as the
+key reference; tool-call results render inline under their summary line.
 
 ## Configuration
 
