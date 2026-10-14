@@ -158,7 +158,7 @@ func SocketOwnerPID(socket string) (int, bool) {
 			}
 
 			pid = parsed
-		case strings.HasPrefix(line, "n") && strings.TrimPrefix(line, "n") == socket:
+		case strings.HasPrefix(line, "n") && socketName(line) == socket:
 			if pid > 1 && pid != os.Getpid() {
 				return pid, true
 			}
@@ -168,6 +168,17 @@ func SocketOwnerPID(socket string) (int, bool) {
 	}
 
 	return 0, false
+}
+
+// socketName extracts the socket path from an lsof `-F n` field, trimming
+// the optional " type=STREAM" suffix some lsof builds append.
+func socketName(field string) string {
+	name := strings.TrimPrefix(field, "n")
+	if base, _, found := strings.Cut(name, " type="); found {
+		return base
+	}
+
+	return name
 }
 
 // readPIDFile returns the recorded server pid, if present and parsable.
