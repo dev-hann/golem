@@ -37,12 +37,16 @@ config schema may change without notice.
 - `session_list` rows carry a `busy` flag — live server state: true while a
   turn runs in that session, false on idle. A list-time snapshot, not a
   subscription.
-- The session picker marks the session this client is in with `· current`
-  and prepositions the cursor on it, so opening the picker lands on "where
-  you are" instead of row zero.
-- Sessions with a live turn show `· running` in the picker. For the current
+- Session picker rows are visual columns now — `▎ ⠋ title  2h ago` — no
+  text status words: a user-colored left bar marks the session this client
+  is in (cursor prepositions on it too, so opening the picker lands on
+  "where you are"), an accent braille spinner animates while a turn is
+  live in that session, and the dim relative age stays on the right.
+  The title alone absorbs truncation so the columns stay aligned.
+- Spinner animation runs only while the picker is open (100 ms ticks,
+  generation-guarded so a closed picker's ticks drop); for the current
   session the client's own turn state wins over the (possibly stale) list
-  snapshot; other sessions use the server's flag.
+  snapshot, other sessions use the server's flag.
 
 ### Added
 
