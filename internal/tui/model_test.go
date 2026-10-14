@@ -1379,3 +1379,120 @@ func TestModalViews_FitTerminalWidth(t *testing.T) {
 		})
 	}
 }
+
+func TestModel_StickyPinsLastLineWithoutTrailingNewline(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m.blocks = []block{
+		{kind: blockUser, text: "question one"},
+		{kind: blockAssistant, text: strings.Repeat("answer line\n", 60)},
+		{kind: blockUser, text: "question two"},
+	}
+	m.refreshView()
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	// The final delta carries NO trailing newline: its text is the very
+	// last content line, with no empty line to sacrifice to the shrink.
+	m = deliver(t, m, golemclient.TextDelta{
+		Type:  golemclient.TypeTextDelta,
+		Delta: strings.Repeat("filler\n", 40) + "tail-marker",
+	})
+
+	if m.stickyText() != "question two" {
+		t.Fatalf("precondition: sticky must pin question two, got %q", m.stickyText())
+	}
+	if !strings.Contains(m.View(), "tail-marker") {
+		t.Errorf("the true last line must stay visible when sticky shrinks the viewport:\n%s", m.View())
+	}
+}
+
+func TestModel_StickyTailSurvivesResizeShrink(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 30)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{
+		Type:  golemclient.TypeTextDelta,
+		Delta: strings.Repeat("filler\n", 80) + "tail-marker",
+	})
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+	if !strings.Contains(m.View(), "tail-marker") {
+		t.Fatal("precondition: tail visible before shrink")
+	}
+
+	m = resize(m, 80, 14)
+	if !strings.Contains(m.View(), "tail-marker") {
+		t.Errorf("resize shrink must keep the true last line visible under sticky:\n%s", m.View())
+	}
+}
+
+func TestModel_ManualScrollToBottomShowsLastLine(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{
+		Type:  golemclient.TypeTextDelta,
+		Delta: strings.Repeat("filler\n", 60) + "tail-marker",
+	})
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+	for range 8 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	}
+
+	for range 8 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+	}
+
+	if !m.follow {
+		t.Error("reaching the bottom should resume follow")
+	}
+	if !strings.Contains(m.View(), "tail-marker") {
+		t.Errorf("paging back to the bottom must show the true last line:\n%s", m.View())
+	}
+}
+
+func TestModel_ToolBlock_ClickLandsOnRenderedRowUnderStickyAtBottom(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+
+	// Long answer, then a tool call as the LAST content line: the sticky
+	// bar pins (the governing question scrolled off) and the window sits
+	// at the tail — the state where the rendered window runs one row
+	// ahead of vp.YOffset.
+	m.blocks = []block{
+		{kind: blockUser, text: "fix the bug"},
+		{kind: blockAssistant, text: strings.Repeat("answer line\n", 60)},
+		{kind: blockTool, callID: "c1", tool: "read", args: `{"path":"main.go"}`, done: true, ok: true, result: "1: package main"},
+	}
+	m.refreshView()
+	m.vp.GotoBottom()
+	m.refreshView()
+
+	if m.stickyText() != "fix the bug" {
+		t.Fatalf("precondition: sticky header must be visible, got %q", m.stickyText())
+	}
+	if !m.vp.AtBottom() {
+		t.Fatal("precondition: viewport at the bottom")
+	}
+
+	span := m.toolSpans[0]
+	top := stickyTopRow(m)
+	offset, height := m.renderedWindow()
+	if span.start < offset || span.start >= offset+height {
+		t.Fatalf("precondition: tool row inside the rendered window: span=%d window=[%d,%d)", span.start, offset, offset+height)
+	}
+
+	// Click the tool row's screen position: sticky line + rows into the window.
+	next, _ := m.Update(tea.MouseMsg{
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
+		X: 2, Y: top + span.start - offset,
+	})
+	m = next.(Model)
+
+	if !m.blocks[2].expanded {
+		t.Error("click must land on the rendered tool row, not a row ahead of it")
+	}
+}

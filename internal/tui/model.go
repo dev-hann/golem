@@ -1453,14 +1453,42 @@ func (m Model) stickyText() string {
 	return span.text
 }
 
-// shrunkViewport renders one viewport row shorter, paying for the sticky
-// line so the total screen height stays constant.
+// shrunkViewport renders the transcript window under a pinned sticky
+// line, one row shorter so the total screen height stays constant.
 func (m Model) shrunkViewport() string {
+	offset, height := m.renderedWindow()
+
 	vp := m.vp
-	vp.Height = max(vp.Height-1, viewportMinHeight)
+	vp.YOffset, vp.Height = offset, height
 
 	return vp.View()
 }
+
+// renderedWindow returns the content-line window [offset, offset+height)
+// the transcript actually renders: the sticky bar shortens the viewport
+// by one row, and a window pinned to the tail must advance by that row —
+// pinning against the full height alone strands the last content line
+// below the fold, hidden behind the composer box. A scrolled-back window
+// stays top-aligned: it only loses its final row.
+func (m Model) renderedWindow() (offset, height int) {
+	height = max(m.vp.Height-stickyRows, viewportMinHeight)
+	offset = m.vp.YOffset
+
+	if m.vp.AtBottom() {
+		offset = max(m.totalLines()-height, 0)
+	}
+
+	return offset, height
+}
+
+// totalLines counts the rendered transcript's content lines.
+func (m Model) totalLines() int {
+	return len(strings.Split(m.content, "\n"))
+}
+
+// stickyRows is the row count the pinned sticky header borrows from the
+// viewport.
+const stickyRows = 1
 
 // modalized renders the modal floating over a faded, escape-free backdrop
 // of the full layout — the base stays visible in the theme's dim tone.
