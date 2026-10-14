@@ -181,6 +181,7 @@ func TestStatus_NewSessionResetsStatus(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
 	m = deliver(t, m, golemclient.TurnStart{
 		Type: golemclient.TypeTurnStart, Provider: "zai", Model: "glm-5.3",
 	})

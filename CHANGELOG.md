@@ -7,6 +7,18 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — lazy session creation (2026-10-14)
+
+- Clients no longer mint a session on connect. The TUI and `golem chat`
+  create their session on the first submitted message (ADR-0018):
+  launching and quitting without speaking leaves nothing on the server,
+  and the session picker lists only sessions that hold a conversation.
+  The first message of a session waits one round-trip
+  (`create_session` → `session_meta`) before the turn starts, shown as
+  `● creating session` in the status line; `ctrl+x n` before any session
+  is a no-op, and a model picked before the session exists applies on
+  creation.
+
 ### Fixed — the last transcript line stays visible under the sticky bar (2026-10-14)
 
 - With the sticky header pinned, the viewport bottom-pinned against its
