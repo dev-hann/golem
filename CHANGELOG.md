@@ -12,8 +12,11 @@ config schema may change without notice.
 - The composer now grows with **soft-wrapped** lines too, not just explicit
   newlines: a long single line that the textarea wraps over several screen
   rows expands the input box (same min-height, 40% terminal cap, and
-  viewport give-back as before). Row counting mirrors the wrap the textarea
-  itself applies, so wide (Hangul) runes count double.
+  viewport give-back as before). The row count comes from the textarea's own
+  wrap — bubbles breaks lines that fill the width one row earlier than plain
+  width math (trailing-space anchors, inclusive boundaries, nine Hangul
+  syllables per 20-column row), so the box always matches the rendered
+  content and never hides its top rows.
 - `SocketOwnerPID` now tolerates lsof builds that append ` type=STREAM` to
   the `-F n` name field — foreign-server detection works outside CI's lsof.
 

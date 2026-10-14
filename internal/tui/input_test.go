@@ -96,9 +96,11 @@ func TestInput_HeightGrowsWithContentAndResets(t *testing.T) {
 func TestInput_HeightGrowsWithSoftWrap(t *testing.T) {
 	t.Parallel()
 
-	// The textarea wraps its text at the usable width: terminal width minus
-	// the composer border (2) and the default "┃ " prompt (2) — clamped to
-	// viewportMinWidth before that.
+	// Expectations are pinned to bubbles v1.0.0 wrap behavior: lines that
+	// fill the usable width wrap one row earlier than a plain width split
+	// suggests (trailing-space anchors, >= boundaries). The usable width is
+	// terminal width minus the composer border (2) and the "┃ " prompt (2),
+	// clamped to viewportMinWidth before that.
 	tests := []struct {
 		name  string
 		width int
@@ -106,10 +108,13 @@ func TestInput_HeightGrowsWithSoftWrap(t *testing.T) {
 		want  int
 	}{
 		{"short line stays one row", 40, "hello", 1},
-		{"long single line wraps by columns", 40, strings.Repeat("a", 100), 3},
-		{"wide runes count double", 24, strings.Repeat("가", 40), 4},
+		{"long single line wraps by columns", 40, strings.Repeat("a", 100), 3}, // usable 36
+		{"hangul wraps nine syllables per row", 24, strings.Repeat("가", 40), 5},
 		{"word boundary moves whole words", 12, "aaaaaaaaaa bbbbbbbbbb", 2},
 		{"explicit newline plus wrap", 12, "aaaa\n" + strings.Repeat("b", 30), 3},
+		{"trailing space at the boundary anchors a row", 22, strings.Repeat("a", 17) + " ", 2},
+		{"width filled exactly", 22, "word " + strings.Repeat("x", 13), 2},
+		{"word run at a wider boundary", 40, "aaaa bbbb cccc dddd eeee ffff gggg", 2},
 		{"empty input one row", 40, "", 1},
 	}
 

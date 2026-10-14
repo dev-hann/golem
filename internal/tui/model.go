@@ -909,11 +909,11 @@ func (m *Model) resize(width, height int) {
 }
 
 // syncInputHeight grows the input box with its content — one row per
-// visual line, wrapping included, min minInputHeight, capped at the
-// terminal share — and returns the freed or claimed rows to the transcript
-// viewport.
+// visual line the textarea actually renders (see composerRows), min
+// minInputHeight, capped at the terminal share — and returns the freed or
+// claimed rows to the transcript viewport.
 func (m *Model) syncInputHeight() {
-	rows := m.visualInputRows()
+	rows := composerRows(m.input.Value(), m.input.Width())
 
 	height := m.height
 	if height == 0 {
@@ -933,18 +933,6 @@ func (m *Model) syncInputHeight() {
 	if m.height > 0 {
 		m.vp.Height = max(m.height-rows-inputBorderRows, viewportMinHeight)
 	}
-}
-
-// visualInputRows reports how many screen rows the composer's content
-// occupies once the textarea soft-wraps it at its width. It mirrors the
-// word-wrap-plus-hardwrap reflow bubbles itself applies when rendering the
-// placeholder, so wrapped words, wide runes, and explicit newlines all
-// count.
-func (m *Model) visualInputRows() int {
-	width := m.input.Width()
-	wrapped := ansi.Hardwrap(ansi.Wordwrap(m.input.Value(), width, ""), width, true)
-
-	return strings.Count(wrapped, "\n") + 1
 }
 
 // Layout minimums so tiny terminals still render.
