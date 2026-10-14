@@ -228,3 +228,43 @@ func TestStatus_EscInterruptsActiveTurn(t *testing.T) {
 		t.Errorf("esc should send Interrupt, got %#v", lastSent(t, fc))
 	}
 }
+
+func TestStatus_SessionSwitchResetsStatus(t *testing.T) {
+	t.Parallel()
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+
+	// Session A completes a turn: idle status carries its model and usage.
+	m = deliver(t, m, golemclient.TurnStart{
+		Type: golemclient.TypeTurnStart, Provider: "zai", Model: "glm-5.3",
+	})
+	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
+	m = deliver(t, m, golemclient.TurnEnd{
+		Type:  golemclient.TypeTurnEnd,
+		Usage: golemclient.Usage{InputTokens: 1200, OutputTokens: 3400},
+	})
+
+	// Switch to session B through the picker.
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Cwd: "/a", Turns: 1},
+			{ID: "s2", Cwd: "/b", Turns: 2},
+		},
+	})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	if _, ok := lastSent(t, fc).(golemclient.LoadSession); !ok {
+		t.Fatal("picker enter should send a load_session")
+	}
+
+	// The status must not carry session A's identity into session B.
+	line := strings.Join(strings.Fields(m.statusLine()), " ")
+	for _, stale := range []string{"glm-5.3", "1.2k", "3.4k"} {
+		if strings.Contains(line, stale) {
+			t.Errorf("status after switch leaked session A's %q: %q", stale, line)
+		}
+	}
+}

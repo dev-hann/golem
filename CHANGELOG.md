@@ -38,6 +38,14 @@ config schema may change without notice.
 
 ### Fixed
 
+- Status-line state leaked across session switches: picking a session
+  from the picker cleared the transcript but kept the previous
+  session's model name and token usage in the idle status. Both switch
+  paths (new session, picker load) now go through `clearTranscript`,
+  which resets every session-scoped field. The interrupt hint was also
+  translated back to English (`esc to interrupt`) for UI consistency —
+  the interface language is English throughout.
+
 - The composer now grows with **soft-wrapped** lines too, not just explicit
   newlines: a long single line that the textarea wraps over several screen
   rows expands the input box (same min-height, 40% terminal cap, and

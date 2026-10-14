@@ -360,7 +360,7 @@ func TestKit_StatusBarOneLineFitsWidth(t *testing.T) {
 
 	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	bar := k.StatusBar(40, "bash — go test ./... 5s", "esc 중단", kit.Tool)
+	bar := k.StatusBar(40, "bash — go test ./... 5s", "esc to interrupt", kit.Tool)
 	if strings.Contains(bar, "\n") {
 		t.Errorf("status bar must be one line:\n%s", bar)
 	}

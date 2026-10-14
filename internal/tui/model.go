@@ -387,14 +387,23 @@ func (m *Model) setLeader(armed bool) {
 // newSessionCmd resets the local view and asks the server for a fresh
 // session over the same connection.
 func (m Model) newSessionCmd() (tea.Model, tea.Cmd) {
+	m.clearTranscript()
+
+	return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
+}
+
+// clearTranscript drops every session-scoped piece of local view state:
+// blocks and their spans, the model identity, and the status line's
+// turn/usage bookkeeping. Session switches (new session, picker load)
+// both land here — the incoming session's History/TurnStart repopulates.
+func (m *Model) clearTranscript() {
 	m.clearSelection()
 	m.blocks = nil
+	m.userSpans, m.toolSpans = nil, nil
 	m.provider, m.modelName = "", ""
 	m.endTurn()
 	m.lastUsage = golemclient.Usage{}
 	m.refreshView()
-
-	return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
 }
 
 // openSessions requests the session list and opens the picker when it
@@ -806,7 +815,7 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		chosen := filtered[m.pickIndex]
 		m.mode = modeChat
-		m.blocks = nil
+		m.clearTranscript()
 
 		return m, m.send(golemclient.LoadSession{
 			Type: golemclient.TypeLoadSession, Session: chosen.ID,
@@ -1267,7 +1276,7 @@ func (m Model) statusLine() string {
 
 	right := ""
 	if m.turnActive {
-		right = "esc 중단"
+		right = "esc to interrupt"
 	}
 
 	return m.kit.StatusBar(m.vp.Width, left, right, token)
