@@ -7,6 +7,20 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed — the status bar shows a running turn after switching back to its session (2026-10-14)
+
+- Switching sessions while a turn was streaming and then returning to it
+  rendered `● idle` even though the turn kept running. Cause: the turn's
+  `turn_start` fires once, so nothing re-armed the active-turn state on
+  return, and `load_session`'s replay folded away the lifecycle events
+  the status line needed. `session_meta` now carries an additive `busy`
+  flag (live state at load time), and the TUI's history replay folds
+  turn lifecycle into status bookkeeping: the last `turn_start` restores
+  the model name, the last `turn_end` the usage, and a busy session
+  whose replay ends mid-turn resumes as an active turn (thinking /
+  responding / tool + elapsed). An idle load with a terminated replay
+  stays idle.
+
 ### Changed — lazy session creation (2026-10-14)
 
 - Clients no longer mint a session on connect. The TUI and `golem chat`

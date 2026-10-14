@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -261,5 +262,123 @@ func TestStatus_SessionSwitchResetsStatus(t *testing.T) {
 		if strings.Contains(line, stale) {
 			t.Errorf("status after switch leaked session A's %q: %q", stale, line)
 		}
+	}
+}
+
+// rawLines wraps JSONL lines as a history batch's raw events.
+func rawLines(lines ...string) []json.RawMessage {
+	out := make([]json.RawMessage, 0, len(lines))
+	for _, l := range lines {
+		out = append(out, json.RawMessage(l))
+	}
+	return out
+}
+
+// Resuming a session whose turn is still in flight (meta busy=true, a
+// replay that ends with turn_start but no turn_end) must restore the
+// active-turn status — the bug: switching away and back rendered "idle"
+// while the turn kept streaming.
+func TestStatus_ResumeBusySessionRestoresActiveTurn(t *testing.T) {
+	t.Parallel()
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+
+	// Session A's turn runs; the client switches away mid-flight and back.
+	m = deliver(t, m, golemclient.SessionMeta{
+		Type: golemclient.TypeSessionMeta, Session: "s1",
+	})
+	m = deliver(t, m, golemclient.TurnStart{
+		Type: golemclient.TypeTurnStart, Session: "s1", Provider: "zai", Model: "glm-5.3",
+	})
+	m = deliver(t, m, golemclient.TextDelta{
+		Type: golemclient.TypeTextDelta, Session: "s1", Delta: "working",
+	})
+
+	// Picker switch to s2 and back to s1 (busy at load time).
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Cwd: "/a", Turns: 1, Busy: true},
+			{ID: "s2", Cwd: "/b", Turns: 2},
+		},
+	})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // load s1
+	if _, ok := lastSent(t, fc).(golemclient.LoadSession); !ok {
+		t.Fatal("picker enter should send a load_session")
+	}
+
+	m = deliver(t, m, golemclient.SessionMeta{
+		Type: golemclient.TypeSessionMeta, Session: "s1", Busy: true,
+	})
+	m = deliver(t, m, golemclient.History{
+		Type: golemclient.TypeHistory, Session: "s1",
+		Events: rawLines(
+			`{"type":"user_message","session":"s1","text":"hi"}`,
+			`{"type":"turn_start","session":"s1","turn":"t1","provider":"zai","model":"glm-5.3"}`,
+			`{"type":"text_delta","session":"s1","turn":"t1","delta":"working"}`,
+		),
+	})
+
+	if !m.turnActive {
+		t.Fatal("resuming a busy session should restore turnActive from the replay")
+	}
+	if m.modelName != "glm-5.3" {
+		t.Errorf("model = %q, want glm-5.3 restored from replay", m.modelName)
+	}
+
+	line := strings.Join(strings.Fields(m.statusLine()), " ")
+	if !strings.Contains(line, "responding") {
+		t.Errorf("status after resume should show responding, got %q", line)
+	}
+
+	// The live turn continues on the same session: its turn_end lands and
+	// the status returns to idle with the turn's usage.
+	m = deliver(t, m, golemclient.TextDelta{
+		Type: golemclient.TypeTextDelta, Session: "s1", Delta: " done",
+	})
+	m = deliver(t, m, golemclient.TurnEnd{
+		Type: golemclient.TypeTurnEnd, Session: "s1",
+		Usage: golemclient.Usage{InputTokens: 100, OutputTokens: 200},
+	})
+
+	if m.turnActive {
+		t.Error("turn_end after resume should return the status to idle")
+	}
+	if !strings.Contains(m.statusLine(), "200") {
+		t.Errorf("idle status should carry the resumed turn's usage, got %q", m.statusLine())
+	}
+}
+
+// A closed replay (turn_end present, or no in-flight turn_start) must not
+// leave turnActive stuck on — sessions interrupted by a crash or loaded
+// idle render idle. Only a busy meta plus an unterminated replay marks
+// the turn live.
+func TestStatus_ResumeIdleSessionStaysIdle(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+
+	m = deliver(t, m, golemclient.SessionMeta{
+		Type: golemclient.TypeSessionMeta, Session: "s1", Busy: false,
+	})
+	m = deliver(t, m, golemclient.History{
+		Type: golemclient.TypeHistory, Session: "s1",
+		Events: rawLines(
+			`{"type":"user_message","session":"s1","text":"hi"}`,
+			`{"type":"turn_start","session":"s1","turn":"t1","provider":"zai","model":"glm-5.3"}`,
+			`{"type":"text_delta","session":"s1","turn":"t1","delta":"done"}`,
+			`{"type":"turn_end","session":"s1","turn":"t1","usage":{"input_tokens":100,"output_tokens":200}}`,
+		),
+	})
+
+	if m.turnActive {
+		t.Error("idle load with a terminated replay should stay idle")
+	}
+	if !strings.Contains(m.statusLine(), "glm-5.3") {
+		t.Errorf("idle status should carry the replay's last model, got %q", m.statusLine())
+	}
+	if !strings.Contains(m.statusLine(), "200") {
+		t.Errorf("idle status should carry the replay's last usage, got %q", m.statusLine())
 	}
 }

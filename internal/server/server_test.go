@@ -453,6 +453,92 @@ func TestServer_SessionListReportsBusyDuringTurn(t *testing.T) {
 	}
 }
 
+// A load mid-turn must announce the live turn in session_meta, so a
+// second client resuming the session can restore its status line from
+// the replay instead of rendering idle while a turn streams.
+func TestServer_LoadMidTurnReportsBusyInMeta(t *testing.T) {
+	t.Parallel()
+
+	gate := make(chan struct{})
+	provider := &scriptedProvider{}
+	provider.streamFn = func(_ context.Context, _ int) <-chan llm.Event {
+		out := make(chan llm.Event, 2)
+		out <- llm.Event{Type: llm.EventTextDelta, Delta: "working"}
+		go func() {
+			defer close(out)
+			<-gate
+			out <- llm.Event{Type: llm.EventUsage, InputTokens: 1, OutputTokens: 1}
+		}()
+		return out
+	}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+
+	second, err := golemclient.Dial(filepath.Join(h.sockDir, "golem.sock"))
+	if err != nil {
+		t.Fatalf("second dial: %v", err)
+	}
+	defer second.Close() //nolint:errcheck // test teardown
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "hi",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	h.expectType(golemclient.TypeTextDelta)
+
+	// The second connection loads the busy session: meta must carry
+	// busy=true and the replay must end without a turn_end (the turn is
+	// still in flight).
+	if err := second.Send(golemclient.LoadSession{
+		Type: golemclient.TypeLoadSession, Session: sess,
+	}); err != nil {
+		t.Fatalf("send load: %v", err)
+	}
+
+	meta := expectFrom(t, second, golemclient.TypeSessionMeta).(golemclient.SessionMeta)
+	if !meta.Busy {
+		t.Error("session_meta.busy = false mid-turn, want true")
+	}
+
+	hist := expectFrom(t, second, golemclient.TypeHistory).(golemclient.History)
+	var sawTurnStart, sawTurnEnd bool
+	for _, raw := range hist.Events {
+		switch {
+		case strings.Contains(string(raw), `"turn_start"`):
+			sawTurnStart = true
+		case strings.Contains(string(raw), `"turn_end"`):
+			sawTurnEnd = true
+		}
+	}
+	if !sawTurnStart || sawTurnEnd {
+		t.Errorf("mid-turn replay = turn_start:%v turn_end:%v, want start without end",
+			sawTurnStart, sawTurnEnd)
+	}
+
+	close(gate)
+	h.expectType(golemclient.TypeTurnEnd)
+}
+
+// expectFrom reads events from one client until the wanted type arrives.
+func expectFrom(t *testing.T, c *golemclient.Client, typ string) any {
+	t.Helper()
+
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		ev, got, err := c.ReceiveWithTimeout(2 * time.Second)
+		if err != nil || !got {
+			continue
+		}
+		if typeName(t, ev) == typ {
+			return ev
+		}
+	}
+
+	t.Fatalf("timed out waiting for %s", typ)
+	return nil
+}
+
 // listSessionByID lists sessions and returns the busy flag of the wanted
 // one; missing sessions fail the test.
 func (h *harness) listSessionByID(t *testing.T, id string) bool {
