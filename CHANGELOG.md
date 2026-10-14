@@ -7,6 +7,15 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added
+
+- Agent status line in the TUI: a one-row strip between transcript and
+  composer. Idle shows the model and the last turn's token usage
+  (↑in ↓out); while a turn runs it shows `thinking` → `responding` → the
+  in-flight tool name and its identifying argument with elapsed seconds,
+  plus an `esc` interrupt hint. Layout height stays constant (the row is
+  borrowed from the viewport, like the sticky header).
+
 ### Fixed
 
 - The composer now grows with **soft-wrapped** lines too, not just explicit
