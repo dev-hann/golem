@@ -68,7 +68,7 @@ The keymap mirrors [opencode's defaults](https://opencode.ai/docs/keybinds/) whe
 | `ctrl+x` … `m` | model picker — switches the session's model from the next turn (`set_model`) |
 | `ctrl+x` … `q` / `ctrl+d` | quit |
 | `enter` | send message |
-| `alt+enter` / `ctrl+j` | insert a newline — the input box grows with the message |
+| `alt+enter` / `ctrl+j` | insert a newline — the input box grows with the message, wrapped lines included |
 | `ctrl+c` | interrupt the active turn; then clear the composer; quit once it is empty |
 | `esc` | interrupt the active turn |
 | `pgup` / `pgdn` | scroll the transcript |

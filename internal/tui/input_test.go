@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -89,6 +90,99 @@ func TestInput_HeightGrowsWithContentAndResets(t *testing.T) {
 
 	if m.inputRows != minInputHeight {
 		t.Errorf("rows after reset = %d, want %d", m.inputRows, minInputHeight)
+	}
+}
+
+func TestInput_HeightGrowsWithSoftWrap(t *testing.T) {
+	t.Parallel()
+
+	// The textarea wraps its text at the usable width: terminal width minus
+	// the composer border (2) and the default "┃ " prompt (2) — clamped to
+	// viewportMinWidth before that.
+	tests := []struct {
+		name  string
+		width int
+		value string
+		want  int
+	}{
+		{"short line stays one row", 40, "hello", 1},
+		{"long single line wraps by columns", 40, strings.Repeat("a", 100), 3},
+		{"wide runes count double", 24, strings.Repeat("가", 40), 4},
+		{"word boundary moves whole words", 12, "aaaaaaaaaa bbbbbbbbbb", 2},
+		{"explicit newline plus wrap", 12, "aaaa\n" + strings.Repeat("b", 30), 3},
+		{"empty input one row", 40, "", 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := New("/tmp/unused.sock")
+			m.resize(tt.width, 30)
+			m.input.SetValue(tt.value)
+			m.syncInputHeight()
+
+			if m.inputRows != tt.want {
+				t.Errorf("inputRows = %d, want %d (value %q, terminal width %d)",
+					m.inputRows, tt.want, tt.value, tt.width)
+			}
+		})
+	}
+}
+
+func TestInput_HeightShrinksAsWrapDisappears(t *testing.T) {
+	t.Parallel()
+
+	m := New("/tmp/unused.sock")
+	m.resize(40, 30)
+
+	m.input.SetValue(strings.Repeat("a", 100))
+	m.syncInputHeight()
+
+	if m.inputRows != 3 {
+		t.Fatalf("inputRows = %d, want 3 while wrapped", m.inputRows)
+	}
+
+	m.input.SetValue("short")
+	m.syncInputHeight()
+
+	if m.inputRows != minInputHeight {
+		t.Errorf("inputRows = %d, want %d after shrink", m.inputRows, minInputHeight)
+	}
+}
+
+func TestInput_WrappedCapHoldsAndRewrapOnResize(t *testing.T) {
+	t.Parallel()
+
+	m := New("/tmp/unused.sock")
+
+	// Height 10 caps the composer at 4 rows; 400 columns at width 78 need 6.
+	m.resize(80, 10)
+	m.input.SetValue(strings.Repeat("a", 400))
+	m.syncInputHeight()
+
+	if want := 10 * inputMaxShareNumerator / inputMaxShareDenominator; m.inputRows != want {
+		t.Errorf("inputRows = %d, want capped at %d", m.inputRows, want)
+	}
+
+	if m.vp.Height < viewportMinHeight {
+		t.Errorf("viewport height = %d, below floor", m.vp.Height)
+	}
+
+	// The same text at a narrower terminal needs more rows, cap still holds.
+	m.resize(40, 10)
+
+	if want := 10 * inputMaxShareNumerator / inputMaxShareDenominator; m.inputRows != want {
+		t.Errorf("inputRows = %d after narrowing, want cap %d", m.inputRows, want)
+	}
+
+	// A taller terminal lifts the cap; width 38 needs 3 rows for 100 columns.
+	m.resize(40, 30)
+	m.input.SetValue(strings.Repeat("a", 100))
+	m.syncInputHeight()
+
+	if m.inputRows != 3 {
+		t.Errorf("inputRows = %d, want 3 after rewrap", m.inputRows)
 	}
 }
 
