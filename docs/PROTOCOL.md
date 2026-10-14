@@ -51,6 +51,8 @@ Override the model this session uses for subsequent turns (same provider; switch
 
 Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
 
+Clients create their session lazily (ADR-0018): no session is minted until the first submitted message — an abandoned launch must leave nothing behind. A client may connect, `list_sessions`, and `load_session` without ever sending `create_session`.
+
 ```json
 {"type":"create_session","cwd":"/home/user/project"}
 {"type":"list_sessions"}

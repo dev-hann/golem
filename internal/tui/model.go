@@ -36,6 +36,8 @@ type Model struct {
 
 	mode           mode
 	sessionID      string
+	pendingMsgs    []string // submits awaiting a session (ADR-0018 lazy create)
+	pendingModel   string   // set_model deferred until a session exists
 	turnActive     bool
 	follow         bool
 	blocks         []block
@@ -128,19 +130,15 @@ func (m Model) Init() tea.Cmd {
 	return m.connect()
 }
 
-// connect dials the server and creates a session.
+// connect dials the server. Per ADR-0018 no session is created here —
+// the first submitted message triggers create_session, so an idle
+// launch leaves nothing behind on the server.
 func (m Model) connect() tea.Cmd {
 	c := m
 
 	return func() tea.Msg {
 		conn, err := c.dial(c.socket)
 		if err != nil {
-			return connErrMsg{err: err}
-		}
-
-		if err := conn.Send(golemclient.CreateSession{
-			Type: golemclient.TypeCreateSession,
-		}); err != nil {
 			return connErrMsg{err: err}
 		}
 
@@ -245,6 +243,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 		return m, nil
 	case connectedMsg:
 		m.client = msg.conn
+		// A pre-connect submit armed the lazy create (ADR-0018).
+		if len(m.pendingMsgs) > 0 {
+			return m, tea.Batch(m.listen(), m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession}))
+		}
+
 		return m, m.listen()
 	case connErrMsg:
 		if m.quitting {
@@ -422,8 +425,13 @@ func (m *Model) setLeader(armed bool) {
 }
 
 // newSessionCmd resets the local view and asks the server for a fresh
-// session over the same connection.
+// session over the same connection. With no session yet there is nothing
+// to reset or create (ADR-0018) — the first message owns that create.
 func (m Model) newSessionCmd() (tea.Model, tea.Cmd) {
+	if m.sessionID == "" {
+		return m, nil
+	}
+
 	m.clearTranscript()
 
 	return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
@@ -734,10 +742,34 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 
 // submit sends the composed line as a chat message. Everything typed is
 // content — navigation and lifecycle live on keys, not slash commands.
+// With no session yet the line queues and triggers create_session
+// (ADR-0018): the session is born with the first word, not the launch.
 func (m Model) submit(line string) (tea.Model, tea.Cmd) {
-	if m.client == nil || m.sessionID == "" {
+	if m.client == nil && m.sessionID == "" {
+		m.blocks = append(m.blocks, block{kind: blockUser, text: line})
+		m.pendingMsgs = append(m.pendingMsgs, line)
+		m.follow = true
+		m.refreshView()
+
+		return m, nil // pre-connect: connectedMsg kicks off the create
+	}
+
+	if m.client == nil {
 		m.blocks = append(m.blocks, block{kind: blockError, text: "not connected yet"})
 		m.refreshView()
+
+		return m, nil
+	}
+
+	if m.sessionID == "" {
+		m.blocks = append(m.blocks, block{kind: blockUser, text: line})
+		m.pendingMsgs = append(m.pendingMsgs, line)
+		m.follow = true
+		m.refreshView()
+
+		if len(m.pendingMsgs) == 1 { // first pending line arms the create
+			return m, m.send(golemclient.CreateSession{Type: golemclient.TypeCreateSession})
+		}
 
 		return m, nil
 	}
@@ -771,6 +803,13 @@ func (m Model) updateModels(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		chosen := m.models[m.modelCursor]
 		m.modelName = chosen
 		m.mode = modeChat
+
+		// No session yet (ADR-0018): remember the choice and apply it
+		// when session_meta arrives.
+		if m.sessionID == "" {
+			m.pendingModel = chosen
+			return m, nil
+		}
 
 		return m, m.send(golemclient.SetModel{
 			Type: golemclient.TypeSetModel, Session: m.sessionID, Model: chosen,
@@ -1087,11 +1126,15 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		return cmd
 	}
 
-	var tick tea.Cmd
+	var (
+		tick tea.Cmd
+		cmd  tea.Cmd
+	)
 
 	switch e := ev.(type) {
 	case golemclient.SessionMeta:
 		m.sessionID = e.Session
+		cmd = m.flushPending()
 	case golemclient.TurnStart:
 		m.turnActive = true
 		m.follow = true
@@ -1136,7 +1179,43 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 
 	// tea.Batch skips nil cmds, so a pre-connect event or a non-lifecycle
 	// event needs no nil plumbing here.
-	return tea.Batch(tick, m.listenCmd())
+	return tea.Batch(tick, cmd, m.listenCmd())
+}
+
+// flushPending sends the messages (and a deferred set_model) that were
+// queued before the session existed. The sends run inline rather than as
+// cmds: wire order matters (set_model applies "from the next turn", so it
+// must land before the first user_message) and tea.Batch executes
+// concurrently. A send failure surfaces as connErrMsg.
+func (m *Model) flushPending() tea.Cmd {
+	if m.client == nil || (len(m.pendingMsgs) == 0 && m.pendingModel == "") {
+		return nil
+	}
+
+	var sendErr error
+
+	if m.pendingModel != "" {
+		sendErr = m.client.Send(golemclient.SetModel{
+			Type: golemclient.TypeSetModel, Session: m.sessionID, Model: m.pendingModel,
+		})
+		m.pendingModel = ""
+	}
+
+	for _, line := range m.pendingMsgs {
+		if sendErr == nil {
+			sendErr = m.client.Send(golemclient.UserMessage{
+				Type: golemclient.TypeUserMessage, Session: m.sessionID, Text: line,
+			})
+		}
+	}
+
+	m.pendingMsgs = nil
+
+	if sendErr != nil {
+		return func() tea.Msg { return connErrMsg{err: sendErr} }
+	}
+
+	return nil
 }
 
 // listenCmd returns the keep-listening command when a connection exists.
@@ -1346,6 +1425,9 @@ func (m Model) statusLine() string {
 		token = kit.Accent
 	case m.turnActive:
 		left = "● thinking " + m.elapsed()
+		token = kit.Accent
+	case m.sessionID == "" && (len(m.pendingMsgs) > 0 || m.pendingModel != ""):
+		left = "● creating session"
 		token = kit.Accent
 	case m.modelName != "":
 		left = "● " + m.modelName + usageSummary(m.lastUsage)

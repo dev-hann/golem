@@ -255,6 +255,7 @@ func TestPalette_FuzzySubsequenceMatch(t *testing.T) {
 
 	m, fc := wired(t)
 	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 
 	// "ns" — n…s in order — matches "new session" and nothing else.
@@ -320,6 +321,7 @@ func TestPalette_NoMatchBackspaceAndEsc(t *testing.T) {
 
 	m, fc := wired(t)
 	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
 
 	m = key(t, m, rkey('z'))

@@ -74,17 +74,12 @@ func Chat(ctx context.Context, opts ChatOptions) error {
 		_ = client.Close()
 	}()
 
-	if err := client.Send(golemclient.CreateSession{Type: golemclient.TypeCreateSession}); err != nil {
-		return fmt.Errorf("cli: creating session: %w", err)
-	}
-
 	events := make(chan any, chatEventBuffer)
 	go receiveEvents(ctx, client, events, stderr, &quiet)
 
-	sessionID := waitSessionMeta(ctx, events, stdout, stderr)
-	if sessionID == "" {
-		return fmt.Errorf("cli: connection closed before session creation")
-	}
+	// ADR-0018: no session until the first message — quitting before
+	// speaking leaves nothing behind on the server.
+	sessionID := ""
 
 	scanner := bufio.NewScanner(opts.Stdin)
 	for scanner.Scan() {
@@ -95,6 +90,17 @@ func Chat(ctx context.Context, opts ChatOptions) error {
 
 		if line == "/quit" || line == "/exit" {
 			return nil
+		}
+
+		if sessionID == "" {
+			if err := client.Send(golemclient.CreateSession{Type: golemclient.TypeCreateSession}); err != nil {
+				return fmt.Errorf("cli: creating session: %w", err)
+			}
+
+			sessionID = waitSessionMeta(ctx, events, stdout, stderr)
+			if sessionID == "" {
+				return fmt.Errorf("cli: connection closed before session creation")
+			}
 		}
 
 		if err := client.Send(golemclient.UserMessage{

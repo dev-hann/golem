@@ -11,6 +11,7 @@ Existing coding agents force a tradeoff: heavyweight runtimes that eat hundreds 
 
 - **~100–150 MB RSS** in normal use (single static binary, no runtime to load)
 - **Server/TUI split** — the agent server owns state; close your TUI, sessions live on. Reconnect anytime.
+- **Lazy sessions** — a client owns no session until its first message; an abandoned launch leaves nothing behind
 - **Append-only JSONL sessions** — no database, instant replay, trivially inspectable
 - **Multi-provider** — Anthropic today; OpenAI, Z.ai (GLM), Ollama behind the same interface (roadmap phase 5)
 - **MCP plugins** — standard Model Context Protocol servers for extensibility (roadmap phase 6)
@@ -63,7 +64,7 @@ The keymap mirrors [opencode's defaults](https://opencode.ai/docs/keybinds/) whe
 | Key | Action |
 |---|---|
 | `ctrl+p` | command palette — type to filter (`ns` fuzzy-matches "new session"), `↑`/`↓` or `ctrl+p`/`ctrl+n` select, `enter` run, `esc` close |
-| `ctrl+x` … `n` | new session (transcript resets, same connection) |
+| `ctrl+x` … `n` | new session (transcript resets, same connection; no-op before the first message creates one) |
 | `ctrl+x` … `l` | session picker — type to filter, `ctrl+r` rename, `↑`/`↓` select, `enter` open, `esc` clear filter/close |
 | `ctrl+x` … `m` | model picker — switches the session's model from the next turn (`set_model`) |
 | `ctrl+x` … `q` / `ctrl+d` | quit |
