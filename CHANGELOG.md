@@ -32,9 +32,10 @@ config schema may change without notice.
 - Agent status line in the TUI: a one-row strip between transcript and
   composer. Idle shows the model and the last turn's token usage
   (↑in ↓out); while a turn runs it shows `thinking` → `responding` → the
-  in-flight tool name and its identifying argument with elapsed seconds,
-  plus an `esc` interrupt hint. Layout height stays constant (the row is
-  borrowed from the viewport, like the sticky header).
+  in-flight tool name and its identifying argument with elapsed seconds.
+  The strip carries agent state only — no key hints. Layout height stays
+  constant (the row is borrowed from the viewport, like the sticky
+  header).
 
 ### Fixed
 
@@ -42,9 +43,7 @@ config schema may change without notice.
   from the picker cleared the transcript but kept the previous
   session's model name and token usage in the idle status. Both switch
   paths (new session, picker load) now go through `clearTranscript`,
-  which resets every session-scoped field. The interrupt hint was also
-  translated back to English (`esc to interrupt`) for UI consistency —
-  the interface language is English throughout.
+  which resets every session-scoped field.
 
 - The composer now grows with **soft-wrapped** lines too, not just explicit
   newlines: a long single line that the textarea wraps over several screen

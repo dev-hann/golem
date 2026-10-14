@@ -166,20 +166,14 @@ func TestStatus_ElapsedSecondsGrowWhileActive(t *testing.T) {
 	}
 }
 
-func TestStatus_InterruptHintShownOnlyWhileActive(t *testing.T) {
+func TestStatus_NoInterruptHintInStrip(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
 
-	if !strings.Contains(m.statusLine(), "esc") {
-		t.Errorf("active turn should show the esc interrupt hint, got %q", m.statusLine())
-	}
-
-	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
-
 	if strings.Contains(m.statusLine(), "esc") {
-		t.Errorf("idle status should drop the hint, got %q", m.statusLine())
+		t.Errorf("the strip carries agent state only, no key hints: %q", m.statusLine())
 	}
 }
 

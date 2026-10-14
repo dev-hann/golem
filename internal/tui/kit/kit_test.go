@@ -355,39 +355,20 @@ func TestKit_Divider(t *testing.T) {
 	}
 }
 
-func TestKit_StatusBarOneLineFitsWidth(t *testing.T) {
+func TestKit_StatusBarOneLineTruncates(t *testing.T) {
 	t.Parallel()
 
 	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	bar := k.StatusBar(40, "bash — go test ./... 5s", "esc to interrupt", kit.Tool)
+	bar := k.StatusBar(40, "◆ bash — go test ./... 5s", kit.Tool)
 	if strings.Contains(bar, "\n") {
 		t.Errorf("status bar must be one line:\n%s", bar)
 	}
 	if w := ansi.StringWidth(bar); w > 40 {
 		t.Errorf("status bar width %d exceeds 40:\n%s", w, bar)
 	}
-	for _, want := range []string{"bash", "esc"} {
-		if !strings.Contains(bar, want) {
-			t.Errorf("status bar missing %q:\n%s", want, bar)
-		}
-	}
-}
-
-func TestKit_StatusBarTruncatesLeftSegmentFirst(t *testing.T) {
-	t.Parallel()
-
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
-
-	bar := k.StatusBar(20, strings.Repeat("l", 40), strings.Repeat("r", 8), kit.Tool)
-	if strings.Contains(bar, "\n") {
-		t.Errorf("status bar must be one line:\n%s", bar)
-	}
-	if w := ansi.StringWidth(bar); w > 20 {
-		t.Errorf("status bar width %d exceeds 20:\n%s", w, bar)
-	}
-	if !strings.Contains(bar, strings.Repeat("r", 8)) {
-		t.Errorf("right segment should survive, left should yield:\n%s", bar)
+	if !strings.Contains(bar, "bash") {
+		t.Errorf("status bar lost its text:\n%s", bar)
 	}
 }
 
@@ -396,7 +377,7 @@ func TestKit_StatusBarZeroWidthNoPanic(t *testing.T) {
 
 	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
 
-	if bar := k.StatusBar(0, "left", "right", kit.Tool); strings.Contains(bar, "\n") {
+	if bar := k.StatusBar(0, "left", kit.Tool); strings.Contains(bar, "\n") {
 		t.Errorf("zero width must not produce newlines:\n%s", bar)
 	}
 }

@@ -180,21 +180,15 @@ func (k *Kit) StickyUser(width int, text string) string {
 }
 
 // StatusBar renders the one-line status strip between the transcript and
-// the composer: a token-colored left segment (the agent phase) and a dim
-// right hint (the interrupt key), padded to width. On overflow the left
-// segment truncates first so the hint survives.
-func (k *Kit) StatusBar(width int, left, right string, token Token) string {
+// the composer: a token-colored segment padded to width, truncated with
+// an ellipsis on overflow. No right-aligned hint — the strip carries the
+// agent state alone; interrupt affordances live on keys and docs.
+func (k *Kit) StatusBar(width int, left string, token Token) string {
 	if width < 1 {
 		return ""
 	}
 
-	right = truncateTo(right, width)
-	rightW := ansi.StringWidth(right)
-
-	left = truncateTo(left, max(width-rightW, 0))
-	gap := max(width-ansi.StringWidth(left)-rightW, 0)
-
-	return k.styles[token].Render(left) + strings.Repeat(" ", gap) + k.styles[Dim].Render(right)
+	return k.styles[token].Render(truncateTo(left, width))
 }
 
 // truncateTo cuts s to limit cells with an ellipsis, tolerating a zero

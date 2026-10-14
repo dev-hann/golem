@@ -1255,8 +1255,8 @@ func (m Model) layout() string {
 }
 
 // statusLine renders the agent-state strip: what the turn is doing (or
-// the model and last usage while idle) on the left, the interrupt hint
-// on the right while a turn runs.
+// the model and last usage while idle). The interrupt hint lives on the
+// key itself, not in the strip.
 func (m Model) statusLine() string {
 	left, token := "● idle", kit.Dim
 
@@ -1274,12 +1274,7 @@ func (m Model) statusLine() string {
 		left = "● " + m.modelName + usageSummary(m.lastUsage)
 	}
 
-	right := ""
-	if m.turnActive {
-		right = "esc to interrupt"
-	}
-
-	return m.kit.StatusBar(m.vp.Width, left, right, token)
+	return m.kit.StatusBar(m.vp.Width, left, token)
 }
 
 // elapsed renders the active turn's age in whole seconds.
