@@ -723,6 +723,114 @@ func TestModel_HistoryReplayOpensAtBottom(t *testing.T) {
 	}
 }
 
+func TestModel_FollowKeepsLastLineVisibleUnderSticky(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m.blocks = []block{
+		{kind: blockUser, text: "question one"},
+		{kind: blockAssistant, text: strings.Repeat("answer line\n", 100)},
+		{kind: blockUser, text: "question two"},
+	}
+	m.refreshView()
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{
+		Type:  golemclient.TypeTextDelta,
+		Delta: strings.Repeat("filler\n", 40) + "tail-marker\n",
+	})
+
+	if got := m.stickyText(); got != "question two" {
+		t.Fatalf("precondition: sticky must pin question two, got %q", got)
+	}
+	if !strings.Contains(m.View(), "tail-marker") {
+		t.Errorf("streaming tail must stay visible under the sticky bar:\n%s", m.View())
+	}
+	if !m.vp.AtBottom() {
+		t.Errorf("follow should keep the viewport at the bottom: YOffset=%d H=%d",
+			m.vp.YOffset, m.vp.Height)
+	}
+}
+
+func TestModel_ResizeShrinkKeepsTailVisible(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 30)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{
+		Type:  golemclient.TypeTextDelta,
+		Delta: strings.Repeat("filler\n", 60) + "last-line\n",
+	})
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+	if !strings.Contains(m.View(), "last-line") {
+		t.Fatal("precondition: tail visible before resize")
+	}
+
+	m = resize(m, 80, 12)
+	if !strings.Contains(m.View(), "last-line") {
+		t.Errorf("shrinking the terminal must keep the tail on screen:\n%s", m.View())
+	}
+	if !m.vp.AtBottom() {
+		t.Errorf("follow should re-pin after a shrink: YOffset=%d H=%d",
+			m.vp.YOffset, m.vp.Height)
+	}
+}
+
+func TestModel_ResizeShrinkPreservesScrollback(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 30)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{
+		Type:  golemclient.TypeTextDelta,
+		Delta: strings.Repeat("filler\n", 200),
+	})
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+	for range 4 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+	}
+	if m.follow {
+		t.Fatal("precondition: paging up suspends follow")
+	}
+
+	m = resize(m, 80, 12)
+	if strings.Contains(m.View(), "filler\nfiller") && m.vp.AtBottom() {
+		t.Error("resize must not jump a scrolled-back reader to the tail")
+	}
+	if m.follow {
+		t.Error("resize must not resume auto-follow")
+	}
+}
+
+func TestModel_ComposerGrowthKeepsTailVisible(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 14)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.TextDelta{
+		Type:  golemclient.TypeTextDelta,
+		Delta: strings.Repeat("filler\n", 30) + "last-line\n",
+	})
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+	if !strings.Contains(m.View(), "last-line") {
+		t.Fatal("precondition: tail visible before composer growth")
+	}
+
+	m.insertNewline()
+	m.insertNewline()
+	m.insertNewline()
+	if m.inputRows < 2 {
+		t.Fatalf("precondition: composer must grow, inputRows=%d", m.inputRows)
+	}
+
+	if !strings.Contains(m.View(), "last-line") {
+		t.Errorf("composer growth must keep the tail on screen:\n%s", m.View())
+	}
+	if !m.vp.AtBottom() {
+		t.Errorf("follow should re-pin after composer growth: YOffset=%d H=%d",
+			m.vp.YOffset, m.vp.Height)
+	}
+}
+
 func TestViewport_HandlesLongOutputScrollback(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
