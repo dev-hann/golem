@@ -7,6 +7,13 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Removed — no 50-round turn cap (2026-10-14)
+
+- Turns are no longer capped at 50 tool rounds (`max tool rounds (50)
+  exceeded`). The loop runs until the model stops calling tools; the guard
+  against a runaway loop is cancellation (interrupt the turn), not a cap
+  (ADR-0017). Long tasks finish in one turn instead of dying mid-flight.
+
 ### Fixed — viewport re-pins the tail on height changes (2026-10-14)
 
 - Shrinking the terminal (or the composer growing over its content)

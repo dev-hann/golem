@@ -14,6 +14,10 @@ import (
 	"github.com/dev-hann/golem/internal/llm"
 )
 
+// oldRoundCap is the removed per-turn round limit (ADR-0017); tests use it
+// to prove the loop runs past the old bound.
+const oldRoundCap = 50
+
 // scriptedProvider streams canned rounds per Stream call and records every
 // request for assertions.
 type scriptedProvider struct {
@@ -201,8 +205,10 @@ func TestLoop_Cancel_StopsAtAwaitPoint(t *testing.T) {
 	}
 }
 
-func TestLoop_MaxRoundsBoundsConfusedModel(t *testing.T) {
+func TestLoop_ConfusedModel_StopsOnlyOnCancellation(t *testing.T) {
 	t.Parallel()
+	// With the round cap gone (ADR-0017) a model that never stops calling
+	// tools runs until the caller cancels — that is the remaining guard.
 	round := []llm.Event{{
 		Type: llm.EventToolCalls,
 		ToolCalls: []llm.ToolCall{
@@ -211,10 +217,72 @@ func TestLoop_MaxRoundsBoundsConfusedModel(t *testing.T) {
 	}}
 	provider := &scriptedProvider{rounds: [][]llm.Event{round}}
 	a, _ := newTestAgent(t, provider)
-	events := collect(t, a.Run(t.Context(), nil, "loop forever"))
-	errEv := findEvent(events, agent.EventError)
-	if errEv == nil || !strings.Contains(errEv.Err.Error(), "max tool rounds") {
-		t.Errorf("expected max-rounds error, got %+v", errEv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	eventsCh := a.Run(ctx, nil, "loop forever")
+
+	toolCalls := 0
+	sawError := false
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for ev := range eventsCh {
+			switch ev.Type {
+			case agent.EventToolCallStart:
+				toolCalls++
+				if toolCalls > oldRoundCap {
+					cancel() // ran past the removed cap; now stop it
+				}
+			case agent.EventError:
+				sawError = true
+			case agent.EventTurnStart, agent.EventTextDelta, agent.EventToolCallEnd, agent.EventTurnEnd:
+				// counted implicitly; not needed for the assertions
+			}
+		}
+	}()
+	<-done
+
+	if toolCalls <= oldRoundCap {
+		t.Errorf("expected the loop to run past %d rounds, saw %d tool calls", oldRoundCap, toolCalls)
+	}
+	if !sawError {
+		t.Error("expected an error event when the confused-model turn was cancelled")
+	}
+}
+
+func TestLoop_TurnRunsBeyondFiftyRoundsUntilModelStops(t *testing.T) {
+	t.Parallel()
+	// 120 > the old bound of 50: a turn must run until the model stops
+	// calling tools, not until a round cap (ADR-0017).
+	const rounds = 120
+	toolRound := []llm.Event{{
+		Type: llm.EventToolCalls,
+		ToolCalls: []llm.ToolCall{
+			{ID: "tc_loop", Name: "glob", Args: rawJSON(t, map[string]string{"pattern": "*.txt"})},
+		},
+	}}
+	provider := &scriptedProvider{streamFn: func(_ context.Context, round int) <-chan llm.Event {
+		out := make(chan llm.Event, 1)
+		if round < rounds-1 {
+			out <- toolRound[0]
+		} else {
+			out <- llm.Event{Type: llm.EventTextDelta, Delta: "finally done"}
+		}
+		close(out)
+		return out
+	}}
+	a, _ := newTestAgent(t, provider)
+	events := collect(t, a.Run(t.Context(), nil, "keep going"))
+
+	if errEv := findEvent(events, agent.EventError); errEv != nil {
+		t.Fatalf("turn past the old bound should complete, got error: %v", errEv.Err)
+	}
+	if got := len(provider.requests); got != rounds {
+		t.Errorf("provider called %d times, want %d", got, rounds)
+	}
+	end := findEvent(events, agent.EventTurnEnd)
+	if end == nil {
+		t.Fatal("expected turn_end after the model stops calling tools")
 	}
 }
 
