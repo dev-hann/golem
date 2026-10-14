@@ -932,7 +932,7 @@ func (m *Model) resize(width, height int) {
 	m.clearSelection()
 	m.width, m.height = width, height
 	m.vp.Width = max(width, viewportMinWidth)
-	m.vp.Height = max(height-m.inputRows-inputBorderRows-statusRows, viewportMinHeight)
+	setViewportHeightKeepingFollow(&m.vp, max(height-m.inputRows-inputBorderRows-statusRows, viewportMinHeight))
 	m.input.SetWidth(max(width-inputBorderCols, viewportMinWidth))
 	m.syncInputHeight()
 }
@@ -960,7 +960,25 @@ func (m *Model) syncInputHeight() {
 	m.input.SetHeight(rows)
 
 	if m.height > 0 {
-		m.vp.Height = max(m.height-rows-inputBorderRows-statusRows, viewportMinHeight)
+		setViewportHeightKeepingFollow(&m.vp, max(m.height-rows-inputBorderRows-statusRows, viewportMinHeight))
+	}
+}
+
+// setViewportHeightKeepingFollow resizes the viewport and, while the
+// reader sits at the tail (or above any content), re-pins it. Without
+// the re-pin, shrinking the terminal (or the composer growing) strands
+// the last line below the fold — the viewport keeps its old offset over
+// a shorter window. A scrolled-back reader keeps their offset: follow
+// stays suspended until they page to the bottom again.
+func setViewportHeightKeepingFollow(vp *viewport.Model, height int) {
+	// AtBottom must be judged against the old height: after shrinking,
+	// the stale offset is past the new fold and no longer "at bottom".
+	atTail := vp.AtBottom() || vp.YOffset == 0
+
+	vp.Height = height
+
+	if atTail {
+		vp.GotoBottom()
 	}
 }
 

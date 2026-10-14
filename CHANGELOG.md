@@ -7,6 +7,16 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed — viewport re-pins the tail on height changes (2026-10-14)
+
+- Shrinking the terminal (or the composer growing over its content)
+  stranded the last transcript line below the fold: the viewport kept its
+  old scroll offset over a shorter window. Both paths now re-pin the tail
+  while the reader was at the bottom (`AtBottom` judged against the *old*
+  height — after the shrink the stale offset is past the new fold). A
+  scrolled-back reader keeps their offset: follow stays suspended until
+  they page down again.
+
 ### Fixed — history replay opens at the bottom (2026-10-14)
 
 - Loading a session (session picker → enter, or a TUI restart reconnecting
