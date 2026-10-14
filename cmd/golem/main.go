@@ -191,6 +191,7 @@ func runServe(ctx context.Context) int {
 		Root:       root,
 		Socket:     cli.DefaultSocketPath(),
 		Sessions:   cli.DefaultSessionsDir(),
+		Version:    resolveVersion(),
 		OnReady: func(addr string) {
 			fmt.Fprintf(os.Stderr, "golem serving on %s\n", addr) //nolint:errcheck // terminal output
 		},

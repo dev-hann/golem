@@ -12,16 +12,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
+
+	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // Launcher timings: dial probe budget, readiness re-check interval after a
 // spawn, and the overall startup budget before giving up.
 const (
-	probeTimeout = 500 * time.Millisecond
-	pollInterval = 100 * time.Millisecond
-	readyTimeout = 5 * time.Second
+	probeTimeout    = 500 * time.Millisecond
+	pollInterval    = 100 * time.Millisecond
+	readyTimeout    = 5 * time.Second
+	shutdownTimeout = 3 * time.Second
 )
 
 // AppOptions configures the default app launch (bare `golem` / `golem tui`).
@@ -50,6 +55,134 @@ func Probe(socket string) bool {
 	_ = conn.Close()
 
 	return true
+}
+
+// ServerVersion asks the server for its build version. It returns "" when
+// nothing listens or the server predates the version handshake (which the
+// caller treats as stale).
+func ServerVersion(socket string) string {
+	client, err := golemclient.Dial(socket)
+	if err != nil {
+		return ""
+	}
+
+	defer client.Close() //nolint:errcheck // probe connection
+
+	if err := client.Send(golemclient.VersionQuery{Type: golemclient.TypeVersionQuery}); err != nil {
+		return ""
+	}
+
+	ev, got, err := client.ReceiveWithTimeout(probeTimeout)
+	if err != nil || !got {
+		return ""
+	}
+
+	hello, ok := ev.(golemclient.ServerHello)
+	if !ok {
+		return ""
+	}
+
+	return hello.Version
+}
+
+// EnsureFreshServer guarantees the server on socket runs the client's own
+// build: a version mismatch (or a server that cannot answer the handshake)
+// triggers a restart — via the pid file, or by resolving the socket's
+// owner with lsof. When neither yields a safe kill target the launch
+// fails fast with the manual restart instruction; silently continuing on
+// an outdated server hides features and is worse than a hard stop.
+func EnsureFreshServer(
+	ctx context.Context, socket, clientVersion string, start func() error, stderr io.Writer,
+) error {
+	if v := ServerVersion(socket); v == clientVersion {
+		return nil
+	}
+
+	pid, ok := readPIDFile(socket + pidSuffix)
+	if !ok {
+		// No pid file (a pre-pidfile server): resolve the socket's owner
+		// instead. SocketOwnerPID refuses self, so an embedded listener
+		// falls through to the manual-restart error below.
+		pid, ok = SocketOwnerPID(socket)
+	}
+
+	if !ok || pid <= 1 {
+		return fmt.Errorf(
+			"cli: outdated server on %s (server %q, client %q) — restart it: pkill -f 'golem serve'",
+			socket, ServerVersion(socket), clientVersion,
+		)
+	}
+
+	fmt.Fprintf(stderr, "golem: restarting outdated server (pid %d)\n", pid) //nolint:errcheck // terminal output
+
+	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil && !errors.Is(err, syscall.ESRCH) {
+		return fmt.Errorf("cli: stopping server pid %d: %w", pid, err)
+	}
+
+	deadline := time.Now().Add(shutdownTimeout)
+
+	for Probe(socket) && time.Now().Before(deadline) {
+		timer := time.NewTimer(pollInterval)
+
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+
+			return fmt.Errorf("cli: waiting for old server: %w", ctx.Err())
+		case <-timer.C:
+		}
+	}
+
+	return EnsureServer(ctx, socket, start, stderr)
+}
+
+// SocketOwnerPID resolves which process listens on the unix socket via
+// lsof (`lsof -F pn -- <socket>`). It refuses this process and non-ids so
+// a launcher can never kill itself; false means lsof is unavailable or
+// the owner was not found.
+func SocketOwnerPID(socket string) (int, bool) {
+	//nolint:gosec,noctx // fixed short-lived probe binary; socket path is the user's own
+	out, err := exec.Command("lsof", "-F", "pn", "--", socket).Output()
+	if err != nil {
+		return 0, false
+	}
+
+	pid := 0
+
+	for line := range strings.SplitSeq(string(out), "\n") {
+		switch {
+		case strings.HasPrefix(line, "p"):
+			parsed, parseErr := strconv.Atoi(line[1:])
+			if parseErr != nil {
+				return 0, false
+			}
+
+			pid = parsed
+		case strings.HasPrefix(line, "n") && strings.TrimPrefix(line, "n") == socket:
+			if pid > 1 && pid != os.Getpid() {
+				return pid, true
+			}
+
+			return 0, false
+		}
+	}
+
+	return 0, false
+}
+
+// readPIDFile returns the recorded server pid, if present and parsable.
+func readPIDFile(pidPath string) (int, bool) {
+	raw, err := os.ReadFile(pidPath) //nolint:gosec // derived from the user's own socket path
+	if err != nil {
+		return 0, false
+	}
+
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		return 0, false
+	}
+
+	return pid, true
 }
 
 // EnsureServer guarantees a server is reachable on socket, starting it via
@@ -180,6 +313,12 @@ func RunApp(ctx context.Context, opts AppOptions) error {
 
 	if err := EnsureServer(ctx, opts.Socket, opts.Start, opts.Stderr); err != nil {
 		return err
+	}
+
+	if opts.Version != "" {
+		if err := EnsureFreshServer(ctx, opts.Socket, opts.Version, opts.Start, opts.Stderr); err != nil {
+			return err
+		}
 	}
 
 	return RunTUI(opts.Socket)

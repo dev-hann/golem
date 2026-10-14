@@ -5,12 +5,14 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/dev-hann/golem/internal/cli"
+	"github.com/dev-hann/golem/internal/session"
 )
 
 // listenUnix opens a listening unix socket so Probe-style dials succeed.
@@ -201,5 +203,132 @@ func TestSpawnServe_StartsExecutable(t *testing.T) {
 
 	if err := cli.SpawnServe("", "unused.log"); err == nil {
 		t.Error("SpawnServe(empty) = nil, want error")
+	}
+}
+
+// startServe runs a real cli.Serve on socket with the given version label.
+func startServe(t *testing.T, socket, version string) {
+	t.Helper()
+
+	store, err := session.NewStore(filepath.Join(shortTempDir(t), "sessions"), 4)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+
+	ready := make(chan struct{})
+
+	go func() {
+		_ = cli.Serve(context.Background(), cli.ServeOptions{
+			Provider: echoProvider{}, Model: "stub", Root: t.TempDir(),
+			Socket: socket, Store: store, Version: version,
+			OnReady: func(string) { close(ready) },
+		})
+	}()
+
+	select {
+	case <-ready:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("serve %s not ready", version)
+	}
+}
+
+func TestServerVersion(t *testing.T) {
+	t.Parallel()
+
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
+
+	if v := cli.ServerVersion(socket); v != "" {
+		t.Errorf("ServerVersion(missing) = %q, want empty", v)
+	}
+
+	startServe(t, socket, "v-old")
+
+	if v := cli.ServerVersion(socket); v != "v-old" {
+		t.Errorf("ServerVersion = %q, want v-old", v)
+	}
+}
+
+func TestEnsureFreshServer_RestartsStaleServer(t *testing.T) {
+	t.Parallel()
+
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
+	startServe(t, socket, "v-old")
+
+	if err := cli.EnsureFreshServer(t.Context(), socket, "v-new", func() error {
+		startServe(t, socket, "v-new")
+		return nil
+	}, os.Stderr); err != nil {
+		t.Fatalf("EnsureFreshServer: %v", err)
+	}
+
+	if v := cli.ServerVersion(socket); v != "v-new" {
+		t.Errorf("ServerVersion after restart = %q, want v-new", v)
+	}
+}
+
+func TestSocketOwnerPIDExcludesSelf(t *testing.T) {
+	t.Parallel()
+
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
+	listenUnix(t, socket) // the listener is this test process itself
+
+	if pid, ok := cli.SocketOwnerPID(socket); ok {
+		t.Errorf("SocketOwnerPID(self-held) = %d, want refusal", pid)
+	}
+}
+
+func TestSocketOwnerPIDFindsForeignListener(t *testing.T) {
+	t.Parallel()
+
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
+
+	// A child process holds the socket; the launcher must resolve its pid.
+	cmd := exec.CommandContext(t.Context(), "python3", "-c",
+		"import socket,time\ns=socket.socket(socket.AF_UNIX)\ns.bind('"+socket+"')\ns.listen(1)\ntime.sleep(30)")
+	if err := cmd.Start(); err != nil {
+		t.Skipf("python3 unavailable: %v", err)
+	}
+
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
+
+	deadline := time.Now().Add(3 * time.Second)
+
+	for time.Now().Before(deadline) {
+		if pid, ok := cli.SocketOwnerPID(socket); ok {
+			if pid != cmd.Process.Pid {
+				t.Errorf("SocketOwnerPID = %d, want child pid %d", pid, cmd.Process.Pid)
+			}
+
+			return
+		}
+
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	t.Fatal("SocketOwnerPID never resolved the child listener")
+}
+
+func TestEnsureFreshServer_FailsFastWithoutKillPath(t *testing.T) {
+	t.Parallel()
+
+	socket := filepath.Join(shortTempDir(t), "golem.sock")
+	listenUnix(t, socket) // held by this process: pidfile absent, lsof must refuse self
+
+	started := false
+
+	err := cli.EnsureFreshServer(t.Context(), socket, "v-new", func() error {
+		started = true
+		return nil
+	}, os.Stderr)
+	if err == nil {
+		t.Fatal("EnsureFreshServer should fail fast when no safe kill path exists")
+	}
+
+	if started {
+		t.Error("start must not run when the old server cannot be stopped")
+	}
+
+	if !strings.Contains(err.Error(), "pkill") {
+		t.Errorf("error should carry the manual restart instruction: %v", err)
 	}
 }
