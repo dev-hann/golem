@@ -76,6 +76,7 @@ type Model struct {
 	statusGen      int               // status ticker generation (stale-tick guard)
 	lastUsage      golemclient.Usage // usage of the most recent completed turn
 	streamedText   bool              // any TextDelta seen this turn (thinking vs responding)
+	metaBusy       bool              // the loaded session's live busy flag (session_meta)
 }
 
 // New builds the model for a socket path.
@@ -448,6 +449,7 @@ func (m *Model) clearTranscript() {
 	m.provider, m.modelName = "", ""
 	m.endTurn()
 	m.lastUsage = golemclient.Usage{}
+	m.metaBusy = false
 	m.refreshView()
 }
 
@@ -1147,6 +1149,7 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 	switch e := ev.(type) {
 	case golemclient.SessionMeta:
 		m.sessionID = e.Session
+		m.metaBusy = e.Busy
 		cmd = m.flushPending()
 	case golemclient.TurnStart:
 		m.turnActive = true
@@ -1182,7 +1185,7 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 			m.sessions[i].Title = e.Title
 		}
 	case golemclient.History:
-		m.replayHistory(e)
+		tick = m.replayHistory(e)
 	default:
 		// Unknown types (including golemclient.Envelope) are ignored per
 		// PROTOCOL.md forward compatibility.
@@ -1322,13 +1325,31 @@ func (m *Model) finishToolBlock(end golemclient.ToolCallEnd) {
 	}
 }
 
+// replayTurn tracks the in-flight turn while folding a history batch:
+// whether the replay ends mid-turn, and what the status line needs to
+// render it (any streamed text, the active tool call).
+type replayTurn struct {
+	open         bool
+	streamedText bool
+	tool, args   string
+}
+
 // replayHistory rebuilds the transcript from a history event batch.
 // Resuming a session opens at its end — follow is restored so the tail
 // (where the conversation continues) is on screen, matching what a live
 // stream would leave behind.
-func (m *Model) replayHistory(hist golemclient.History) {
+//
+// Turn lifecycle events fold into status bookkeeping instead of blocks:
+// the last turn_start names the model, the last turn_end carries usage.
+// When the meta announced a live turn (busy) and the replay ends
+// mid-turn — persist-before-emit guarantees the in-flight events are
+// already stored — the turn resumes as active, so a client switching
+// away and back renders the running state instead of "idle".
+func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 	m.blocks = nil
 	m.follow = true
+
+	live := replayTurn{}
 
 	for _, raw := range hist.Events {
 		ev, err := golemclient.Decode(raw)
@@ -1339,23 +1360,52 @@ func (m *Model) replayHistory(hist golemclient.History) {
 		switch e := ev.(type) {
 		case golemclient.UserMessage:
 			m.blocks = append(m.blocks, block{kind: blockUser, text: e.Text})
+			live = replayTurn{open: true} // a message opens its turn
+		case golemclient.TurnStart:
+			m.provider, m.modelName = e.Provider, e.Model
+			live = replayTurn{open: true}
 		case golemclient.TextDelta:
 			m.appendToAssistant(e.Delta)
+
+			live.streamedText = true
 		case golemclient.ToolCallStart:
 			m.blocks = append(m.blocks, block{
 				kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
 			})
+
+			live.tool, live.args = e.Tool, string(e.Args)
 		case golemclient.ToolCallEnd:
 			m.finishToolBlock(e)
+
+			live.tool, live.args = "", ""
 		case golemclient.ErrorEvent:
 			m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
+			live = replayTurn{} // errors end the turn
+		case golemclient.TurnEnd:
+			m.lastUsage = e.Usage
+			live = replayTurn{}
 		default:
-			// turn lifecycle events are implicit in the transcript
+			// Unknown types are ignored per PROTOCOL.md forward compatibility.
 		}
 	}
 
 	m.refreshView()
 	m.vp.GotoBottom()
+
+	busy := m.metaBusy
+	m.metaBusy = false // the flag scopes to this one replay
+
+	if !busy || !live.open {
+		return nil
+	}
+
+	m.turnActive = true
+	m.streamedText = live.streamedText
+	m.activeTool, m.activeArgs = live.tool, live.args
+	m.turnStart = time.Now() // the true start is unknowable from the replay
+	m.statusGen++
+
+	return armStatus(m.statusGen)
 }
 
 // refreshView pushes the rendered transcript into the viewport. While a

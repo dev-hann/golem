@@ -81,6 +81,10 @@ type SessionMeta struct {
 	Cwd     string `json:"cwd"`
 	Created string `json:"created"`
 	Turns   int    `json:"turns"`
+	// Busy reports a turn currently running in this session — live state
+	// at load time, so a client resuming a busy session can restore its
+	// status line from the replay (omitted when false: create, idle load).
+	Busy bool `json:"busy,omitempty"`
 }
 
 // History replays stored events after LoadSession.

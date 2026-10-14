@@ -166,7 +166,7 @@ func (s *Server) handleCreate(writer *connWriter, ev golemclient.CreateSession) 
 		return
 	}
 
-	writer.send(metaOf(sess))
+	writer.send(metaOf(sess, false))
 }
 
 // handleList replies with the session list.
@@ -205,7 +205,9 @@ func (s *Server) busySessions() map[string]bool {
 	return busy
 }
 
-// handleLoad replays a session as meta plus history.
+// handleLoad replays a session as meta plus history. The meta carries
+// the session's live busy state so a client resuming mid-turn can
+// restore its status line from the replay.
 func (s *Server) handleLoad(writer *connWriter, ev golemclient.LoadSession) {
 	sess, err := s.cfg.Store.Get(ev.Session)
 	if err != nil {
@@ -219,8 +221,18 @@ func (s *Server) handleLoad(writer *connWriter, ev golemclient.LoadSession) {
 		return
 	}
 
-	writer.send(metaOf(sess))
+	writer.send(metaOf(sess, s.sessionBusy(sess.ID)))
 	writer.send(golemclient.History{Type: golemclient.TypeHistory, Session: sess.ID, Events: raw})
+}
+
+// sessionBusy reports whether a turn currently runs in the session.
+func (s *Server) sessionBusy(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, busy := s.turns[sessionID]
+
+	return busy
 }
 
 // handleUserMessage runs one turn if the session is free.
@@ -474,11 +486,12 @@ func errorOf(sessionID, turnID, code string, err error) golemclient.ErrorEvent {
 	}
 }
 
-// metaOf converts a session to wire metadata.
-func metaOf(sess *session.Session) golemclient.SessionMeta {
+// metaOf converts a session to wire metadata; busy carries the session's
+// live turn state (load-time snapshot, false on create).
+func metaOf(sess *session.Session, busy bool) golemclient.SessionMeta {
 	return golemclient.SessionMeta{
 		Type: golemclient.TypeSessionMeta, Session: sess.ID, Cwd: sess.Cwd,
-		Created: sess.Created.UTC().Format(rfc3339), Turns: sess.Turns,
+		Created: sess.Created.UTC().Format(rfc3339), Turns: sess.Turns, Busy: busy,
 	}
 }
 
