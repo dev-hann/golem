@@ -312,7 +312,19 @@ func (k *Kit) Fade(plain string) string {
 	return k.styles[Dim].Render(plain)
 }
 
-// Selection renders the picker cursor marker.
-func (k *Kit) Selection(line string) string {
-	return k.styles[Selection].Reverse(true).Render(" " + line + " ")
+// RowGutter is the flank padding every list row spends — cursor rows
+// render it through Selection, the rest as plain spaces — so all rows
+// share one text origin and moving the cursor shifts nothing.
+const RowGutter = 1
+
+// Row renders one list row in the shared gutter; selected highlights it
+// with reverse video (no arrow prefix: a marker would offset the row's
+// text against its neighbors every time the cursor moves).
+func (k *Kit) Row(text string, selected bool) string {
+	if selected {
+		return k.styles[Selection].Reverse(true).
+			Render(" " + text + " ")
+	}
+
+	return " " + text + " "
 }
