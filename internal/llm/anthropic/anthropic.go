@@ -5,6 +5,7 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -94,6 +95,30 @@ func pump(ctx context.Context, stream interface {
 	finishStream(ctx, stream, send, tools, usage, out)
 }
 
+// classifyStreamError maps SDK failures onto retry markers: rate limits,
+// overload, 5xx, and status-less network drops are transient; 401/403 are
+// auth; other 4xx pass plain (not retryable). The 401/403 constants are
+// shared with listmodels.go.
+func classifyStreamError(err error) error {
+	var apiErr *anthropic.Error
+
+	switch {
+	case errors.As(err, &apiErr) && (apiErr.StatusCode == httpTooManyRequests || apiErr.StatusCode >= 500):
+		return llm.MarkTransient(err)
+	case errors.As(err, &apiErr) &&
+		(apiErr.StatusCode == httpUnauthorized || apiErr.StatusCode == httpForbidden):
+		return llm.MarkAuth(err)
+	case errors.As(err, &apiErr):
+		return err
+	default:
+		// No HTTP status: connection reset, EOF, DNS — retryable.
+		return llm.MarkTransient(err)
+	}
+}
+
+// HTTP status used for stream classification; 401/403 live in listmodels.go.
+const httpTooManyRequests = 429
+
 // makeSend builds an event sender that prefers delivery and only gives up
 // when the consumer is gone and the buffer is full while ctx is cancelled.
 func makeSend(ctx context.Context, out chan<- llm.Event) func(llm.Event) bool {
@@ -165,7 +190,7 @@ func finishStream(
 	out chan<- llm.Event,
 ) {
 	if err := stream.Err(); err != nil {
-		send(llm.Event{Type: llm.EventError, Err: fmt.Errorf("anthropic stream: %w", err)})
+		send(llm.Event{Type: llm.EventError, Err: fmt.Errorf("anthropic stream: %w", classifyStreamError(err))})
 		return
 	}
 

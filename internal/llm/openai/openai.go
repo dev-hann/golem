@@ -6,6 +6,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -165,7 +166,7 @@ func finishStream(
 	out chan<- llm.Event,
 ) {
 	if err := stream.Err(); err != nil {
-		send(llm.Event{Type: llm.EventError, Err: fmt.Errorf("openai stream: %w", err)})
+		send(llm.Event{Type: llm.EventError, Err: fmt.Errorf("openai stream: %w", classifyStreamError(err))})
 
 		return
 	}
@@ -179,6 +180,29 @@ func finishStream(
 	emitToolCalls(tools, out)
 	emitUsage(usage, out)
 }
+
+// classifyStreamError maps SDK failures onto retry markers: rate limits,
+// 5xx, and status-less network drops are transient; 401/403 are auth; the
+// rest passes plain. The 401/403 constants are shared with listmodels.go.
+func classifyStreamError(err error) error {
+	var apiErr *openai.Error
+
+	switch {
+	case errors.As(err, &apiErr) && (apiErr.StatusCode == httpTooManyRequests || apiErr.StatusCode >= 500):
+		return llm.MarkTransient(err)
+	case errors.As(err, &apiErr) &&
+		(apiErr.StatusCode == httpUnauthorized || apiErr.StatusCode == httpForbidden):
+		return llm.MarkAuth(err)
+	case errors.As(err, &apiErr):
+		return err
+	default:
+		// No HTTP status: connection reset, EOF, DNS — retryable.
+		return llm.MarkTransient(err)
+	}
+}
+
+// HTTP status used for stream classification; 401/403 live in listmodels.go.
+const httpTooManyRequests = 429
 
 // emitUsage sends a populated usage event on ch.
 func emitUsage(e llm.Event, ch chan<- llm.Event) {

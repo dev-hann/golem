@@ -31,9 +31,9 @@ func buildProvider(id, key, baseURL string) (llm.Provider, error) {
 
 	switch preset.Kind {
 	case llm.KindAnthropic:
-		return anthropicgo.NewProvider(key, baseURL), nil
+		return llm.Retrying(anthropicgo.NewProvider(key, baseURL), llm.DefaultRetryPolicy()), nil
 	case llm.KindOpenAICompat:
-		return openaicompat.NewProvider(key, baseURL), nil
+		return llm.Retrying(openaicompat.NewProvider(key, baseURL), llm.DefaultRetryPolicy()), nil
 	default:
 		return nil, fmt.Errorf("cli: provider %q has unsupported kind %q", id, preset.Kind)
 	}
