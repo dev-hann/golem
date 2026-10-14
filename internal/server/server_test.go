@@ -94,7 +94,7 @@ func shortTempDir(t *testing.T) string {
 	return dir
 }
 
-func newHarness(t *testing.T, provider llm.Provider, approvalTimeoutS int) *harness {
+func newHarness(t *testing.T, provider llm.Provider) *harness {
 	t.Helper()
 	root := t.TempDir()
 	storeDir := filepath.Join(t.TempDir(), "sessions")
@@ -104,7 +104,7 @@ func newHarness(t *testing.T, provider llm.Provider, approvalTimeoutS int) *harn
 	}
 	cfg := server.Config{
 		Provider: provider, Model: "stub-model", Root: root,
-		Store: store, ApprovalTimeoutS: approvalTimeoutS, Version: "test-version",
+		Store: store, Version: "test-version",
 	}
 	srv, err := server.New(cfg)
 	if err != nil {
@@ -205,7 +205,7 @@ func TestServer_SetModelOverridesNextTurn(t *testing.T) {
 		{{Type: llm.EventTextDelta, Delta: "one"}, {Type: llm.EventUsage}},
 		{{Type: llm.EventTextDelta, Delta: "two"}, {Type: llm.EventUsage}},
 	}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 
 	if err := h.client.Send(golemclient.UserMessage{
@@ -242,7 +242,7 @@ func TestServer_SetModelOverridesNextTurn(t *testing.T) {
 func TestServer_SetModelRejectsEmptyAndUnknownSession(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, &scriptedProvider{}, 5)
+	h := newHarness(t, &scriptedProvider{})
 	sess := h.createSession()
 
 	if err := h.client.Send(golemclient.SetModel{
@@ -272,7 +272,7 @@ func TestServer_UserMessageProducesTurnLifecycle(t *testing.T) {
 		{Type: llm.EventTextDelta, Delta: "answer"},
 		{Type: llm.EventUsage, InputTokens: 3, OutputTokens: 2},
 	}}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 	if err := h.client.Send(golemclient.UserMessage{
 		Type: golemclient.TypeUserMessage, Session: sess, Text: "hi",
@@ -293,103 +293,28 @@ func TestServer_UserMessageProducesTurnLifecycle(t *testing.T) {
 	}
 }
 
-func TestServer_ApprovalAllowRunsCommand(t *testing.T) {
+func TestServer_BashRunsDirectly_NoApprovalRoundTrip(t *testing.T) {
 	t.Parallel()
 	provider := &scriptedProvider{rounds: [][]llm.Event{
 		{{
 			Type: llm.EventToolCalls,
 			ToolCalls: []llm.ToolCall{{
 				ID: "c1", Name: "bash",
-				Args: json.RawMessage(`{"command":"echo golem-approved-marker"}`),
+				Args: json.RawMessage(`{"command":"echo golem-auto-marker"}`),
 			}},
 		}},
 		{{Type: llm.EventTextDelta, Delta: "ran"}},
 	}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 	if err := h.client.Send(golemclient.UserMessage{
 		Type: golemclient.TypeUserMessage, Session: sess, Text: "run it",
 	}); err != nil {
 		t.Fatalf("send: %v", err)
 	}
-	req := h.expectType(golemclient.TypeApprovalRequest).(golemclient.ApprovalRequest)
-	if req.CallID != "c1" || req.Tool != "bash" || !strings.Contains(req.Preview, "echo") {
-		t.Fatalf("approval_request = %+v", req)
-	}
-	if err := h.client.Send(golemclient.ApprovalResponse{
-		Type: golemclient.TypeApprovalResponse, Session: sess, Turn: req.Turn,
-		ApprovalID: req.ApprovalID, Decision: "allow",
-	}); err != nil {
-		t.Fatalf("send approval: %v", err)
-	}
 	end := h.expectType(golemclient.TypeToolCallEnd).(golemclient.ToolCallEnd)
-	if !end.OK || !strings.Contains(end.Result, "golem-approved-marker") {
-		t.Errorf("tool_call_end = %+v", end)
-	}
-	h.expectType(golemclient.TypeTurnEnd)
-}
-
-func TestServer_ApprovalDenySkipsExecution(t *testing.T) {
-	t.Parallel()
-	provider := &scriptedProvider{rounds: [][]llm.Event{
-		{{
-			Type: llm.EventToolCalls,
-			ToolCalls: []llm.ToolCall{{
-				ID: "c1", Name: "bash",
-				Args: json.RawMessage(`{"command":"echo golem-deny-marker"}`),
-			}},
-		}},
-		{{Type: llm.EventTextDelta, Delta: "denied"}},
-	}}
-	h := newHarness(t, provider, 5)
-	sess := h.createSession()
-	if err := h.client.Send(golemclient.UserMessage{
-		Type: golemclient.TypeUserMessage, Session: sess, Text: "run it",
-	}); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	req := h.expectType(golemclient.TypeApprovalRequest).(golemclient.ApprovalRequest)
-	if err := h.client.Send(golemclient.ApprovalResponse{
-		Type: golemclient.TypeApprovalResponse, Session: sess, Turn: req.Turn,
-		ApprovalID: req.ApprovalID, Decision: "deny",
-	}); err != nil {
-		t.Fatalf("send denial: %v", err)
-	}
-	end := h.expectType(golemclient.TypeToolCallEnd).(golemclient.ToolCallEnd)
-	if end.OK || strings.Contains(end.Result, "golem-deny-marker") {
-		t.Errorf("denied command should not run, got %+v", end)
-	}
-	if !strings.Contains(end.Result, "denied") {
-		t.Errorf("result should explain denial: %q", end.Result)
-	}
-	h.expectType(golemclient.TypeTurnEnd)
-}
-
-func TestServer_ApprovalTimeoutDefaultsDeny(t *testing.T) {
-	t.Parallel()
-	provider := &scriptedProvider{rounds: [][]llm.Event{
-		{{
-			Type: llm.EventToolCalls,
-			ToolCalls: []llm.ToolCall{{
-				ID: "c1", Name: "bash",
-				Args: json.RawMessage(`{"command":"echo nope"}`),
-			}},
-		}},
-		{{Type: llm.EventTextDelta, Delta: "done"}},
-	}}
-	h := newHarness(t, provider, 1) // 1s approval timeout
-	sess := h.createSession()
-	if err := h.client.Send(golemclient.UserMessage{
-		Type: golemclient.TypeUserMessage, Session: sess, Text: "run",
-	}); err != nil {
-		t.Fatalf("send: %v", err)
-	}
-	h.expectType(golemclient.TypeApprovalRequest)
-	// No response: wait past the timeout.
-	end := h.expectType(golemclient.TypeToolCallEnd)
-	toolEnd, ok := end.(golemclient.ToolCallEnd)
-	if !ok || toolEnd.OK {
-		t.Fatalf("timeout should deny, got %+v", end)
+	if !end.OK || !strings.Contains(end.Result, "golem-auto-marker") {
+		t.Errorf("bash should run without approval, got %+v", end)
 	}
 	h.expectType(golemclient.TypeTurnEnd)
 }
@@ -406,7 +331,7 @@ func TestServer_InterruptEndsTurnGracefully(t *testing.T) {
 		}()
 		return out
 	}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 	if err := h.client.Send(golemclient.UserMessage{
 		Type: golemclient.TypeUserMessage, Session: sess, Text: "stall",
@@ -447,7 +372,7 @@ func TestServer_BusySessionRejectsSecondTurn(t *testing.T) {
 		}()
 		return out
 	}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 	send := func() {
 		t.Helper()
@@ -477,7 +402,7 @@ func TestServer_SessionListOrdersByLastActive(t *testing.T) {
 	provider := &scriptedProvider{rounds: [][]llm.Event{
 		{{Type: llm.EventTextDelta, Delta: "hi"}},
 	}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	first := h.createSession()
 	time.Sleep(5 * time.Millisecond)
 	second := h.createSession()
@@ -496,7 +421,7 @@ func TestServer_SessionListOrdersByLastActive(t *testing.T) {
 func TestServer_IgnoresUnknownEventTypes(t *testing.T) {
 	t.Parallel()
 	provider := &scriptedProvider{rounds: [][]llm.Event{}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	if err := h.client.Send(map[string]string{"type": "totally_unknown", "x": "1"}); err != nil {
 		t.Fatalf("send unknown: %v", err)
 	}
@@ -511,7 +436,7 @@ func TestServer_LoadSessionReplaysHistory(t *testing.T) {
 	provider := &scriptedProvider{rounds: [][]llm.Event{
 		{{Type: llm.EventTextDelta, Delta: "one"}},
 	}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 	if err := h.client.Send(golemclient.UserMessage{
 		Type: golemclient.TypeUserMessage, Session: sess, Text: "hello",
@@ -557,7 +482,7 @@ func TestServer_EventsPersistedBeforeEmission(t *testing.T) {
 		}()
 		return out
 	}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 	if err := h.client.Send(golemclient.UserMessage{
 		Type: golemclient.TypeUserMessage, Session: sess, Text: "hi",
@@ -586,7 +511,7 @@ func TestServer_FirstTurnGeneratesTitleOnce(t *testing.T) {
 		{{Type: llm.EventTextDelta, Delta: "one"}, {Type: llm.EventUsage}},
 		{{Type: llm.EventTextDelta, Delta: "two"}, {Type: llm.EventUsage}},
 	}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 
 	if err := h.client.Send(golemclient.UserMessage{
@@ -645,7 +570,7 @@ func TestServer_RenameSession(t *testing.T) {
 	t.Parallel()
 
 	provider := &scriptedProvider{rounds: [][]llm.Event{}}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 
 	if err := h.client.Send(golemclient.RenameSession{
@@ -672,7 +597,7 @@ func TestServer_RenameSession(t *testing.T) {
 func TestServer_RenameSessionRejectsEmptyAndUnknownSession(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, &scriptedProvider{rounds: [][]llm.Event{}}, 5)
+	h := newHarness(t, &scriptedProvider{rounds: [][]llm.Event{}})
 	sess := h.createSession()
 
 	if err := h.client.Send(golemclient.RenameSession{
@@ -699,7 +624,7 @@ func TestServer_RenameSessionRejectsEmptyAndUnknownSession(t *testing.T) {
 func TestServer_VersionQueryAnswersHello(t *testing.T) {
 	t.Parallel()
 
-	h := newHarness(t, &scriptedProvider{rounds: [][]llm.Event{}}, 5)
+	h := newHarness(t, &scriptedProvider{rounds: [][]llm.Event{}})
 
 	if err := h.client.Send(golemclient.VersionQuery{Type: golemclient.TypeVersionQuery}); err != nil {
 		t.Fatalf("send: %v", err)
@@ -718,7 +643,7 @@ func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 		rounds:      [][]llm.Event{{{Type: llm.EventTextDelta, Delta: "hi"}, {Type: llm.EventUsage}}},
 		titleEvents: []llm.Event{{Type: llm.EventError, Err: errors.New("boom")}},
 	}
-	h := newHarness(t, provider, 5)
+	h := newHarness(t, provider)
 	sess := h.createSession()
 
 	if err := h.client.Send(golemclient.UserMessage{

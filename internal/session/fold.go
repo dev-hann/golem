@@ -91,7 +91,7 @@ func (f *folder) feed(line []byte) {
 
 		f.title = ev.Title
 	default:
-		// session_meta / approval / error / interrupt events do not change
+		// session_meta / error / interrupt events do not change
 		// conversation state.
 	}
 }

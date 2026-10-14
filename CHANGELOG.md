@@ -7,13 +7,25 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed
+
+- `SocketOwnerPID` now tolerates lsof builds that append ` type=STREAM` to
+  the `-F n` name field — foreign-server detection works outside CI's lsof.
+
+### Removed — approval gate (ADR-0016)
+
+- The interactive approval gate is gone: tools execute autonomously and are
+  observable via `tool_call_start`/`tool_call_end` transcript blocks.
+- Removed the `internal/approval` package, the agent-loop bash gate, the
+  `approval_request`/`approval_response` protocol events and
+  `approval_timeout` error code, the `[approval]` config section, and the
+  TUI approval modal. Old sessions replay cleanly (unknown events skipped).
+
 ### Added — phase 1 (agent core)
 
 - `Provider` interface with the Anthropic adapter as reference implementation.
 - Agent turn loop with tool dispatch and cancellation.
 - Built-in tools: read, write, edit, bash, grep, glob — with output budgets.
-- Approval gate: read-only prefix whitelist, word-boundary matching, compound
-  command segmentation, substitution/ redirection forced deny.
 
 ### Added — phase 2 (sessions & server)
 

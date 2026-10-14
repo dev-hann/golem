@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dev-hann/golem/internal/approval"
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/tools"
 )
@@ -49,11 +48,9 @@ type Event struct {
 type Agent struct {
 	provider llm.Provider
 	registry *tools.Registry
-	policy   *approval.Policy
 	model    string
 	system   string
 	budget   int
-	approver ApprovalFunc
 }
 
 // Option customizes an Agent.
@@ -69,18 +66,6 @@ func WithBudget(bytes int) Option {
 	return func(a *Agent) { a.budget = bytes }
 }
 
-// ApprovalFunc interactively confirms a command that the policy did not
-// auto-allow. preview is the command line. Returning true runs the command.
-// The server implements this by emitting approval_request and blocking on
-// approval_response (see docs/PROTOCOL.md).
-type ApprovalFunc func(ctx context.Context, call llm.ToolCall, preview string) bool
-
-// WithApprovalFunc installs an interactive approval hook. Without one,
-// non-whitelisted commands are denied (non-interactive behavior).
-func WithApprovalFunc(fn ApprovalFunc) Option {
-	return func(a *Agent) { a.approver = fn }
-}
-
 // defaultSystemPrompt is the built-in instruction set for the model.
 const defaultSystemPrompt = `You are golem, a coding agent working in the user's workspace.
 Use the provided tools to read, search, edit files and run commands.
@@ -88,19 +73,17 @@ Prefer the edit tool over rewriting whole files.
 Verify your changes (run tests when available) before claiming completion.
 Be concise.`
 
-// New builds an Agent. model selects the provider model; policy gates bash
-// commands; registry supplies the tool implementations.
+// New builds an Agent. model selects the provider model; registry supplies
+// the tool implementations.
 func New(
 	provider llm.Provider,
 	registry *tools.Registry,
-	policy *approval.Policy,
 	model string,
 	opts ...Option,
 ) *Agent {
 	a := &Agent{
 		provider: provider,
 		registry: registry,
-		policy:   policy,
 		model:    model,
 		system:   defaultSystemPrompt,
 		budget:   tools.DefaultOutputBudget,
@@ -113,9 +96,9 @@ func New(
 }
 
 // Run executes one turn: it appends userText to history, streams provider
-// events, dispatches tool calls (through the approval gate for bash), feeds
-// results back, and repeats until the model stops calling tools. The returned
-// channel closes when the turn is complete or fatally errored.
+// events, dispatches tool calls, feeds results back, and repeats until the
+// model stops calling tools. The returned channel closes when the turn is
+// complete or fatally errored.
 func (a *Agent) Run(ctx context.Context, history []llm.Message, userText string) <-chan Event {
 	out := make(chan Event, eventBuffer)
 	go func() {
@@ -243,9 +226,8 @@ func (a *Agent) streamRound(
 	return text, calls, usage, nil
 }
 
-// executeCalls runs each tool call through the approval gate (bash only in
-// this phase) and the registry, emitting start/end events and returning the
-// results to append as the next user message.
+// executeCalls runs each tool call through the registry, emitting start/end
+// events and returning the results to append as the next user message.
 func (a *Agent) executeCalls(
 	ctx context.Context,
 	calls []llm.ToolCall,
@@ -272,15 +254,9 @@ func (a *Agent) executeCalls(
 	return results, true
 }
 
-// runOne executes a single call, applying the approval gate for bash.
+// runOne executes a single call.
 func (a *Agent) runOne(ctx context.Context, call llm.ToolCall) llm.ToolResult {
 	result := llm.ToolResult{CallID: call.ID, Name: call.Name, OK: true}
-	if call.Name == bashToolName && !a.bashAllowed(ctx, call) {
-		result.OK = false
-		result.Output = "denied by approval policy: command not whitelisted"
-
-		return result
-	}
 
 	output, err := a.registry.Execute(ctx, call.Name, call.Args)
 	if err != nil {
@@ -291,35 +267,4 @@ func (a *Agent) runOne(ctx context.Context, call llm.ToolCall) llm.ToolResult {
 	result.Output, _ = tools.Truncate(output, a.budget)
 
 	return result
-}
-
-// bashAllowed reports whether a bash call may run: auto-allowed prefixes
-// pass, otherwise the interactive approver decides (deny when absent).
-func (a *Agent) bashAllowed(ctx context.Context, call llm.ToolCall) bool {
-	command := bashCommand(call.Args)
-	if a.policy.Check(command) == approval.DecisionAllow {
-		return true
-	}
-
-	if a.approver == nil {
-		return false
-	}
-
-	return a.approver(ctx, call, command)
-}
-
-// bashToolName is the registry name of the shell tool.
-const bashToolName = "bash"
-
-// bashCommand extracts the command line from bash tool arguments. Malformed
-// arguments deny closed: an unparseable command cannot be checked.
-func bashCommand(args json.RawMessage) string {
-	var a struct {
-		Command string `json:"command"`
-	}
-	if err := json.Unmarshal(args, &a); err != nil {
-		return "unparseable-command"
-	}
-
-	return a.Command
 }

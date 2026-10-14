@@ -17,14 +17,14 @@ Goal: a working agent via `golem ask "..."` — no server, no TUI.
 - `internal/llm`: `Provider` interface, `Request`, `Event` types; `anthropic` adapter (reference implementation).
 - `internal/tools`: read, write, edit, bash, grep, glob. Registry.
 - `internal/agent`: turn loop with tool dispatch.
-- `internal/approval`: policy engine (auto-mode for CLI harness with prefix whitelist; interactive gate lands with server/TUI).
+- `internal/approval`: policy engine (auto-mode for CLI harness with prefix whitelist; interactive gate lands with server/TUI). *(Removed 2026-10-14 — ADR-0016.)*
 - `cmd/golem`: `ask` subcommand (one-shot).
 
 ### Acceptance criteria
 
 1. `golem ask "read go.mod in <dir> and tell me the module name"` performs a real tool round-trip and prints the final answer.
 2. Edit tool refuses (with clear error result to the model) on: missing old string, ambiguous multiple matches — model receives the error and can retry.
-3. Bash tool with a non-whitelisted command in non-interactive mode is denied without execution.
+3. Bash tool with a non-whitelisted command in non-interactive mode is denied without execution. *(Superseded by ADR-0016: bash executes autonomously.)*
 4. Grep/glob results are truncated to the byte budget; truncation is visible in the result.
 5. Context cancellation (SIGINT) stops the loop within one await point.
 
@@ -44,7 +44,7 @@ Goal: a working agent via `golem ask "..."` — no server, no TUI.
 - `TestGlob_MatchesRecursivePatterns`
 - `TestTruncation_RespectsByteBudget_MarksTruncated`
 
-**internal/approval**
+**internal/approval** *(package removed 2026-10-14 — ADR-0016)*
 - `TestApproval_AutoAllowsWhitelistedPrefixes`
 - `TestApproval_DeniesNonWhitelistedInNonInteractive`
 - `TestApproval_PrefixMatchRequiresWordBoundary`
@@ -66,7 +66,7 @@ Goal: a working agent via `golem ask "..."` — no server, no TUI.
 
 ## Phase 2 — Sessions and server (unix socket, NDJSON)
 
-Status: implemented — all test-list items green, `make all` passes, coverage ≥ 80%. `golem serve` + `golem chat` wired. Interactive approval UI is phase 4; `golem chat` auto-denies approvals until then.
+Status: implemented — all test-list items green, `make all` passes, coverage ≥ 80%. `golem serve` + `golem chat` wired. The approval gate this phase shipped was later removed (ADR-0016); tools execute autonomously and report via tool_call events.
 
 Goal: `golem serve` + protocol over the socket, testable with `nc`.
 
@@ -95,8 +95,8 @@ Goal: `golem serve` + protocol over the socket, testable with `nc`.
 
 **internal/server**
 - `TestServer_UserMessageProducesTurnLifecycle` (turn_start → deltas → turn_end)
-- `TestServer_ApprovalRequestBlocksUntilResponse`
-- `TestServer_ApprovalTimeoutDefaultsDeny`
+- `TestServer_ApprovalRequestBlocksUntilResponse` *(removed — ADR-0016; see `TestServer_BashRunsDirectly_NoApprovalRoundTrip`)*
+- `TestServer_ApprovalTimeoutDefaultsDeny` *(removed — ADR-0016)*
 - `TestServer_InterruptEndsTurn_Gracefully`
 - `TestServer_SessionListOrdersByLastActive`
 - `TestServer_ConcurrentSessionsNoCrossTalk`
@@ -131,8 +131,8 @@ Goal: daily-driver terminal client.
 ### Test list
 
 - `TestModel_AppliesTextDelta_UpdatesView`
-- `TestModel_ApprovalPromptYesRunsCommand`
-- `TestModel_ApprovalPromptDenySendsDeny`
+- `TestModel_ApprovalPromptYesRunsCommand` *(removed — ADR-0016)*
+- `TestModel_ApprovalPromptDenySendsDeny` *(removed — ADR-0016)*
 - `TestModel_ToolCallCollapsedByDefault`
 - `TestModel_InterruptSendsInterruptEvent`
 - `TestModel_SessionPickerListsAndSwitches`
@@ -141,24 +141,15 @@ Goal: daily-driver terminal client.
 
 ---
 
-## Phase 4 — Approval UX + session management polish
+## Phase 4 — Session management polish
 
 ### Deliverable
 
-- Approval prompt UX in TUI (command preview with cwd, always-deny-on-timeout indicator), `approval.auto_prefixes` config support, `/new`, `/resume` commands.
+- `/new`, `/resume` commands. *(The approval UX originally planned here was cancelled — the approval gate was removed entirely; see ADR-0016.)*
 
 ### Acceptance criteria
 
-1. Non-whitelisted command shows preview and blocks turn; y/n/deny-all works.
-2. Prefixes from config extend the whitelist at runtime (no server restart).
-3. Timeout path renders explicit "denied (timeout)" in transcript.
-
-### Test list
-
-- `TestConfig_PrefixesFeedApprovalEngine`
-- `TestApprovalUI_PreviewIncludesCommandAndCwd`
-- `TestApprovalUI_DenyAllForSession`
-- `TestApproval_TimeoutSurfacesAsDenied`
+1. `/new` starts a fresh session from the TUI; `/resume` restores a prior one.
 
 ---
 
@@ -200,7 +191,7 @@ Goal: daily-driver terminal client.
 1. Declared MCP server starts lazily, tools appear in the registry, agent uses them in a turn.
 2. Plugin crash → exponential backoff restart (max 3) → marked failed; its tools return a clear error result to the model.
 3. Server shutdown stops plugins gracefully (5 s timeout → SIGKILL).
-4. MCP tools pass through the approval gate (default: require approval).
+4. MCP tools execute autonomously like built-in tools; invocations are observable via tool_call events (ADR-0016).
 
 ### Test list
 
@@ -209,7 +200,6 @@ Goal: daily-driver terminal client.
 - `TestMCP_LazyStartOnFirstSessionUse`
 - `TestMCP_CrashRestartBackoff_ThenFailed`
 - `TestMCP_GracefulShutdownTimeoutKills`
-- `TestMCP_ToolsRouteThroughApproval`
 - `TestMCP_Register_NamesMangledCorrectly`
 
 ---

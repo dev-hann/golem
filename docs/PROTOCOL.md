@@ -31,19 +31,6 @@ Send a user prompt. Starts a new turn in the given session.
 |---|---|---|
 | `text` | string | Non-empty user prompt |
 
-### `approval_response`
-
-Respond to a pending `approval_request` (same `turn`).
-
-```json
-{"type":"approval_response","session":"01J...","turn":"01J...","approval_id":"ap_9f2","decision":"allow"}
-```
-
-| Field | Type | Description |
-|---|---|---|
-| `approval_id` | string | ID from `approval_request` |
-| `decision` | `"allow" \| "deny"` | `deny` sends the tool a "user denied" error result so the loop continues |
-
 ### `interrupt`
 
 Cancel the current turn. Server stops the agent loop at the next await point; partial events already emitted stand.
@@ -125,7 +112,6 @@ Emitted in order during a turn. All carry `turn`.
 | `text_delta` | `delta` | Assistant text chunk (append) |
 | `tool_call_start` | `call_id`, `tool`, `args` | Tool invocation; `args` is the parsed JSON object |
 | `tool_call_end` | `call_id`, `ok`, `result` | Tool finished. Failures carry the error text in `result`; `result` truncated to 16 KiB display budget |
-| `approval_request` | `approval_id`, `call_id`, `tool`, `preview` | Loop blocked; awaiting `approval_response`. `preview`: command line + cwd |
 | `error` | `code`, `message` | Recoverable error within the turn (tool failures already reported via `tool_call_end`; this is loop/provider level) |
 | `turn_end` | `usage` | Turn complete. `usage`: `{"input_tokens":n,"output_tokens":n}` |
 
@@ -136,7 +122,6 @@ Examples:
 {"type":"text_delta","session":"01J...","turn":"01J...","delta":"Reading the test file.\n"}
 {"type":"tool_call_start","session":"01J...","turn":"01J...","call_id":"tc_1","tool":"read","args":{"path":"internal/tools/edit.go"}}
 {"type":"tool_call_end","session":"01J...","turn":"01J...","call_id":"tc_1","ok":true,"result":"package tools..."}
-{"type":"approval_request","session":"01J...","turn":"01J...","approval_id":"ap_1","call_id":"tc_2","tool":"bash","preview":"rm -rf /tmp/build && make build (cwd: /home/user/project)"}
 {"type":"turn_end","session":"01J...","turn":"01J...","usage":{"input_tokens":4211,"output_tokens":380}}
 ```
 
@@ -147,15 +132,16 @@ Examples:
 | `provider_error` | LLM API call failed (rate limit, auth, 5xx) | Show message; turn ended |
 | `provider_overloaded` | Provider explicitly overloaded | Offer retry |
 | `context_length` | Conversation exceeds model window | Suggest new session (compaction is a non-goal for v1) |
-| `approval_timeout` | No approval response within 120s | Tool denied by default |
 | `session_not_found` | Unknown session ID | Refetch `session_list` |
 | `invalid_request` | Malformed client event | Log; ignore |
 | `internal` | Unexpected server error | Show message |
 
 ## Session persistence mirror
 
-Every event in this protocol (except `approval_response`, `interrupt`, and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format.
+Every event in this protocol (except `interrupt` and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format. Sessions recorded before the approval gate's removal may still contain legacy `approval_request` lines; replay skips unknown event types.
 
 ## Versioning
 
 The protocol has no version negotiation in v1. Breaking changes require: new `type` names rather than changed meanings, plus a note here. When a second consumer exists, add a `hello` handshake with `protocol_version`.
+
+> **Breaking change note:** the `approval_request` server event, the `approval_response` client event, and the `approval_timeout` error code were removed when the interactive approval gate was dropped (ADR-0016). Tools now execute autonomously and are observable via `tool_call_start`/`tool_call_end`.

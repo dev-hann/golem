@@ -14,10 +14,6 @@ func TestRoundTrip_AllClientEvents(t *testing.T) {
 	t.Parallel()
 	events := []any{
 		golemclient.UserMessage{Type: golemclient.TypeUserMessage, Session: "s1", Text: "hello"},
-		golemclient.ApprovalResponse{
-			Type: golemclient.TypeApprovalResponse, Session: "s1", Turn: "t1",
-			ApprovalID: "ap1", Decision: "allow",
-		},
 		golemclient.Interrupt{Type: golemclient.TypeInterrupt, Session: "s1", Turn: "t1"},
 		golemclient.CreateSession{Type: golemclient.TypeCreateSession, Cwd: "/tmp"},
 		golemclient.ListSessions{Type: golemclient.TypeListSessions},
@@ -57,10 +53,6 @@ func TestRoundTrip_AllServerEvents(t *testing.T) {
 		golemclient.ToolCallEnd{
 			Type: golemclient.TypeToolCallEnd, Session: "s1", Turn: "t1",
 			CallID: "c1", OK: true, Result: "contents",
-		},
-		golemclient.ApprovalRequest{
-			Type: golemclient.TypeApprovalRequest, Session: "s1", Turn: "t1",
-			ApprovalID: "ap1", CallID: "c1", Tool: "bash", Preview: "rm -rf /tmp/x (cwd: /p)",
 		},
 		golemclient.ErrorEvent{
 			Type: golemclient.TypeError, Session: "s1", Turn: "t1",

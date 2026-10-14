@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-12. Schema changes require updating this file in the same commit.
 
-> **Status: partially implemented.** The config parser (`internal/config`) is bootstrapped: built-in defaults, the global file, `GOLEM_PROVIDER`/`GOLEM_MODEL` overrides, `[provider]` sections, and `ref:` secret resolution. Project files, CLI flags, and the remaining sections (`[server]`, `[approval]`, `[tools]`, `[plugins]`) land with roadmap phases 4–6. Providers beyond Anthropic arrive in phase 5; MCP support in phase 6. This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
+> **Status: partially implemented.** The config parser (`internal/config`) is bootstrapped: built-in defaults, the global file, `GOLEM_PROVIDER`/`GOLEM_MODEL` overrides, `[provider]` sections, and `ref:` secret resolution. Project files, CLI flags, and the remaining sections (`[server]`, `[tools]`, `[plugins]`) land with roadmap phases 4–6. Providers beyond Anthropic arrive in phase 5; MCP support in phase 6. This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
 
 ## First-run onboarding
 
@@ -62,20 +62,6 @@ Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The future 
 | `mem_limit_mb` | int | `256` | Sets `GOMEMLIMIT` |
 | `session_cache` | int | `8` | Most-recently-active sessions held in memory |
 
-### `[approval]`
-
-| Key | Type | Default | Description |
-|---|---|---|---|
-| `mode` | string | `"prompt"` | `prompt` = gate non-whitelisted; `all_auto` = never block (dangerous, warns at startup) |
-| `auto_prefixes` | []string | `["ls", "cat", "head", "tail", "git status", "git log", "git diff", "grep", "rg", "find", "wc"]` | Word-boundary prefix match against the command line |
-| `timeout_secs` | int | `120` | Approval wait; expiry = deny |
-
-Matching rules (already enforced by `internal/approval` for the CLI harness):
-
-- The command line is split into segments at `&&`, `||`, `|`, `;` and newlines; **every segment** must pass the whitelist or the whole line is denied.
-- Prefixes match whole words at the start of a segment: `git status` matches `git status -s`, not `git statusx`.
-- Command substitution and redirection (`$(`, `` ` ``, `>`, `<`) anywhere in the line force a deny regardless of prefixes — `cat notes.txt > out.txt` prompts even though `cat` is whitelisted.
-
 ### `[tools]`
 
 | Key | Type | Default | Description |
@@ -109,9 +95,6 @@ api_key = "ref:ZAI_API_KEY"
 [server]
 mem_limit_mb = 256
 
-[approval]
-auto_prefixes = ["ls", "cat", "git status", "git diff", "rg"]
-
 [plugins.mcp.github]
 command = ["./github-mcp", "-stdio"]
 env = { GITHUB_TOKEN = "ref:GITHUB_TOKEN" }
@@ -142,7 +125,7 @@ Rules:
 
 - **Lazy start** by default; a declared-but-unused plugin costs nothing.
 - Registration: MCP tool JSON Schemas pass through to providers unmodified (no translation layer).
-- MCP tools are subject to the same approval gate as built-in tools; tools that declare no side effects still default to requiring approval (opt-out per plugin is a non-goal for now).
+- MCP tools execute autonomously like built-in tools; their invocations are observable via `tool_call_start`/`tool_call_end` events.
 - A `failed_permanent` plugin's tools return `{"error": "plugin down"}` results to the model rather than blocking the turn.
 - Config reload does not restart healthy plugins; only `disabled` toggles and command changes take effect on reload.
 

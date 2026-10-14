@@ -29,17 +29,17 @@ func (p *bashProvider) Stream(
 		out <- llm.Event{
 			Type: llm.EventToolCalls,
 			ToolCalls: []llm.ToolCall{{
-				ID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo never-runs"}`),
+				ID: "c1", Name: "bash", Args: json.RawMessage(`{"command":"echo golem-chat-ran"}`),
 			}},
 		}
 	} else {
-		out <- llm.Event{Type: llm.EventTextDelta, Delta: "denied and done"}
+		out <- llm.Event{Type: llm.EventTextDelta, Delta: "ran and done"}
 	}
 	close(out)
 	return out, nil
 }
 
-func TestChat_AutoDeniesApprovalRequests(t *testing.T) {
+func TestChat_BashRunsAutonomouslyAndShowsInTranscript(t *testing.T) {
 	t.Parallel()
 	sockDir := shortTempDir(t)
 	socket := filepath.Join(sockDir, "golem.sock")
@@ -68,16 +68,13 @@ func TestChat_AutoDeniesApprovalRequests(t *testing.T) {
 		t.Fatalf("Chat: %v", err)
 	}
 	errOut := stderr.String()
-	if !strings.Contains(errOut, "auto-denied") {
-		t.Errorf("stderr should note auto-denial: %q", errOut)
+	if !strings.Contains(errOut, "→ bash") {
+		t.Errorf("stderr should show the tool call: %q", errOut)
 	}
-	if !strings.Contains(errOut, "✗") {
-		t.Errorf("stderr should show the denied tool call: %q", errOut)
+	if !strings.Contains(errOut, "✓") {
+		t.Errorf("stderr should show the tool succeeded: %q", errOut)
 	}
-	if strings.Contains(errOut, "max tool rounds") {
-		t.Errorf("provider should move on after denial: %q", errOut)
-	}
-	if !strings.Contains(stdout.String(), "denied and done") {
+	if !strings.Contains(stdout.String(), "ran and done") {
 		t.Errorf("stdout missing final answer: %q", stdout.String())
 	}
 }

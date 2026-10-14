@@ -122,42 +122,6 @@ func TestModel_AppliesTextDelta_UpdatesView(t *testing.T) {
 	}
 }
 
-func TestModel_ApprovalPromptYesSendsAllow(t *testing.T) {
-	t.Parallel()
-	m, fc := wired(t)
-	m = deliver(t, m, golemclient.ApprovalRequest{
-		Type: golemclient.TypeApprovalRequest, Session: "s1", Turn: "t1",
-		ApprovalID: "ap1", CallID: "c1", Tool: "bash", Preview: "rm -rf /tmp/x",
-	})
-	if m.mode != modeApproval {
-		t.Fatalf("mode = %v, want approval", m.mode)
-	}
-	if !strings.Contains(m.View(), "rm -rf /tmp/x") {
-		t.Errorf("approval modal should show preview:\n%s", m.View())
-	}
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
-	resp, ok := lastSent(t, fc).(golemclient.ApprovalResponse)
-	if !ok || resp.Decision != "allow" || resp.ApprovalID != "ap1" {
-		t.Errorf("sent = %#v, want allow ap1", resp)
-	}
-	if m.mode != modeChat {
-		t.Errorf("mode after answer = %v, want chat", m.mode)
-	}
-}
-
-func TestModel_ApprovalPromptOtherKeysDeny(t *testing.T) {
-	t.Parallel()
-	m, fc := wired(t)
-	m = deliver(t, m, golemclient.ApprovalRequest{
-		Type: golemclient.TypeApprovalRequest, Session: "s1", Turn: "t1", ApprovalID: "ap1",
-	})
-	key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	resp, ok := lastSent(t, fc).(golemclient.ApprovalResponse)
-	if !ok || resp.Decision != "deny" {
-		t.Errorf("sent = %#v, want deny", resp)
-	}
-}
-
 func TestModel_ToolCallCollapsedByDefault(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)

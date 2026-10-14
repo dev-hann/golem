@@ -54,8 +54,7 @@ func (s *syncWriter) print(text string) {
 
 // Chat runs a line-based REPL against a golem server: the body of
 // `golem chat`. It exits when stdin ends, /quit is entered, or ctx is
-// cancelled. Approval requests are auto-denied in this phase (interactive
-// approval UI is roadmap phase 4).
+// cancelled.
 func Chat(ctx context.Context, opts ChatOptions) error {
 	client, err := golemclient.Dial(opts.Socket)
 	if err != nil {
@@ -104,7 +103,7 @@ func Chat(ctx context.Context, opts ChatOptions) error {
 			return fmt.Errorf("cli: sending: %w", err)
 		}
 
-		if err := drainTurn(ctx, events, stdout, stderr, client, sessionID); err != nil {
+		if err := drainTurn(ctx, events, stdout, stderr); err != nil {
 			return err
 		}
 	}
@@ -179,8 +178,6 @@ func drainTurn(
 	ctx context.Context,
 	events <-chan any,
 	stdout, stderr *syncWriter,
-	client *golemclient.Client,
-	sessionID string,
 ) error {
 	for {
 		select {
@@ -191,26 +188,18 @@ func drainTurn(
 				return fmt.Errorf("cli: connection closed")
 			}
 
-			done, err := renderChatEvent(stdout, stderr, client, sessionID, ev)
-			if err != nil {
-				return err
-			}
-
-			if done {
+			if done := renderChatEvent(stdout, stderr, ev); done {
 				return nil
 			}
 		}
 	}
 }
 
-// renderChatEvent prints one event; returns done=true at turn end. Approval
-// requests are auto-denied (interactive approval arrives in phase 4).
+// renderChatEvent prints one event; returns done=true at turn end.
 func renderChatEvent(
 	stdout, stderr *syncWriter,
-	client *golemclient.Client,
-	sessionID string,
 	ev any,
-) (bool, error) {
+) bool {
 	switch e := ev.(type) {
 	case golemclient.TextDelta:
 		stdout.print(e.Delta)
@@ -225,23 +214,15 @@ func renderChatEvent(
 		}
 
 		stderr.printf("%s %s\n", status, e.CallID)
-	case golemclient.ApprovalRequest:
-		stderr.printf("approval needed: %s — auto-denied (interactive approval is phase 4)\n", e.Preview)
-		err := client.Send(golemclient.ApprovalResponse{
-			Type: golemclient.TypeApprovalResponse, Session: sessionID,
-			Turn: e.Turn, ApprovalID: e.ApprovalID, Decision: "deny",
-		})
-
-		return false, err
 	case golemclient.ErrorEvent:
 		stderr.printf("error[%s]: %s\n", e.Code, e.Message)
-		return true, nil
+		return true
 	case golemclient.TurnEnd:
 		stderr.printf("\n[tokens: in=%d out=%d]\n", e.Usage.InputTokens, e.Usage.OutputTokens)
-		return true, nil
+		return true
 	default:
 		// history/session events are not rendered in chat
 	}
 
-	return false, nil
+	return false
 }

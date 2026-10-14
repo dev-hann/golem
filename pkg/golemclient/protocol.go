@@ -11,30 +11,28 @@ import (
 
 // Event type names (client → server).
 const (
-	TypeUserMessage      = "user_message"
-	TypeApprovalResponse = "approval_response"
-	TypeInterrupt        = "interrupt"
-	TypeCreateSession    = "create_session"
-	TypeListSessions     = "list_sessions"
-	TypeLoadSession      = "load_session"
-	TypeRenameSession    = "rename_session"
-	TypeVersionQuery     = "version_query"
+	TypeUserMessage   = "user_message"
+	TypeInterrupt     = "interrupt"
+	TypeCreateSession = "create_session"
+	TypeListSessions  = "list_sessions"
+	TypeLoadSession   = "load_session"
+	TypeRenameSession = "rename_session"
+	TypeVersionQuery  = "version_query"
 )
 
 // Event type names (server → client).
 const (
-	TypeSessionMeta     = "session_meta"
-	TypeHistory         = "history"
-	TypeSessionList     = "session_list"
-	TypeTurnStart       = "turn_start"
-	TypeTextDelta       = "text_delta"
-	TypeToolCallStart   = "tool_call_start"
-	TypeToolCallEnd     = "tool_call_end"
-	TypeApprovalRequest = "approval_request"
-	TypeError           = "error"
-	TypeTurnEnd         = "turn_end"
-	TypeSessionTitle    = "session_title"
-	TypeServerHello     = "server_hello"
+	TypeSessionMeta   = "session_meta"
+	TypeHistory       = "history"
+	TypeSessionList   = "session_list"
+	TypeTurnStart     = "turn_start"
+	TypeTextDelta     = "text_delta"
+	TypeToolCallStart = "tool_call_start"
+	TypeToolCallEnd   = "tool_call_end"
+	TypeError         = "error"
+	TypeTurnEnd       = "turn_end"
+	TypeSessionTitle  = "session_title"
+	TypeServerHello   = "server_hello"
 )
 
 // Envelope is the minimal shape every message shares. Unknown types must be
@@ -50,15 +48,6 @@ type UserMessage struct {
 	Type    string `json:"type"`
 	Session string `json:"session"`
 	Text    string `json:"text"`
-}
-
-// ApprovalResponse answers a pending ApprovalRequest.
-type ApprovalResponse struct {
-	Type       string `json:"type"`
-	Session    string `json:"session"`
-	Turn       string `json:"turn"`
-	ApprovalID string `json:"approval_id"`
-	Decision   string `json:"decision"` // "allow" | "deny"
 }
 
 // Interrupt cancels the active turn.
@@ -154,17 +143,6 @@ type ToolCallEnd struct {
 	Result  string `json:"result"`
 }
 
-// ApprovalRequest blocks the turn pending an ApprovalResponse.
-type ApprovalRequest struct {
-	Type       string `json:"type"`
-	Session    string `json:"session"`
-	Turn       string `json:"turn"`
-	ApprovalID string `json:"approval_id"`
-	CallID     string `json:"call_id"`
-	Tool       string `json:"tool"`
-	Preview    string `json:"preview"`
-}
-
 // ErrorEvent is a recoverable protocol-level error.
 type ErrorEvent struct {
 	Type    string `json:"type"`
@@ -231,27 +209,25 @@ type decoder func([]byte) (any, error)
 // decoders maps every known event type to its typed decoder. Unknown types
 // fall through to the Envelope (forward compatibility per PROTOCOL.md).
 var decoders = map[string]decoder{
-	TypeUserMessage:      typed[UserMessage],
-	TypeSetModel:         typed[SetModel],
-	TypeApprovalResponse: typed[ApprovalResponse],
-	TypeInterrupt:        typed[Interrupt],
-	TypeCreateSession:    typed[CreateSession],
-	TypeListSessions:     typed[ListSessions],
-	TypeLoadSession:      typed[LoadSession],
-	TypeSessionMeta:      typed[SessionMeta],
-	TypeHistory:          typed[History],
-	TypeSessionList:      typed[SessionList],
-	TypeTurnStart:        typed[TurnStart],
-	TypeTextDelta:        typed[TextDelta],
-	TypeToolCallStart:    typed[ToolCallStart],
-	TypeToolCallEnd:      typed[ToolCallEnd],
-	TypeApprovalRequest:  typed[ApprovalRequest],
-	TypeError:            typed[ErrorEvent],
-	TypeTurnEnd:          typed[TurnEnd],
-	TypeSessionTitle:     typed[SessionTitle],
-	TypeServerHello:      typed[ServerHello],
-	TypeRenameSession:    typed[RenameSession],
-	TypeVersionQuery:     typed[VersionQuery],
+	TypeUserMessage:   typed[UserMessage],
+	TypeSetModel:      typed[SetModel],
+	TypeInterrupt:     typed[Interrupt],
+	TypeCreateSession: typed[CreateSession],
+	TypeListSessions:  typed[ListSessions],
+	TypeLoadSession:   typed[LoadSession],
+	TypeSessionMeta:   typed[SessionMeta],
+	TypeHistory:       typed[History],
+	TypeSessionList:   typed[SessionList],
+	TypeTurnStart:     typed[TurnStart],
+	TypeTextDelta:     typed[TextDelta],
+	TypeToolCallStart: typed[ToolCallStart],
+	TypeToolCallEnd:   typed[ToolCallEnd],
+	TypeError:         typed[ErrorEvent],
+	TypeTurnEnd:       typed[TurnEnd],
+	TypeSessionTitle:  typed[SessionTitle],
+	TypeServerHello:   typed[ServerHello],
+	TypeRenameSession: typed[RenameSession],
+	TypeVersionQuery:  typed[VersionQuery],
 }
 
 // Decode classifies one raw NDJSON line into a typed event. It returns the

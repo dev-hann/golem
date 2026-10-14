@@ -15,8 +15,8 @@ import (
 const defaultBashTimeoutSecs = 120
 
 // BashTool runs a shell command line via bash -c in the workspace root,
-// capturing stdout and stderr. The agent loop gates it behind the approval
-// policy; the tool itself executes whatever it is given.
+// capturing stdout and stderr. Tools execute autonomously (ADR-0016); the
+// invocation is observable via tool_call events.
 type BashTool struct {
 	// Root is the working directory for the command.
 	Root string

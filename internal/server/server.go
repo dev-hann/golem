@@ -1,6 +1,6 @@
 // Package server implements the golem agent server: a unix-socket listener
 // speaking the NDJSON protocol from docs/PROTOCOL.md, wiring sessions, the
-// agent loop, tools, and the approval gate together.
+// agent loop, and tools together.
 package server
 
 import (
@@ -12,20 +12,15 @@ import (
 	"net"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/oklog/ulid/v2"
 
 	"github.com/dev-hann/golem/internal/agent"
-	"github.com/dev-hann/golem/internal/approval"
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/session"
 	"github.com/dev-hann/golem/internal/tools"
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
-
-// defaultApprovalTimeout matches docs/CONFIG.md [approval].timeout_secs.
-const defaultApprovalTimeout = 120 // seconds
 
 // Config wires a Server's dependencies.
 type Config struct {
@@ -38,15 +33,13 @@ type Config struct {
 	Store      *session.Store
 	// Version labels this build for client freshness checks; "" hides
 	// the server from version handshake (development default).
-	Version          string
-	ApprovalTimeoutS int
+	Version string
 }
 
 // Server accepts client connections and runs agent turns.
 type Server struct {
 	cfg      Config
 	registry *tools.Registry
-	policy   *approval.Policy
 
 	mu             sync.Mutex
 	turns          map[string]*turnState
@@ -58,18 +51,12 @@ type Server struct {
 
 // turnState tracks one active turn per session.
 type turnState struct {
-	mu      sync.Mutex
-	ctx     context.Context
-	cancel  context.CancelFunc
-	pending map[string]chan string // approvalID → decision
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // New builds a Server.
 func New(cfg Config) (*Server, error) {
-	if cfg.ApprovalTimeoutS <= 0 {
-		cfg.ApprovalTimeoutS = defaultApprovalTimeout
-	}
-
 	registry, err := tools.NewRegistry(
 		tools.ReadTool{Root: cfg.Root},
 		tools.WriteTool{Root: cfg.Root},
@@ -85,7 +72,6 @@ func New(cfg Config) (*Server, error) {
 	return &Server{
 		cfg:            cfg,
 		registry:       registry,
-		policy:         approval.NewPolicy(approval.ModePrompt, approval.DefaultPrefixes),
 		turns:          make(map[string]*turnState),
 		modelOverrides: make(map[string]string),
 		closed:         make(chan struct{}),
@@ -153,8 +139,6 @@ func (s *Server) dispatch(_ net.Conn, writer *connWriter, event any) bool {
 		s.handleLoad(writer, ev)
 	case golemclient.UserMessage:
 		s.handleUserMessage(writer, ev)
-	case golemclient.ApprovalResponse:
-		s.handleApprovalResponse(ev)
 	case golemclient.Interrupt:
 		s.handleInterrupt(ev)
 	case golemclient.SetModel:
@@ -248,27 +232,6 @@ func (s *Server) handleUserMessage(writer *connWriter, ev golemclient.UserMessag
 	go s.runTurn(turnCtx, writer, ev)
 }
 
-// handleApprovalResponse routes a decision to the waiting turn.
-func (s *Server) handleApprovalResponse(ev golemclient.ApprovalResponse) {
-	s.mu.Lock()
-	state := s.turns[ev.Session]
-	s.mu.Unlock()
-
-	if state == nil {
-		return
-	}
-
-	state.mu.Lock()
-	defer state.mu.Unlock()
-
-	if ch, ok := state.pending[ev.ApprovalID]; ok {
-		select {
-		case ch <- ev.Decision:
-		default:
-		}
-	}
-}
-
 // handleInterrupt cancels the active turn for the session.
 func (s *Server) handleInterrupt(ev golemclient.Interrupt) {
 	s.mu.Lock()
@@ -356,7 +319,7 @@ func (s *Server) beginTurn(ctx context.Context, sessionID string, cancel context
 		return false
 	}
 
-	s.turns[sessionID] = &turnState{ctx: ctx, cancel: cancel, pending: make(map[string]chan string)}
+	s.turns[sessionID] = &turnState{ctx: ctx, cancel: cancel}
 
 	return true
 }
@@ -372,14 +335,9 @@ func (s *Server) endTurn(sessionID string) {
 // rfc3339 is the timestamp format used on the wire.
 const rfc3339 = "2006-01-02T15:04:05Z07:00"
 
-// newTurnID mints a ULID for a turn or approval id.
+// newTurnID mints a ULID for a turn id.
 func newTurnID() string {
 	return ulid.Make().String()
-}
-
-// timeoutFromSecs converts config seconds to a Duration.
-func timeoutFromSecs(secs int) time.Duration {
-	return time.Duration(secs) * time.Second
 }
 
 // runTurn executes the agent loop, persisting then emitting each event.
@@ -392,8 +350,7 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 
 	model := s.turnModel(msg.Session)
 
-	ag := agent.New(s.cfg.Provider, s.registry, s.policy, model,
-		agent.WithApprovalFunc(s.approver(writer, msg.Session, turnID)))
+	ag := agent.New(s.cfg.Provider, s.registry, model)
 
 	sess, err := s.cfg.Store.Get(msg.Session)
 	if err != nil {
@@ -455,63 +412,6 @@ func (s *Server) wireEvent(sessionID, turnID, model string, event agent.Event) a
 		}
 	default:
 		return nil
-	}
-}
-
-// approver builds the interactive approval hook for one turn.
-func (s *Server) approver(
-	writer *connWriter,
-	sessionID, turnID string,
-) agent.ApprovalFunc {
-	return func(ctx context.Context, call llm.ToolCall, preview string) bool {
-		approvalID := "ap_" + newTurnID()[:8]
-		ch := make(chan string, 1)
-
-		s.mu.Lock()
-		state := s.turns[sessionID]
-		s.mu.Unlock()
-
-		if state == nil {
-			return false
-		}
-
-		state.mu.Lock()
-		state.pending[approvalID] = ch
-
-		state.mu.Unlock()
-		defer func() {
-			state.mu.Lock()
-			delete(state.pending, approvalID)
-			state.mu.Unlock()
-		}()
-
-		request := golemclient.ApprovalRequest{
-			Type: golemclient.TypeApprovalRequest, Session: sessionID, Turn: turnID,
-			ApprovalID: approvalID, CallID: call.ID, Tool: call.Name,
-			Preview: preview + " (cwd: " + s.cfg.Root + ")",
-		}
-		if err := s.cfg.Store.Append(sessionID, request); err != nil {
-			return false
-		}
-
-		writer.send(request)
-
-		timeout := timeoutFromSecs(s.cfg.ApprovalTimeoutS)
-
-		timer := time.AfterFunc(timeout, func() {
-			select {
-			case ch <- "deny":
-			default:
-			}
-		})
-		defer timer.Stop()
-
-		select {
-		case decision := <-ch:
-			return decision == "allow"
-		case <-ctx.Done():
-			return false
-		}
 	}
 }
 

@@ -21,7 +21,6 @@ type mode int
 // Input modes.
 const (
 	modeChat mode = iota
-	modeApproval
 	modeSessions
 	modeModels
 	modeCommand
@@ -46,7 +45,6 @@ type Model struct {
 	leaderGen      int
 	cmdQuery       string
 	cmdCursor      int
-	pending        *golemclient.ApprovalRequest
 	sessions       []golemclient.SessionSummary
 	pickIndex      int
 	sessQuery      string
@@ -229,8 +227,6 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.mode {
 	case modeChat:
 		return m.updateChat(key)
-	case modeApproval:
-		return m.updateApproval(key)
 	case modeSessions:
 		return m.updateSessions(key)
 	case modeCommand:
@@ -680,7 +676,6 @@ func (m Model) submit(line string) (tea.Model, tea.Cmd) {
 	})
 }
 
-// updateApproval handles y/n for a pending approval_request.
 // updateModels drives the model picker modal: arrows move, enter applies
 // via set_model, esc cancels.
 func (m Model) updateModels(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -727,27 +722,6 @@ func (m Model) WithModels(models []string) Model {
 	m.models = models
 
 	return m
-}
-
-func (m Model) updateApproval(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	req := m.pending
-	if req == nil {
-		m.mode = modeChat
-		return m, nil
-	}
-
-	decision := "deny"
-	if key.Type == tea.KeyRunes && (key.String() == "y" || key.String() == "Y") {
-		decision = "allow"
-	}
-
-	m.mode = modeChat
-	m.pending = nil
-
-	return m, m.send(golemclient.ApprovalResponse{
-		Type: golemclient.TypeApprovalResponse, Session: req.Session,
-		Turn: req.Turn, ApprovalID: req.ApprovalID, Decision: decision,
-	})
 }
 
 // updateSessions drives the session picker: typing filters (fuzzy over
@@ -979,8 +953,6 @@ func sessionOf(ev any) string {
 		return e.Session
 	case golemclient.ToolCallEnd:
 		return e.Session
-	case golemclient.ApprovalRequest:
-		return e.Session
 	case golemclient.ErrorEvent:
 		return e.Session
 	case golemclient.TurnEnd:
@@ -1033,10 +1005,6 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		})
 	case golemclient.ToolCallEnd:
 		m.finishToolBlock(e)
-	case golemclient.ApprovalRequest:
-		req := e
-		m.pending = &req
-		m.mode = modeApproval
 	case golemclient.ErrorEvent:
 		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
 		m.turnActive = false
@@ -1166,14 +1134,10 @@ func (m Model) View() string {
 		return m.modalized(m.kit.Modal("models · "+m.provider, m.modelsBody()))
 	case modeSessions:
 		return m.modalized(m.kit.Modal("sessions", m.sessionsBody()))
-	case modeApproval:
-		if m.pending != nil {
-			return m.modalized(m.kit.Modal("approval", m.approvalBody()))
-		}
 	case modeChat:
 		// The full layout below.
 	default:
-		// modeApproval without a pending request also falls to the layout.
+		// Future modes fall through to the layout.
 	}
 
 	return m.layout()
@@ -1354,11 +1318,4 @@ func relTime(now time.Time, rfc3339 string) (string, bool) {
 	default:
 		return ts.Format("Jan 2"), true
 	}
-}
-
-// approvalBody renders the approval prompt.
-func (m Model) approvalBody() string {
-	return m.kit.WarnLine("run this command?") + "\n" +
-		m.kit.ToolLine("  "+m.pending.Preview) + "\n" +
-		m.kit.DimLine("y allow · n deny")
 }

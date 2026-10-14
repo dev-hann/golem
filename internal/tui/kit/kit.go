@@ -149,7 +149,7 @@ func (k *Kit) StickyUser(width int, text string) string {
 
 // Modal renders the shared overlay panel: a title line over a padded,
 // framed, background-filled body. Every overlay in the app (help,
-// pickers, approvals) uses this shape so their look cannot drift apart.
+// pickers) uses this shape so their look cannot drift apart.
 func (k *Kit) Modal(title, body string) string {
 	content := k.Title(title) + "\n" + strings.TrimRight(body, "\n")
 

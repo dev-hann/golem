@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/dev-hann/golem/internal/agent"
-	"github.com/dev-hann/golem/internal/approval"
 	"github.com/dev-hann/golem/internal/llm"
 )
 
@@ -47,14 +46,10 @@ func (p *scriptedProvider) Stream(
 func newTestAgent(
 	t *testing.T,
 	provider llm.Provider,
-	policy *approval.Policy,
 ) (a *agent.Agent, root string) {
 	t.Helper()
 	root = t.TempDir()
-	if policy == nil {
-		policy = approval.NewPolicy(approval.ModePrompt, approval.DefaultPrefixes)
-	}
-	return agent.New(provider, mustRegistry(t, root), policy, "test-model"), root
+	return agent.New(provider, mustRegistry(t, root), "test-model"), root
 }
 
 // collect drains an event channel until close.
@@ -83,7 +78,7 @@ func TestLoop_TextOnlyTurn_EmitsDeltasThenEnds(t *testing.T) {
 		{Type: llm.EventTextDelta, Delta: "world"},
 		{Type: llm.EventUsage, InputTokens: 10, OutputTokens: 5},
 	}}}
-	a, _ := newTestAgent(t, provider, nil)
+	a, _ := newTestAgent(t, provider)
 	events := collect(t, a.Run(t.Context(), nil, "hi"))
 	want := []string{"turn_start", "text_delta", "text_delta", "turn_end"}
 	got := eventTypes(events)
@@ -107,7 +102,7 @@ func TestLoop_ToolRoundTrip_AppendsResultAndRepeats(t *testing.T) {
 		},
 		{{Type: llm.EventTextDelta, Delta: "Done."}, {Type: llm.EventUsage, InputTokens: 20, OutputTokens: 7}},
 	}}
-	a, root := newTestAgent(t, provider, nil)
+	a, root := newTestAgent(t, provider)
 	writeTestFile(t, root, "f.txt", "line one\n")
 
 	events := collect(t, a.Run(t.Context(), nil, "read f.txt"))
@@ -142,7 +137,7 @@ func TestLoop_ToolError_ReturnsErrorResultToModel(t *testing.T) {
 		}},
 		{{Type: llm.EventTextDelta, Delta: "It's missing."}},
 	}}
-	a, _ := newTestAgent(t, provider, nil)
+	a, _ := newTestAgent(t, provider)
 	events := collect(t, a.Run(t.Context(), nil, "read missing"))
 	toolEnd := findEvent(events, agent.EventToolCallEnd)
 	if toolEnd == nil || toolEnd.OK {
@@ -157,28 +152,25 @@ func TestLoop_ToolError_ReturnsErrorResultToModel(t *testing.T) {
 	}
 }
 
-func TestLoop_BashDeniedByPolicy_WithoutExecution(t *testing.T) {
+func TestLoop_BashRunsDirectly_WithoutApprovalGate(t *testing.T) {
 	t.Parallel()
 	provider := &scriptedProvider{rounds: [][]llm.Event{
 		{{
 			Type: llm.EventToolCalls,
 			ToolCalls: []llm.ToolCall{
-				{ID: "tc_1", Name: "bash", Args: rawJSON(t, map[string]string{"command": "rm -rf /tmp/nothing"})},
+				{ID: "tc_1", Name: "bash", Args: rawJSON(t, map[string]string{"command": "echo golem-ran"})},
 			},
 		}},
-		{{Type: llm.EventTextDelta, Delta: "Denied, okay."}},
+		{{Type: llm.EventTextDelta, Delta: "Ran, okay."}},
 	}}
-	a, root := newTestAgent(t, provider, nil)
-	marker := root + "/marker.txt"
-	writeTestFile(t, root, "marker.txt", "must survive\n")
-	_ = marker
-	events := collect(t, a.Run(t.Context(), nil, "rm something"))
+	a, _ := newTestAgent(t, provider)
+	events := collect(t, a.Run(t.Context(), nil, "run something"))
 	toolEnd := findEvent(events, agent.EventToolCallEnd)
-	if toolEnd == nil || toolEnd.OK {
-		t.Fatalf("denied bash should be error result, got %+v", toolEnd)
+	if toolEnd == nil || !toolEnd.OK {
+		t.Fatalf("bash should run without an approval gate, got %+v", toolEnd)
 	}
-	if !strings.Contains(toolEnd.Result, "denied by approval policy") {
-		t.Errorf("result should say denied, got: %q", toolEnd.Result)
+	if !strings.Contains(toolEnd.Result, "golem-ran") {
+		t.Errorf("result should carry command output, got: %q", toolEnd.Result)
 	}
 }
 
@@ -193,7 +185,7 @@ func TestLoop_Cancel_StopsAtAwaitPoint(t *testing.T) {
 		}()
 		return out
 	}
-	a, _ := newTestAgent(t, provider, nil)
+	a, _ := newTestAgent(t, provider)
 	ctx, cancel := context.WithCancel(context.Background())
 	eventsCh := a.Run(ctx, nil, "stall")
 	time.Sleep(100 * time.Millisecond)
@@ -218,7 +210,7 @@ func TestLoop_MaxRoundsBoundsConfusedModel(t *testing.T) {
 		},
 	}}
 	provider := &scriptedProvider{rounds: [][]llm.Event{round}}
-	a, _ := newTestAgent(t, provider, nil)
+	a, _ := newTestAgent(t, provider)
 	events := collect(t, a.Run(t.Context(), nil, "loop forever"))
 	errEv := findEvent(events, agent.EventError)
 	if errEv == nil || !strings.Contains(errEv.Err.Error(), "max tool rounds") {
@@ -234,7 +226,7 @@ func TestLoop_UnknownEventTypeIgnored(t *testing.T) {
 			{Type: llm.EventTextDelta, Delta: "ok"},
 		},
 	}}
-	a, _ := newTestAgent(t, provider, nil)
+	a, _ := newTestAgent(t, provider)
 	events := collect(t, a.Run(t.Context(), nil, "hi"))
 	for _, ev := range events {
 		if ev.Type == agent.EventError {

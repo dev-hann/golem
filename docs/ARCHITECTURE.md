@@ -23,7 +23,6 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
                   │   /ws listeners)    │
                   │  session manager    │
                   │  agent loop         │
-                  │  approval gate      │
                   │  tool registry      │
                   │  provider interface │
                   │  MCP client         │
@@ -40,21 +39,20 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
 |---|---|---|---|
 | `cmd/golem` | implemented | Main binary. Bare `golem` (or `golem tui`) ensures a server is running — spawning a detached `golem serve` when the socket is dead — then runs the TUI. Also `serve`, `chat`, `ask`. Wiring only — no business logic. | `internal/*`, `pkg/*` |
 | `cmd/golem-tui` | implemented | TUI binary. Thin `main` wiring; the app lives in `internal/tui`. | `internal/cli`, `internal/tui` |
-| `internal/tui` | implemented | The Bubble Tea app: streaming chat view, collapsible tool blocks, approval prompts, session picker, interrupt. All rendering goes through `internal/tui/kit`. | `internal/tui/kit`, `pkg/golemclient` |
+| `internal/tui` | implemented | The Bubble Tea app: streaming chat view, collapsible tool blocks, session picker, interrupt. All rendering goes through `internal/tui/kit`. | `internal/tui/kit`, `pkg/golemclient` |
 | `internal/tui/kit` | implemented | The TUI design system: semantic color tokens, pure-data themes (default: Tokyo Night; `ThemeFromMap` is the future config hook), derived styles, shared components (transcript lines, picker). Raw colors are forbidden outside this package. | stdlib, `lipgloss`, `bubbletea` |
-| `internal/cli` | implemented | Subcommand implementations (`ask`, `serve`, `chat`) and the bare-`golem` launcher (ensure-server + TUI): provider wiring, default socket/session paths, the line REPL, socket probing and detached server spawn. One layer below `cmd` so it is testable without spawning processes. | `internal/agent`, `internal/approval`, `internal/llm`, `internal/server`, `internal/session`, `internal/tools`, `internal/tui`, `pkg/golemclient` |
+| `internal/cli` | implemented | Subcommand implementations (`ask`, `serve`, `chat`) and the bare-`golem` launcher (ensure-server + TUI): provider wiring, default socket/session paths, the line REPL, socket probing and detached server spawn. One layer below `cmd` so it is testable without spawning processes. | `internal/agent`, `internal/llm`, `internal/server`, `internal/session`, `internal/tools`, `internal/tui`, `pkg/golemclient` |
 | `internal/llm` | partial | `Provider` interface + adapters. `anthropic` (reference) and `openai` — one adapter for every OpenAI-compatible endpoint: openai, zai, ollama, gateways (ADR-0014). Streaming normalization. | stdlib, provider SDKs |
-| `internal/agent` | implemented | Agent loop: send context → receive tool calls → dispatch tools → append results → repeat until turn end. | `internal/llm`, `internal/tools`, `internal/session`, `internal/approval` |
+| `internal/agent` | implemented | Agent loop: send context → receive tool calls → dispatch tools → append results → repeat until turn end. | `internal/llm`, `internal/tools`, `internal/session` |
 | `internal/tools` | implemented | Built-in tools: read, write, edit, bash, grep, glob. Pure execution, no LLM knowledge. | stdlib |
 | `internal/server` | implemented | Transport listeners (unix socket, TCP, WS later), connection handling, event routing. | `internal/agent`, `internal/session`, `pkg/golemclient` |
 | `internal/session` | implemented | Append-only JSONL session store + in-memory cache with bounded size. Replay on load. | stdlib |
-| `internal/approval` | implemented | Approval policy engine: whitelist prefixes, prompt/auto modes, pending-approval state. | stdlib |
 | `internal/mcp` | planned (phase 6) | MCP client: process lifecycle, JSON-RPC over stdio, tool discovery. | stdlib (or MCP Go SDK — ADR required to adopt) |
 | `internal/config` | partial | Layered TOML config load & merge. Bootstrapped: defaults, global file (`[provider]` sections), `GOLEM_PROVIDER`/`GOLEM_MODEL` env overrides, `ref:` secret resolution. Remaining sections and precedence layers land in phase 4–5. | stdlib, `BurntSushi/toml` |
 | `pkg/golemclient` | implemented | **Public** client library. Protocol types + a typed client over any transport. Future apps build on this. | stdlib only — never `internal/*` |
 | `apps/` | future | Web/desktop clients. Not part of the Go module build. | — |
 
-**Dependency direction:** `cmd → internal → pkg` is wrong; the rule is: `cmd` may import everything; `internal` packages import other `internal` packages and `pkg`; `pkg` imports stdlib/external only. Layer flow inside `internal`: `server → agent → (llm, tools, approval) → session`. Never upward.
+**Dependency direction:** `cmd → internal → pkg` is wrong; the rule is: `cmd` may import everything; `internal` packages import other `internal` packages and `pkg`; `pkg` imports stdlib/external only. Layer flow inside `internal`: `server → agent → (llm, tools) → session`. Never upward.
 
 ## The agent loop
 
@@ -69,7 +67,6 @@ for {
     }
     if no tool calls: break
     for each tool call:
-        if bash-like && policy requires: emit approval_request, await response
         result := registry.Execute(ctx, name, args)
         emit tool_call_end; append result to history
     }
@@ -119,15 +116,13 @@ Adapters normalize each SDK's stream into the common event channel (text deltas,
 
 Status: `anthropic` and one `openai`-compat adapter are implemented (ADR-0014 — zai and ollama ride the compat adapter via `base_url`). Provider selection is config-driven (`provider.default`, `GOLEM_PROVIDER`, single-key inference when no config exists); models resolve as `GOLEM_MODEL` > config > preset default. The `/model` runtime switch lands with the rest of phase 5.
 
-## Approval gate
+## Autonomous tool execution
 
-All shell-executing tools (built-in `bash`, MCP tools that declare side effects) pass through `internal/approval` before execution:
+Tools execute without an interactive approval gate (ADR-0016). Observability, not gating, is the contract:
 
-- `auto_prefixes` (config): read-only commands (ls, cat, git status, grep, rg, …) run without prompting.
-- Compound command lines are split at `&&`, `||`, `|`, `;` and newlines; **every segment** must pass the whitelist or the whole line prompts.
-- Command substitution and redirection (`$(`, `` ` ``, `>`, `<`) anywhere in the line force a prompt regardless of prefixes — `cat notes.txt > out.txt` prompts even though `cat` is whitelisted. Matching rules live in [CONFIG.md](CONFIG.md).
-- Everything else: agent loop emits `approval_request`, blocks until `approval_response`, with timeout.
-- Policy modes: `prompt` (default), `all_auto` (danger, config-only). Documented in CONFIG.md.
+- Every invocation is visible as `tool_call_start` (name + arguments) followed by `tool_call_end` (ok + result) on the wire and in the session transcript.
+- Execution safety rails remain: per-command wall-clock timeouts (`[tools].bash_timeout_secs`) and per-result byte budgets (`[tools].output_budget_bytes`).
+- The removed gate (prefix whitelist, prompt/all_auto modes, `approval_request`/`approval_response`) is documented in ADR-0010's supersession note.
 
 ## Plugins (MCP)
 

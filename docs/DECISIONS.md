@@ -69,10 +69,10 @@ Chronological. Each ADR is immutable once accepted; superseding an ADR adds a ne
 
 ## ADR-0010: Approval gate with read-only whitelist
 
-- **Status:** Accepted (2026-09-27)
+- **Status:** Superseded by ADR-0016 (2026-10-14)
 - **Context:** Unattended shell execution is the primary risk of a coding agent.
 - **Decision:** All shell-side-effect tools route through `internal/approval`. Configurable `auto_prefixes` (ls, cat, git status, grep, rg, …) run unprompted; everything else blocks on an `approval_request` until answered or timed out (120 s → deny). `all_auto` exists as a config-only escape hatch with documentation warnings.
-- **Consequences:** One round-trip per sensitive command; acceptable.
+- **Consequences:** One round-trip per sensitive command; acceptable. *(In practice the whitelist matched almost no real model-issued command line — redirections like `2>/dev/null` and chained segments forced prompts — turning the gate into per-call friction; see ADR-0016.)*
 
 ## ADR-0011: Apache-2.0 license
 
@@ -108,3 +108,10 @@ Chronological. Each ADR is immutable once accepted; superseding an ADR adds a ne
 - **Context:** ADR-0012's secrets stance (env vars / `ref:` indirection only) optimized for servers and CI. golem is a local, single-user tool: the env-var flow required every user to maintain an `export` line in their shell profile, and the daemon inherited only the launching shell's environment — producing invisible startup failures ("server not ready within 5s") and a three-round debugging session. Critically, the env-var flow does not keep keys off disk: the export line lands in `~/.zshrc`, a plaintext file with typically looser permissions than golem's 0600 config.
 - **Decision:** The setup wizard writes the validated key directly into `~/.config/golem/config.toml` (`api_key = "sk-..."`, file mode 0600), matching the local-CLI precedent (`gh` hosts.yml, `aws` credentials). `ref:ENV_VAR` indirection and the per-provider env fallback remain supported options. The plaintext warning is removed for the global config; the future project-level `.golem.toml` (committable) will still forbid plaintext keys.
 - **Consequences:** Setup-to-first-message works with zero shell integration. Users syncing `~/.config/golem` through dotfiles repos or cloud sync must exclude the file (documented). Credential rotation means editing the config and restarting the server.
+
+## ADR-0016: No approval gate — autonomous tool execution with transcript visibility
+
+- **Status:** Accepted (2026-10-14)
+- **Context:** golem is a local, single-user agent on a machine the operator controls. ADR-0010's gate was designed for one prompt per genuinely dangerous command, but real model-issued command lines defeated the whitelist almost every call: `2>/dev/null` and other redirections hit the forced-deny substrings, and chained segments (`cd X && … | head`) required every segment to be whitelisted. A representative session (2026-10-14) prompted 58 times across 67 bash calls — all read-only exploration — and the retry churn contributed to hitting the 50-round turn cap. The gate cost more than the risk it priced.
+- **Decision:** Remove the interactive approval gate entirely: the `internal/approval` package, the agent-loop gate, the server's `approval_request`/`approval_response` protocol events (and `approval_timeout` error code), the `[approval]` config section, and the TUI approval modal. Tools execute autonomously. The user-facing contract is observability: every invocation is reported through `tool_call_start`/`tool_call_end` and rendered as a transcript tool block. Execution rails stay: per-command timeouts and output budgets (CONFIG.md `[tools]`).
+- **Consequences:** Unattended arbitrary command execution is accepted by design; users who need gating should not run golem with credentials they cannot afford to lose. The wire protocol change is breaking but coordinated (server and clients ship together; pre-1.0 per the changelog header). Old session files containing `approval_request` lines replay harmlessly — unknown event types are skipped. Supersedes ADR-0010.

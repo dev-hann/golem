@@ -8,7 +8,6 @@ import (
 	"io"
 
 	"github.com/dev-hann/golem/internal/agent"
-	"github.com/dev-hann/golem/internal/approval"
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/tools"
 )
@@ -42,9 +41,7 @@ func Ask(ctx context.Context, opts AskOptions) error {
 		return fmt.Errorf("cli: building tools: %w", err)
 	}
 
-	policy := approval.NewPolicy(approval.ModePrompt, approval.DefaultPrefixes)
-
-	ag := agent.New(opts.Provider, registry, policy, opts.Model)
+	ag := agent.New(opts.Provider, registry, opts.Model)
 	for event := range ag.Run(ctx, nil, opts.Prompt) {
 		if renderErr := renderEvent(opts.Stdout, opts.Stderr, event); renderErr != nil {
 			return fmt.Errorf("cli: rendering: %w", renderErr)

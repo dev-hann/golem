@@ -54,7 +54,7 @@ The first run walks you through provider setup — keys are validated live and s
 
 The first run spawns a detached `golem serve` (unix socket) and waits for it; later runs reuse the running server. Sessions survive closing the TUI — reconnect with `golem` anytime; stop the server with `pkill -f 'golem serve'`.
 
-Also available: `golem serve` runs just the agent server; `golem chat` is a line-based REPL against a running server (`/quit` exits; command approvals are auto-denied until the phase 4 UX lands); `golem ask "<prompt>"` runs a one-shot prompt without the server.
+Also available: `golem serve` runs just the agent server; `golem chat` is a line-based REPL against a running server (`/quit` exits); `golem ask "<prompt>"` runs a one-shot prompt without the server. Tools execute autonomously — every call is shown in the transcript via tool blocks (ADR-0016).
 
 ### TUI keys
 
@@ -73,7 +73,6 @@ The keymap mirrors [opencode's defaults](https://opencode.ai/docs/keybinds/) whe
 | `esc` | interrupt the active turn |
 | `pgup` / `pgdn` | scroll the transcript |
 | `ctrl+g` / `ctrl+alt+g` | jump the transcript to the top / bottom |
-| `y` / `n` | allow / deny a pending command approval (any other key denies) |
 | click a tool row | expand / collapse that tool call's result — `▸ ✓ read main.go` summaries are collapsed by default (✗ marks failures) |
 
 All leader commands share the `ctrl+x` prefix: press it, then the key
