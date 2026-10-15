@@ -630,18 +630,18 @@ func TestModel_SessionPickerSpinnerTicks(t *testing.T) {
 		t.Errorf("picker spinner must start at frame 0:\n%s", m.View())
 	}
 
-	next, _ := m.Update(sessTickMsg{gen: m.sessTickGen})
+	next, _ := m.Update(spinTickMsg{gen: m.spinGen})
 	m2 := next.(Model)
-	if m2.sessSpinFrame != 1 {
-		t.Errorf("sessSpinFrame after tick = %d, want 1", m2.sessSpinFrame)
+	if m2.spinFrame != 1 {
+		t.Errorf("spinFrame after tick = %d, want 1", m2.spinFrame)
 	}
 	if !strings.Contains(ansi.Strip(m2.View()), kit.SpinnerFrames[1]) {
 		t.Errorf("picker spinner must advance to frame 1:\n%s", m2.View())
 	}
 
 	// A stale-generation tick (picker reopened since) must not advance.
-	next, _ = m2.Update(sessTickMsg{gen: m2.sessTickGen + 5})
-	if got := next.(Model).sessSpinFrame; got != 1 {
+	next, _ = m2.Update(spinTickMsg{gen: m2.spinGen + 5})
+	if got := next.(Model).spinFrame; got != 1 {
 		t.Errorf("stale tick advanced the frame to %d, want it ignored", got)
 	}
 }
@@ -664,8 +664,8 @@ func TestModel_SessionPickerSpinnerStopsWhenClosed(t *testing.T) {
 	})
 	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // opens the session, closes the picker
 
-	next, _ := m.Update(sessTickMsg{gen: m.sessTickGen})
-	if got := next.(Model).sessSpinFrame; got != 0 {
+	next, _ := m.Update(spinTickMsg{gen: m.spinGen})
+	if got := next.(Model).spinFrame; got != 0 {
 		t.Errorf("tick advanced a closed picker's frame to %d, want it ignored", got)
 	}
 }

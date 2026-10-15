@@ -53,8 +53,8 @@ type Model struct {
 	sessions        []golemclient.SessionSummary
 	pickIndex       int
 	sessQuery       string
-	sessSpinFrame   int // picker spinner frame (braille loader for live turns)
-	sessTickGen     int // spinner ticker generation (stale-tick guard)
+	spinFrame       int // animation frame (picker spinner rows, status strip glyph)
+	spinGen         int // animation ticker generation (stale-tick guard)
 	sessRenaming    bool
 	sessRenameText  string
 	sessDeleteArmed string // picker row armed for ctrl+d delete (session id)
@@ -181,28 +181,34 @@ type (
 // newer sequence.
 type leaderTimeoutMsg struct{ gen int }
 
-// sessTickMsg advances the session picker's spinner frame; gen guards
-// against a stale tick from a previously opened picker.
-type sessTickMsg struct{ gen int }
+// spinTickMsg advances an animation frame (the picker's spinner rows,
+// the status strip's in-progress glyph); gen guards against a stale
+// tick from a disarmed animation.
+type spinTickMsg struct{ gen int }
 
-// sessTickInterval is the session picker's spinner animation rate —
-// fast enough to read as motion, slow enough not to churn redraws.
-const sessTickInterval = 100 * time.Millisecond
+// spinTickInterval is the animation rate — fast enough to read as
+// motion, slow enough not to churn redraws.
+const spinTickInterval = 100 * time.Millisecond
 
-// armSessTick schedules the picker spinner's next frame.
-func armSessTick(gen int) tea.Cmd {
-	return tea.Tick(sessTickInterval, func(time.Time) tea.Msg {
-		return sessTickMsg{gen: gen}
+// armSpinTick schedules the next animation frame.
+func armSpinTick(gen int) tea.Cmd {
+	return tea.Tick(spinTickInterval, func(time.Time) tea.Msg {
+		return spinTickMsg{gen: gen}
 	})
 }
 
-// sessTick advances the picker spinner: only an open picker animates —
-// a tick from a closed one (or a stale generation) is dropped.
-func (m Model) sessTick(msg sessTickMsg) (tea.Model, tea.Cmd) {
-	if m.mode == modeSessions && m.sessTickGen == msg.gen {
-		m.sessSpinFrame++
+// spinTick advances the animation frame: an open picker animates its
+// rows, an active turn animates the status strip. Ticks from a closed
+// picker with no live turn (or a stale generation) are dropped.
+func (m Model) spinTick(msg spinTickMsg) (tea.Model, tea.Cmd) {
+	if m.spinGen != msg.gen {
+		return m, nil
+	}
 
-		return m, armSessTick(m.sessTickGen)
+	if m.mode == modeSessions || m.turnActive {
+		m.spinFrame++
+
+		return m, armSpinTick(m.spinGen)
 	}
 
 	return m, nil
@@ -249,8 +255,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 		}
 
 		return m, nil
-	case sessTickMsg:
-		return m.sessTick(msg)
+	case spinTickMsg:
+		return m.spinTick(msg)
 	case tea.MouseMsg:
 		m.handleMouse(msg)
 
@@ -1252,6 +1258,13 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		tick = m.applySessionList(e)
 	case golemclient.History:
 		m.replayHistory(e)
+	case golemclient.TurnStart:
+		m.applyTurnEvent(ev)
+		m.applySessionRecord(ev)
+
+		if m.turnActive { // arm the status strip's animation
+			tick = armSpinTick(m.spinGen)
+		}
 	default:
 		// Turn events fold through applyTurnEvent; session records
 		// (title, deletion, compaction) through applySessionRecord;
@@ -1259,6 +1272,14 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		// compatibility.
 		m.applyTurnEvent(ev)
 		m.applySessionRecord(ev)
+	}
+
+	// A busy session resumed mid-turn (replayHistory set turnActive
+	// above) arms the animation too — the strip must not freeze.
+	if m.turnActive && tick == nil {
+		m.spinFrame = 0
+		m.spinGen++
+		tick = armSpinTick(m.spinGen)
 	}
 
 	m.refreshView()
@@ -1326,7 +1347,7 @@ func (m *Model) endTurn() {
 
 // applySessionList stores a session list and, when it was explicitly
 // requested, opens the picker on it with fresh search state, the cursor
-// starting on the session this client is in. Opening arms the spinner
+// starting on the session this client is in. Opening arms the animation
 // ticker; closing the picker orphans its generation (stale ticks drop).
 func (m *Model) applySessionList(e golemclient.SessionList) tea.Cmd {
 	m.sessions = e.Sessions
@@ -1343,10 +1364,10 @@ func (m *Model) applySessionList(e golemclient.SessionList) tea.Cmd {
 		m.mode = modeSessions
 
 		if anyRunning(m) {
-			m.sessSpinFrame = 0
-			m.sessTickGen++
+			m.spinFrame = 0
+			m.spinGen++
 
-			return armSessTick(m.sessTickGen)
+			return armSpinTick(m.spinGen)
 		}
 	}
 
@@ -1368,6 +1389,8 @@ func (m *Model) applyTurnEvent(ev any) {
 		m.retryState = nil
 		m.activeTool, m.activeArgs = "", ""
 		m.synthDone = nil
+		m.spinFrame = 0
+		m.spinGen++ // orphan any open animation; this one is live
 	case golemclient.TextDelta:
 		m.appendToAssistant(e.Delta)
 		m.streamedText = true
@@ -1802,22 +1825,26 @@ func (m Model) activeState() (string, kit.Token) {
 }
 
 // activeTurnState resolves the strip while a turn runs: retry, tool,
-// synthesizing, responding, reasoning, thinking — in that priority.
+// synthesizing, responding, reasoning, thinking — in that priority. The
+// leading glyph is the animated spinner (the strip's motion marker);
+// only the idle strip is static.
 func (m Model) activeTurnState() (string, kit.Token) {
+	spin := m.kit.Spinner(m.spinFrame) + " "
+
 	switch {
 	case m.retryState != nil:
-		return fmt.Sprintf("↻ retrying %d/%d · %s",
+		return spin + fmt.Sprintf("retrying %d/%d · %s",
 			m.retryState.Attempt, m.retryState.Retries, shortDur(m.retryState.DelayMs)), kit.Warn
 	case m.activeTool != "":
-		return "◆ " + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs), kit.Tool
+		return spin + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs), kit.Tool
 	case m.synthDone != nil:
-		return "◆ " + synthMark(m.synthDone) + " · working", kit.Accent
+		return spin + synthMark(m.synthDone) + " · working", kit.Accent
 	case m.streamedText:
-		return "● responding", kit.Accent
+		return spin + "responding", kit.Accent
 	case m.reasoned:
-		return "◐ reasoning", kit.Accent
+		return spin + "reasoning", kit.Accent
 	default:
-		return "● thinking", kit.Accent
+		return spin + "thinking", kit.Accent
 	}
 }
 
@@ -2189,13 +2216,13 @@ func (m Model) rowStatus(s golemclient.SessionSummary, focused bool) string {
 		return strings.Repeat(" ", sessStatusCols)
 	}
 
-	glyph := kit.SpinnerFrames[(m.sessSpinFrame%len(kit.SpinnerFrames)+len(kit.SpinnerFrames))%len(kit.SpinnerFrames)]
+	glyph := kit.SpinnerFrames[(m.spinFrame%len(kit.SpinnerFrames)+len(kit.SpinnerFrames))%len(kit.SpinnerFrames)]
 
 	if focused {
 		return glyph + " "
 	}
 
-	return m.kit.Spinner(m.sessSpinFrame) + " "
+	return m.kit.Spinner(m.spinFrame) + " "
 }
 
 // sessDeleteHint is the armed row's confirm prompt.
@@ -2255,7 +2282,7 @@ const sessGutterCols = 2 * kit.RowGutter
 //	▎ ⠋ Fix auth middleware    2h ago
 //
 // the bar marks the session this client is in, the spinner (animated by
-// sessTickMsg) marks a live turn, and the dim age stays right. No text
+// spinTickMsg) marks a live turn, and the dim age stays right. No text
 // markers: state reads from color and glyphs, not words. The raw
 // session id never shows.
 //

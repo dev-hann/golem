@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/dev-hann/golem/internal/tui/kit"
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
@@ -299,6 +300,228 @@ func TestStatus_SessionSwitchResetsStatus(t *testing.T) {
 		if strings.Contains(line, stale) {
 			t.Errorf("status after switch leaked session A's %q: %q", stale, line)
 		}
+	}
+}
+
+// TestStatus_ActiveStatesAnimateSpinnerFrames verifies every
+// in-progress strip state animates: each tick advances the frame and
+// the rendered line carries the corresponding spinner glyph instead of
+// the static dot. The idle strip stays static across the same ticks.
+func TestStatus_ActiveStatesAnimateSpinnerFrames(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		prep func(Model) Model
+		want string
+	}{
+		{
+			name: "thinking",
+			prep: func(m Model) Model {
+				return deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+			},
+			want: "thinking",
+		},
+		{
+			name: "responding",
+			prep: func(m Model) Model {
+				m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+				return deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
+			},
+			want: "responding",
+		},
+		{
+			name: "reasoning",
+			prep: func(m Model) Model {
+				m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+				return deliver(t, m, golemclient.ThinkingDelta{Type: golemclient.TypeThinkingDelta})
+			},
+			want: "reasoning",
+		},
+		{
+			name: "tool",
+			prep: func(m Model) Model {
+				m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+				return deliver(t, m, golemclient.ToolCallStart{
+					Type: golemclient.TypeToolCallStart, CallID: "c1", Tool: "bash",
+					Args: []byte(`{"command":"go test ./..."}`),
+				})
+			},
+			want: "bash",
+		},
+		{
+			name: "synthesizing",
+			prep: func(m Model) Model {
+				m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+				return deliver(t, m, golemclient.ToolCallEnd{
+					Type: golemclient.TypeToolCallEnd, CallID: "c1", OK: true,
+				})
+			},
+			want: "working",
+		},
+		{
+			name: "retrying",
+			prep: func(m Model) Model {
+				m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+				return deliver(t, m, golemclient.Retry{
+					Type: golemclient.TypeRetry, Attempt: 1, Retries: 6, DelayMs: 1000,
+				})
+			},
+			want: "retrying",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			m, _ := wired(t)
+			m = resize(m, 100, 40)
+			m = tt.prep(m)
+
+			// The strip shows frame 0 while the turn runs.
+			line := m.statusLine()
+			if !strings.Contains(line, kit.SpinnerFrames[0]) {
+				t.Errorf("%s: strip should animate, want %q in %q", tt.name, kit.SpinnerFrames[0], line)
+			}
+			if !strings.Contains(line, tt.want) {
+				t.Errorf("%s: strip should still name the state %q, got %q", tt.name, tt.want, line)
+			}
+			if strings.Contains(line, "●") {
+				t.Errorf("%s: active strip must drop the static dot, got %q", tt.name, line)
+			}
+
+			// A tick advances to frame 1 and renders it.
+			next, _ := m.Update(spinTickMsg{gen: m.spinGen})
+			m2 := next.(Model)
+			if got := m2.statusLine(); !strings.Contains(got, kit.SpinnerFrames[1]) {
+				t.Errorf("%s: after a tick the strip should show %q, got %q", tt.name, kit.SpinnerFrames[1], got)
+			}
+
+			// Turn end freezes the strip back on the static dot.
+			m3 := deliver(t, m2, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+			if line := m3.statusLine(); !strings.Contains(line, "●") {
+				t.Errorf("%s: idle strip should return to the static dot, got %q", tt.name, line)
+			}
+			for _, frame := range kit.SpinnerFrames {
+				if strings.Contains(m3.statusLine(), frame) {
+					t.Errorf("%s: idle strip must not animate, found %q", tt.name, frame)
+				}
+			}
+		})
+	}
+}
+
+// TestStatus_IdleStripIgnoresSpinnerTicks verifies the ticker spends no
+// frames while no turn runs: a tick arriving on an idle model neither
+// advances the frame nor changes the strip.
+func TestStatus_IdleStripIgnoresSpinnerTicks(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m = deliver(t, m, golemclient.TurnStart{
+		Type: golemclient.TypeTurnStart, Provider: "zai", Model: "glm-5.3",
+	})
+	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+
+	before := m.statusLine()
+	next, _ := m.Update(spinTickMsg{gen: m.spinGen})
+	m2 := next.(Model)
+
+	if got := m2.statusLine(); got != before {
+		t.Errorf("idle strip changed on tick: %q -> %q", before, got)
+	}
+	if m2.spinFrame != m.spinFrame {
+		t.Errorf("idle tick advanced the frame to %d, want it ignored", m2.spinFrame)
+	}
+}
+
+// TestStatus_TurnStartArmsTicker verifies the first streaming event of a
+// turn arms the ticker (generation bump), the tick advances the frame
+// and rearms while the turn stays live, and a tick after turn end is
+// dropped without rearming.
+func TestStatus_TurnStartArmsTicker(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+
+	next, cmd := m.Update(serverEventMsg{ev: golemclient.TurnStart{Type: golemclient.TypeTurnStart}})
+	m2, ok := next.(Model)
+	if !ok {
+		t.Fatal("update must return the model")
+	}
+	_ = cmd // batched with listen(); executing it would block on the fake
+
+	if m2.spinGen == m.spinGen {
+		t.Error("turn start should arm the spinner ticker (generation bump)")
+	}
+
+	// The tick advances the frame and the handler rearms the next one.
+	n2, rearm := m2.Update(spinTickMsg{gen: m2.spinGen})
+	m3 := n2.(Model)
+	if rearm == nil {
+		t.Error("a live turn's tick must rearm the ticker")
+	}
+	if m3.spinFrame == m2.spinFrame {
+		t.Errorf("tick should advance the spinner frame, still %d", m3.spinFrame)
+	}
+
+	// Turn end: the next tick is dropped, no rearm.
+	m4 := deliver(t, m3, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
+	if _, cmd := m4.Update(spinTickMsg{gen: m4.spinGen}); cmd != nil {
+		t.Error("a tick after turn end must not rearm the ticker")
+	}
+}
+
+// Resuming a busy session must also arm the strip's animation ticker —
+// the restored turn renders the animated spinner, not a frozen frame.
+func TestStatus_ResumeBusySessionArmsTicker(t *testing.T) {
+	t.Parallel()
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Cwd: "/a", Turns: 1, Busy: true},
+		},
+	})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // load s1
+	if _, ok := lastSent(t, fc).(golemclient.LoadSession); !ok {
+		t.Fatal("picker enter should send a load_session")
+	}
+
+	gen := m.spinGen
+	m = deliver(t, m, golemclient.SessionMeta{
+		Type: golemclient.TypeSessionMeta, Session: "s1", Busy: true,
+	})
+	m = deliver(t, m, golemclient.History{
+		Type: golemclient.TypeHistory, Session: "s1",
+		Events: rawLines(
+			`{"type":"user_message","session":"s1","text":"hi"}`,
+			`{"type":"turn_start","session":"s1","turn":"t1","provider":"zai","model":"glm-5.3"}`,
+			`{"type":"text_delta","session":"s1","turn":"t1","delta":"working"}`,
+		),
+	})
+
+	if !m.turnActive {
+		t.Fatal("precondition: resumed session should be turnActive")
+	}
+	if m.spinGen == gen {
+		t.Fatal("resuming a busy session should arm the animation ticker (generation bump)")
+	}
+
+	next, cmd := m.Update(spinTickMsg{gen: m.spinGen})
+	m2 := next.(Model)
+	if cmd == nil {
+		t.Error("a resumed live turn's tick must rearm the ticker")
+	}
+	if m2.spinFrame == m.spinFrame {
+		t.Errorf("tick should advance the spinner frame, still %d", m2.spinFrame)
 	}
 }
 

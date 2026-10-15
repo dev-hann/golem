@@ -7,6 +7,23 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — status line animates while a turn runs (2026-10-15)
+
+- The agent status strip's leading glyph is now the animated braille
+  spinner (`⠋⠙⠹…`, 100 ms frames, accent-colored) whenever a turn is
+  in progress — motion is the "something is happening" signal. Idle
+  states keep the static `●` dot: no turn, no animation (and idle ticks
+  are dropped, so an idle terminal redraws nothing). The former static
+  per-state glyphs (`●`/`◐` thinking-family, `◆` tool/synthesizing,
+  `↻` retrying) are gone — the spinner replaces them all, the state
+  text after it still names the state. The picker's ticker was
+  generalized into the shared animation ticker (same frame counter,
+  generation guard, and rate) driving both the picker's busy rows and
+  the status strip; arming points are `turn_start`, a busy-session
+  resume (replay ending mid-turn), and opening a picker with running
+  sessions. A turn ending orphans the generation, so the trailing tick
+  drops instead of rearming.
+
 ### Added — markdown tables in the TUI (2026-10-15, ADR-0027)
 
 - Assistant messages now render GFM-style tables as aligned pipe
