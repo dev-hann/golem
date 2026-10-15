@@ -184,7 +184,47 @@ func TestView_CursorHiddenInModalsAndErrors(t *testing.T) {
 	}
 }
 
-// TestView_CursorFollowsComposerGrowth asserts the cursor advances with
+// TestView_CursorUnderStickyPin asserts the frame offset accounts for
+// the sticky question bar: with a pinned sticky line the composer sits
+// one row lower on screen, and the pinned cursor must agree with the
+// rendered box even then.
+func TestView_CursorUnderStickyPin(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+
+	// Same setup as TestModel_ToolBlock_ClickAccountsForStickyHeader: a
+	// question, enough answer to push it off-screen, and a scroll that
+	// pins the sticky bar above the viewport.
+	m.blocks = []block{
+		{kind: blockUser, text: "fix the bug"},
+		{kind: blockAssistant, text: strings.Repeat("answer line\n", 60)},
+	}
+	m.refreshView()
+	// Scroll past the question — the sticky bar pins above the viewport.
+	m.vp.SetYOffset(m.userSpans[0].end)
+	m.refreshView()
+
+	if m.stickyText() != "fix the bug" {
+		t.Fatalf("precondition: sticky header must be visible, got %q", m.stickyText())
+	}
+
+	m.input.SetValue("typed under pin")
+	m.syncInputHeight()
+
+	view := m.View()
+	if view.Cursor == nil {
+		t.Fatal("View().Cursor is nil under the sticky pin")
+	}
+
+	wantX, wantY := cellAfter(t, view.Content, "typed under pin")
+	if got := view.Cursor.Position; got.X != wantX || got.Y != wantY {
+		t.Errorf("cursor at (%d,%d), want (%d,%d) under sticky pin — screen:\n%s",
+			got.X, got.Y, wantX, wantY, view.Content)
+	}
+}
+
 // the caret as the box grows around multi-row input, staying inside the
 // box.
 func TestView_CursorFollowsComposerGrowth(t *testing.T) {
