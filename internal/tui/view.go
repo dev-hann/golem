@@ -46,6 +46,10 @@ func (m Model) layout() string {
 	if text := m.stickyText(); text != "" {
 		b.WriteString(m.kit.StickyUser(m.vp.Width, text) + "\n")
 		b.WriteString(m.shrunkViewport() + "\n")
+	} else if m.showWelcome() {
+		// Fresh launch: the centered banner owns the transcript region
+		// (ADR-0018's pre-session state) until the first message lands.
+		b.WriteString(m.welcomeView() + "\n")
 	} else {
 		b.WriteString(m.vp.View() + "\n")
 	}
