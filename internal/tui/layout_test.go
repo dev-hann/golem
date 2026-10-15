@@ -60,8 +60,9 @@ func TestLayout_PadsHorizontalOnlyContentRows(t *testing.T) {
 
 	lines := strings.Split(m.View(), "\n")
 
-	// The transcript row sits at screenPadV and carries the pad prefix.
-	row := lines[screenPadV]
+	// The transcript row sits one row below the header and carries the
+	// pad prefix.
+	row := lines[screenPadV+headerRows]
 	content := strings.TrimPrefix(row, strings.Repeat(" ", screenPadH))
 
 	if !strings.Contains(content, "hello padding") {
@@ -162,7 +163,7 @@ func TestSelection_TopPaddingRowsIgnored(t *testing.T) {
 	}
 
 	// A press on the first transcript row does.
-	next = press(m, screenPadV)
+	next = press(m, stickyTopRow(m))
 	if !next.selecting {
 		t.Error("press on the first transcript row must begin a selection")
 	}
@@ -176,7 +177,7 @@ func TestSelection_LeftPadColumnsIgnored(t *testing.T) {
 	// A press whose x lands on the left pad still selects the row under
 	// it — rows gate selection, x never does.
 	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: screenPadH, Y: screenPadV,
+		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: screenPadH, Y: stickyTopRow(m),
 	})
 	if !next.(Model).selecting {
 		t.Error("press on the first transcript row (x on the pad) must select")

@@ -36,6 +36,8 @@ type Model struct {
 
 	mode            mode
 	sessionID       string
+	sessionTitle    string   // current session's title (header); "" while untitled
+	sessionCwd      string   // current session's working directory (header tail)
 	pendingMsgs     []string // submits awaiting a session (ADR-0018 lazy create)
 	pendingModel    string   // set_model deferred until a session exists
 	turnActive      bool
@@ -425,6 +427,7 @@ func (m *Model) clearTranscript() {
 	m.endTurn()
 	m.lastUsage = golemclient.Usage{}
 	m.metaBusy = false
+	m.sessionTitle, m.sessionCwd = "", ""
 	m.refreshView()
 }
 
@@ -1000,6 +1003,10 @@ func (m Model) renameKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sessions[i].Title = title
 		}
 
+		if chosen.ID == m.sessionID {
+			m.sessionTitle = title
+		}
+
 		return m, m.send(golemclient.RenameSession{
 			Type: golemclient.TypeRenameSession, Session: chosen.ID, Title: title,
 		})
@@ -1086,7 +1093,7 @@ func (m *Model) resize(width, height int) {
 	m.width, m.height = width, height
 	m.vp.Width = max(width-2*screenPadH, viewportMinWidth)
 	setViewportHeightKeepingFollow(&m.vp, max(
-		height-m.inputRows-inputBorderRows-statusRows-layoutChromeRows, viewportMinHeight,
+		height-m.inputRows-inputBorderRows-statusRows-layoutChromeRows-headerRowsIfShown(height), viewportMinHeight,
 	))
 	m.input.SetWidth(max(width-2*screenPadH-inputBorderCols, viewportMinWidth))
 	m.syncInputHeight()
@@ -1116,7 +1123,7 @@ func (m *Model) syncInputHeight() {
 
 	if m.height > 0 {
 		setViewportHeightKeepingFollow(&m.vp, max(
-			m.height-rows-inputBorderRows-statusRows-layoutChromeRows, viewportMinHeight,
+			m.height-rows-inputBorderRows-statusRows-layoutChromeRows-headerRowsIfShown(m.height), viewportMinHeight,
 		))
 	}
 }
@@ -1163,6 +1170,16 @@ const (
 // statusRows is the height the status line borrows from the viewport —
 // always rendered, so the layout never jumps between idle and active.
 const statusRows = 1
+
+// headerRows is the height the session header borrows from the viewport
+// — always rendered on roomy terminals (same anti-jump rule as the
+// status line), dropped entirely on terminals too short to afford it so
+// the viewport keeps its floor.
+const headerRows = 1
+
+// headerMinHeight is the smallest terminal that still shows the header;
+// below it the transcript's floor claims the row.
+const headerMinHeight = 16
 
 // applyEvent folds one server event into the model, returning the next cmd.
 // sessionOf extracts the session a streaming event belongs to; "" for
@@ -1225,6 +1242,7 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 	switch e := ev.(type) {
 	case golemclient.SessionMeta:
 		m.sessionID = e.Session
+		m.sessionTitle, m.sessionCwd = e.Title, e.Cwd
 		m.metaBusy = e.Busy
 		cmd = m.flushPending()
 	case golemclient.SessionList:
@@ -1387,6 +1405,10 @@ func (m *Model) applySessionRecord(ev any) {
 	case golemclient.SessionTitle:
 		if i := chosenIndex(m.sessions, e.Session); i >= 0 {
 			m.sessions[i].Title = e.Title
+		}
+
+		if e.Session == m.sessionID {
+			m.sessionTitle = e.Title
 		}
 	case golemclient.SessionDeleted:
 		m.applySessionDeleted(e)
@@ -1641,6 +1663,10 @@ func (m Model) View() string {
 // layout composes the full chat screen through the active kit.
 func (m Model) layout() string {
 	var b strings.Builder
+	if m.headerShown() {
+		b.WriteString(m.headerLine() + "\n")
+	}
+
 	if text := m.stickyText(); text != "" {
 		b.WriteString(m.kit.StickyUser(m.vp.Width, text) + "\n")
 		b.WriteString(m.shrunkViewport() + "\n")
@@ -1685,6 +1711,60 @@ func padScreen(body string) string {
 
 	return strings.Join(out, "\n")
 }
+
+// headerShown reports whether the session header renders on this
+// terminal — roomy enough to afford the row, else the transcript keeps
+// it. The screenPadV offset shifts by the same amount, so the padding
+// geometry stays in sync with the resize chrome arithmetic.
+func (m Model) headerShown() bool {
+	return m.height >= headerMinHeight
+}
+
+// headerRowsIfShown is the header's chrome contribution at resize time.
+func headerRowsIfShown(height int) int {
+	if height >= headerMinHeight {
+		return headerRows
+	}
+
+	return 0
+}
+
+// headerLine renders the one-row session header: the title (or a dim
+// placeholder naming the state) with the working-directory tail —
+// always exactly one row, truncated to the viewport width.
+func (m Model) headerLine() string {
+	title, token := m.headerTitle()
+
+	left := title
+	if dir := m.headerDir(); dir != "" {
+		left += headerDirSep + dir
+	}
+
+	return m.kit.StatusBar(m.vp.Width, left, token)
+}
+
+// headerTitle resolves the header's title text and token: a titled
+// session names itself, an untitled one and the pre-session state fall
+// back to dim placeholders.
+func (m Model) headerTitle() (string, kit.Token) {
+	switch {
+	case m.sessionID == "":
+		return "no session yet", kit.Dim
+	case m.sessionTitle != "":
+		return m.sessionTitle, kit.Title
+	default:
+		return "untitled session", kit.Dim
+	}
+}
+
+// headerDir renders the working-directory tail beside the title: the
+// final path segment (empty until a session exists).
+func (m Model) headerDir() string {
+	return dirName(m.sessionCwd)
+}
+
+// headerDirSep joins the header's title and directory segments.
+const headerDirSep = " · "
 
 // statusLine renders the agent-state strip: what the turn is doing (or
 // the model and last usage while idle). The interrupt hint lives on the

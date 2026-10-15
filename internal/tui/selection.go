@@ -182,12 +182,17 @@ func (m Model) lineClamped(y int) int {
 }
 
 // stickyTopRow reports the screen row the transcript starts on: past the
-// screen's top padding, then one more below the sticky bar while it is
-// pinned.
+// screen's top padding, one more below the session header while it
+// renders, and the sticky bar's row while it is pinned.
 func stickyTopRow(m Model) int {
-	if m.stickyText() != "" {
-		return screenPadV + 1
+	top := screenPadV
+	if m.headerShown() {
+		top += headerRows
 	}
 
-	return screenPadV
+	if m.stickyText() != "" {
+		top++
+	}
+
+	return top
 }

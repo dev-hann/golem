@@ -88,6 +88,11 @@ type SessionMeta struct {
 	Cwd     string `json:"cwd"`
 	Created string `json:"created"`
 	Turns   int    `json:"turns"`
+	// Title is the session's folded title (rename or generation), so a
+	// loading client can label the session at once. Omitted while the
+	// session is untitled — clients render a placeholder until a
+	// session_title event or their next list arrives.
+	Title string `json:"title,omitempty"`
 	// Busy reports a turn currently running in this session — live state
 	// at load time, so a client resuming a busy session can restore its
 	// status line from the replay (omitted when false: create, idle load).

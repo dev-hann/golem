@@ -231,6 +231,7 @@ Goal: daily-driver terminal client.
 - 2026-10-12 — `golem serve` shutdown fix: SIGINT/SIGTERM now stop the server (the listener closes and the accept loop unblocks; regression-tested via the injected signal hook).
 - 2026-10-13 — Bare `golem` launcher: probe the default socket, spawn a detached `golem serve` when it is down (removing stale socket files), then run the TUI. Ships ahead of phases 4/5; `golem stop` and config-driven socket paths land with phase 5.
 - 2026-10-14 — TUI agent status line: a one-row strip between the transcript and the composer, always rendered (idle shows the model and last-turn token usage; an active turn shows thinking → responding → the in-flight tool with its identifying argument). Agent state only — no key hints. Fully derived from existing protocol events (turn_start/text_delta/tool_call_start/tool_call_end/turn_end) — no wire changes. Ticker follows the leader-timeout gen pattern for stale-tick safety. (The elapsed-seconds counter was dropped on 2026-10-15 — it reset on every session switch because the true start time never survives the replay.)
+- 2026-10-15 — TUI session header: a one-row title strip above the transcript (title + cwd tail; dim placeholders for the no-session and untitled states), always rendered on terminals ≥ 16 rows and dropped below that floor (ADR-0024). `session_meta` gains an optional `title` field so a loading client labels the session at once; the header also updates from `session_title` events and optimistic picker renames.
 
 ## Explicitly deferred (needs new ADR before starting)
 
