@@ -7,6 +7,18 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed — focused picker rows rendered as color blocks (2026-10-15)
+
+- The picker's focus highlight is reverse video, and any colored span
+  nested inside it has its foreground turned into a background — the
+  current-session `▎` bar became a bright cyan block (the glyph lost),
+  the running-turn spinner and the dim age became colored rectangles,
+  and the armed delete hint inverted into a red slab. Focused rows now
+  render plain: the glyphs (`▎`, spinner, `ctrl+d again to confirm`)
+  carry the state without color while highlighted, and the token colors
+  return the moment the cursor moves off. Columns stay aligned either
+  way — the plain glyphs occupy the same cells the styled ones do.
+
 ### Added — session picker: date groups and a scroll window (2026-10-15)
 
 - The picker groups sessions by last-active date — `Today`,
