@@ -34,8 +34,10 @@ func TestAsk_ErrorEventRenderedToStderr(t *testing.T) {
 func TestAsk_UsageSummaryRendered(t *testing.T) {
 	t.Parallel()
 	var stdout, stderr bytes.Buffer
+	// A usage-only round is an empty response error (reasoning burn);
+	// the usage line must still render for a turn that produced text.
 	provider := &stubProvider{rounds: [][]llm.Event{
-		{{Type: llm.EventUsage, InputTokens: 5, OutputTokens: 3}},
+		{{Type: llm.EventTextDelta, Delta: "hi"}, {Type: llm.EventUsage, InputTokens: 5, OutputTokens: 3}},
 	}}
 	err := cli.Ask(t.Context(), cli.AskOptions{
 		Provider: provider,

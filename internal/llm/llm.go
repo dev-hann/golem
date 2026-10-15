@@ -78,6 +78,13 @@ var (
 	// ErrModelListUnavailable marks a provider whose model-list endpoint is
 	// missing or returned nothing — the key may still be fine.
 	ErrModelListUnavailable = errors.New("model list unavailable")
+	// ErrEmptyReasoningRound marks a stream that ended truncated
+	// (finish_reason=length) without producing any text or tool call —
+	// typically a reasoning model that spent the whole output budget on
+	// invisible thinking.
+	ErrEmptyReasoningRound = errors.New(
+		"empty reasoning round: model hit the max-token limit before writing anything" +
+			" (raise max_tokens or disable thinking)")
 )
 
 // Event is a normalized provider stream event.

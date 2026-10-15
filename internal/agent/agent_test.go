@@ -308,6 +308,32 @@ func TestLoop_UnknownEventTypeIgnored(t *testing.T) {
 	}
 }
 
+func TestLoop_EmptyRoundWithoutError_SurfacesErrorInsteadOfSilentEnd(t *testing.T) {
+	t.Parallel()
+
+	// A provider round can legally end with no content at all and no
+	// error — e.g. a reasoning model that burned its whole max_tokens
+	// budget on invisible thinking (GLM). Ending the turn silently
+	// renders as a dead session; the user must see why instead.
+	provider := &scriptedProvider{rounds: [][]llm.Event{{
+		{Type: llm.EventThinkingDelta, Delta: "invisible reasoning"},
+		{Type: llm.EventUsage, InputTokens: 100, OutputTokens: 16384},
+	}}}
+	a, _ := newTestAgent(t, provider)
+	events := collect(t, a.Run(t.Context(), nil, "why no response?"))
+
+	errEv := findEvent(events, agent.EventError)
+	if errEv == nil {
+		t.Fatalf("events = %v, want an error event on empty round", eventTypes(events))
+	}
+	if !strings.Contains(errEv.Err.Error(), "empty response") {
+		t.Errorf("error = %v, want empty-response mention", errEv.Err)
+	}
+	if findEvent(events, agent.EventTurnEnd) != nil {
+		t.Error("empty round must not end with a clean turn_end")
+	}
+}
+
 // findEvent returns the first event of the given type.
 func findEvent(events []agent.Event, typ agent.EventType) *agent.Event {
 	for i := range events {

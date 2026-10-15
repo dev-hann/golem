@@ -132,7 +132,7 @@ Emitted in order during a turn. All carry `turn`.
 | Type | Fields | Meaning |
 |---|---|---|
 | `turn_start` | `provider`, `model` | Turn began |
-| `thinking_delta` | — | Model is reasoning (extended thinking). No content on the wire — the event exists so clients can render a reasoning state; reasoning text is never streamed, stored, or replayed |
+| `thinking_delta` | — | Model is reasoning (extended thinking — Anthropic native, GLM's `reasoning_content` normalized by the adapter). No content on the wire — the event exists so clients can render a reasoning state; reasoning text is never streamed, stored, or replayed |
 | `text_delta` | `delta` | Assistant text chunk (append) |
 | `retry` | `attempt`, `retries`, `delay_ms` | Server is about to retry the provider (`attempt` of at most `retries`, after sleeping `delay_ms`). Emitted before the wait so clients can render a retrying state instead of a frozen one |
 | `tool_call_start` | `call_id`, `tool`, `args` | Tool invocation; `args` is the parsed JSON object |
@@ -156,7 +156,7 @@ Examples:
 
 | Code | Meaning | Client action |
 |---|---|---|
-| `provider_error` | LLM API call failed (rate limit, auth, 5xx) | Show message; turn ended |
+| `provider_error` | LLM API call failed (rate limit, auth, 5xx), or the round ended truncated with no visible output (reasoning budget burn — `llm.ErrEmptyReasoningRound`), or produced nothing at all (`agent.ErrEmptyResponse`) | Show message; turn ended |
 | `provider_overloaded` | Provider explicitly overloaded | Offer retry |
 | `context_length` | Conversation exceeds model window | Offer `/compact` (manual compaction, ADR-0021) or a new session |
 | `session_not_found` | Unknown session ID | Refetch `session_list` |

@@ -282,6 +282,115 @@ func TestStream_SendsConversationAndToolsUpstream(t *testing.T) {
 	}
 }
 
+func TestStream_NormalizesReasoningContentToThinkingDeltas(t *testing.T) {
+	t.Parallel()
+
+	// GLM (zai) streams chain-of-thought in the non-standard
+	// delta.reasoning_content field, which the SDK drops on the floor
+	// (it is absent from ChatCompletionChunkChoiceDelta). Without
+	// normalization the reasoning budget burns invisibly and the client
+	// sees a frozen turn.
+	srv := sseServer(t, http.StatusOK, []chunk{
+		withChoice(map[string]any{
+			"role": "assistant", "reasoning_content": "thinking hard",
+		}, nil),
+		withChoice(map[string]any{"content": "answer"}, nil),
+		withChoice(map[string]any{}, "stop"),
+		usageChunk(),
+	})
+
+	got := collect(t, stream(t, srv.URL, []llm.Message{{Role: llm.RoleUser, Text: "hi"}}, nil))
+
+	var thinking strings.Builder
+	var text strings.Builder
+
+	for _, ev := range got {
+		switch ev.Type {
+		case llm.EventThinkingDelta:
+			thinking.WriteString(ev.Delta)
+		case llm.EventTextDelta:
+			text.WriteString(ev.Delta)
+		case llm.EventError:
+			t.Fatalf("unexpected error event: %v", ev.Err)
+		case llm.EventToolCalls, llm.EventUsage, llm.EventRetry:
+			// not asserted here
+		}
+	}
+
+	if thinking.String() != "thinking hard" {
+		t.Errorf("thinking deltas = %q, want %q", thinking.String(), "thinking hard")
+	}
+	if text.String() != "answer" {
+		t.Errorf("text = %q, want answer", text.String())
+	}
+}
+
+func TestStream_LengthFinishWithoutContent_SurfacesError(t *testing.T) {
+	t.Parallel()
+
+	// A reasoning-heavy model can spend the whole max_tokens budget on
+	// invisible reasoning: finish_reason=length with zero content and
+	// zero tool calls. Silently ending the round there produces turns
+	// that look dead — an explicit error must surface instead.
+	srv := sseServer(t, http.StatusOK, []chunk{
+		withChoice(map[string]any{"reasoning_content": "burn"}, nil),
+		withChoice(map[string]any{}, "length"),
+		usageChunk(),
+	})
+
+	got := collect(t, stream(t, srv.URL, []llm.Message{{Role: llm.RoleUser, Text: "hi"}}, nil))
+
+	var errEvent *llm.Event
+
+	for i, ev := range got {
+		if ev.Type == llm.EventError {
+			errEvent = &got[i]
+		}
+	}
+
+	if errEvent == nil {
+		t.Fatalf("events = %+v, want an error event", got)
+	}
+	if !strings.Contains(errEvent.Err.Error(), "max-token") {
+		t.Errorf("error = %v, want max-token truncation mention", errEvent.Err)
+	}
+}
+
+func TestStream_LengthFinishAfterContent_StillCompletes(t *testing.T) {
+	t.Parallel()
+
+	// finish_reason=length with streamed content is truncation the user
+	// can see; the stream must complete normally, not error.
+	srv := sseServer(t, http.StatusOK, []chunk{
+		withChoice(map[string]any{"content": "partial answer"}, nil),
+		withChoice(map[string]any{}, "length"),
+		usageChunk(),
+	})
+
+	got := collect(t, stream(t, srv.URL, []llm.Message{{Role: llm.RoleUser, Text: "hi"}}, nil))
+
+	var text strings.Builder
+	errCount := 0
+
+	for _, ev := range got {
+		switch ev.Type {
+		case llm.EventTextDelta:
+			text.WriteString(ev.Delta)
+		case llm.EventError:
+			errCount++
+		case llm.EventThinkingDelta, llm.EventToolCalls, llm.EventUsage, llm.EventRetry:
+			// not asserted here
+		}
+	}
+
+	if text.String() != "partial answer" {
+		t.Errorf("text = %q, want partial answer", text.String())
+	}
+	if errCount != 0 {
+		t.Errorf("truncation with visible content should not error, got %d error events", errCount)
+	}
+}
+
 func TestStream_SurfacesAPIError(t *testing.T) {
 	t.Parallel()
 

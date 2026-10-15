@@ -6,6 +6,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -131,6 +132,11 @@ func New(
 	return a
 }
 
+// ErrEmptyResponse is emitted when a provider round completes without an
+// error but also without any text or tool call — the conversation cannot
+// proceed and the user must be told why instead of seeing a dead turn.
+var ErrEmptyResponse = errors.New("empty response: the model produced no text or tool calls this round")
+
 // Run executes one turn: it appends userText to history, streams provider
 // events, dispatches tool calls, feeds results back, and repeats until the
 // model stops calling tools. The returned channel closes when the turn is
@@ -188,7 +194,18 @@ func (a *Agent) runTurn(ctx context.Context, messages []llm.Message, out chan<- 
 		}
 
 		if len(calls) == 0 {
+			// A round with neither text nor tool calls produced nothing the
+			// user can see. Common cause: a reasoning model spent its whole
+			// output budget on invisible thinking. Fail loudly — a silent
+			// turn_end reads as a dead session.
+			if text == "" {
+				emit(Event{Type: EventError, Err: ErrEmptyResponse})
+
+				return
+			}
+
 			emit(Event{Type: EventTurnEnd, InputTokens: inTok, OutputTokens: outTok})
+
 			return
 		}
 

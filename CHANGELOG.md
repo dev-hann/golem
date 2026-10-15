@@ -7,6 +7,24 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed — dead-looking turns: reasoning budget burn now fails loudly (2026-10-15)
+
+- Sessions against GLM (zai/zai-coding) could go completely silent: the
+  model, thinking enabled by default, spent its entire `max_tokens`
+  budget on chain-of-thought streamed as the non-standard
+  `delta.reasoning_content` — a field the OpenAI SDK drops — and the
+  round ended with zero text, zero tool calls, and no error, rendering
+  as a frozen session (ADR-0023).
+  - The openai adapter now normalizes `reasoning_content` into
+    `thinking_delta`, so reasoning time shows the "◐ reasoning" status
+    instead of a dead screen.
+  - A round truncated by `finish_reason=length` with no visible output
+    errors (`llm.ErrEmptyReasoningRound`) instead of ending cleanly;
+    any no-error round with neither text nor tool calls errors
+    (`agent.ErrEmptyResponse`). The message names the cause and the
+    remedies (raise `max_tokens`, disable thinking, compact the
+    session — large accumulated contexts feed the burn).
+
 ### Fixed — focused picker rows rendered as color blocks (2026-10-15)
 
 - The picker's focus highlight is reverse video, and any colored span

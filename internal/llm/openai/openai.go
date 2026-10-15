@@ -85,13 +85,15 @@ func pump(ctx context.Context, stream chunkStream, out chan<- llm.Event) {
 
 	var usage llm.Event
 
+	var saw streamSignals
+
 	send := makeSend(ctx, out)
 
 	for stream.Next() {
-		handleChunk(stream.Current(), send, tools, &usage)
+		handleChunk(stream.Current(), send, tools, &usage, &saw)
 	}
 
-	finishStream(ctx, stream, send, tools, usage, out)
+	finishStream(ctx, stream, send, tools, usage, saw, out)
 }
 
 // makeSend builds an event sender that prefers delivery and only gives up
@@ -115,16 +117,28 @@ func makeSend(ctx context.Context, out chan<- llm.Event) func(llm.Event) bool {
 
 // handleChunk processes one SSE chunk: text deltas stream out immediately,
 // tool-call fragments accumulate by index, usage lands on the terminal
-// chunk (include_usage).
+// chunk (include_usage). The final finish_reason is folded into saw for the
+// empty-round check in finishStream.
 func handleChunk(
 	chunk openai.ChatCompletionChunk,
 	send func(llm.Event) bool,
 	tools map[int64]*toolAccumulator,
 	usage *llm.Event,
+	saw *streamSignals,
 ) {
 	for _, choice := range chunk.Choices {
+		if delta := reasoningContent(choice.Delta); delta != "" {
+			send(llm.Event{Type: llm.EventThinkingDelta, Delta: delta})
+		}
+
 		if choice.Delta.Content != "" {
+			saw.content = true
+
 			send(llm.Event{Type: llm.EventTextDelta, Delta: choice.Delta.Content})
+		}
+
+		if choice.FinishReason == finishReasonLength {
+			saw.length = true
 		}
 
 		for _, tc := range choice.Delta.ToolCalls {
@@ -155,14 +169,46 @@ func handleChunk(
 	}
 }
 
+// finishReasonLength is the API's stop reason for max-token truncation.
+const finishReasonLength = "length"
+
+// reasoningContent extracts chain-of-thought text from the delta. GLM
+// (zai) streams it as delta.reasoning_content, a field the OpenAI SDK
+// does not model — it only survives in the JSON metadata map, from which
+// the raw string is unwrapped.
+func reasoningContent(delta openai.ChatCompletionChunkChoiceDelta) string {
+	field, ok := delta.JSON.ExtraFields[reasoningField]
+	if !ok {
+		return ""
+	}
+
+	var text string
+	if err := json.Unmarshal([]byte(field.Raw()), &text); err != nil {
+		return ""
+	}
+
+	return text
+}
+
+// reasoningField is the SSE delta key carrying reasoning text on
+// GLM-compatible endpoints.
+const reasoningField = "reasoning_content"
+
+// streamSignals records what one stream round observed.
+type streamSignals struct {
+	length  bool
+	content bool
+}
+
 // finishStream flushes leftovers after the SDK stream ended: errors first,
-// then any accumulated tool calls and usage.
+// then the empty-round guard, then any accumulated tool calls and usage.
 func finishStream(
 	ctx context.Context,
 	stream chunkStream,
 	send func(llm.Event) bool,
 	tools map[int64]*toolAccumulator,
 	usage llm.Event,
+	saw streamSignals,
 	out chan<- llm.Event,
 ) {
 	if err := stream.Err(); err != nil {
@@ -177,8 +223,27 @@ func finishStream(
 		return
 	}
 
+	if err := emptyRoundError(saw, tools); err != nil {
+		send(llm.Event{Type: llm.EventError, Err: fmt.Errorf("openai stream: %w", err)})
+
+		return
+	}
+
 	emitToolCalls(tools, out)
 	emitUsage(usage, out)
+}
+
+// emptyRoundError reports the failure behind a round that produced nothing
+// observable: a reasoning-heavy model (thinking enabled by default, e.g.
+// GLM) can spend the entire max_tokens budget on invisible reasoning, so
+// the stream ends with finish_reason=length, no text, and no tool calls.
+// Ending such a round silently produces turns that look dead to the user.
+func emptyRoundError(saw streamSignals, tools map[int64]*toolAccumulator) error {
+	if !saw.length || saw.content || len(tools) != 0 {
+		return nil
+	}
+
+	return llm.ErrEmptyReasoningRound
 }
 
 // classifyStreamError maps SDK failures onto retry markers: rate limits,
