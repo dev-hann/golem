@@ -767,7 +767,7 @@ func TestServer_FirstTurnGeneratesTitleOnce(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 
-	// ADR-0031: the title is generated (and pushed) from a side call
+	// ADR-0032: the title is generated (and pushed) from a side call
 	// fired at turn start; the wire does not order session_title against
 	// turn events, so collect until the title arrives regardless of
 	// where the turn's own events sit.
@@ -917,7 +917,7 @@ func TestServer_TitleGeneratedDuringTurn(t *testing.T) {
 	t.Parallel()
 
 	// The turn is gated open mid-stream; the title side call has its own
-	// ungated stream. ADR-0031 fires generation at turn start, so the
+	// ungated stream. ADR-0032 fires generation at turn start, so the
 	// pushed session_title must arrive while the turn is still running.
 	gate := make(chan struct{})
 
@@ -1036,7 +1036,7 @@ func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 
 	// The failed side call schedules a retry: the next turn must attempt
 	// generation again (the session is still untitled). The retried title
-	// may arrive anywhere around this turn's events (ADR-0031 fires the
+	// may arrive anywhere around this turn's events (ADR-0032 fires the
 	// side call at turn start), so drain the turn without discarding.
 	h.expectType(golemclient.TypeTurnEnd)
 

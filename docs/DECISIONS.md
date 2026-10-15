@@ -223,7 +223,7 @@ Chronological. Each ADR is immutable once accepted; superseding an ADR adds a ne
 - **Alternatives considered:** keeping the view drop and adding a "show full history" toggle (a second render path for the same data, and the default still hid the beginning); truncating pre-barrier blocks but keeping a jump-to-top (the jump would land nowhere — the content was gone); dropping the barrier block from the view entirely (the summary is real conversation history users cite).
 - **Consequences:** Loaded sessions scroll from their true first message to the tail across any number of barriers. Very long sessions render more blocks (replay cost is linear in stored events either way; the render cache absorbs reflows). `stickyText`, selection, and click geometry see only a longer block list — no new interaction. PROTOCOL.md now states the scoping explicitly so other clients (`golem chat`, future apps) do not re-import the symmetric-fold reading.
 
-## ADR-0031: Title generation fires at turn start and pushes the result
+## ADR-0032: Title generation fires at turn start and pushes the result
 
 - **Status:** Accepted (2026-10-16)
 - **Context:** A first turn of a fresh session generated its title only after `turn_end` — and even then merely persisted the `session_title` record, never emitting it. Perceived latency stacked three ways: the whole agent turn (tool loops can run for minutes) delayed the side call; the side call itself adds seconds; and the client never learned the title at all — the TUI header showed "untitled session" until the user happened to open the session picker (its `list_sessions`) or reload. The first user message names the task the moment the turn starts; nothing about the answer is needed to title it.

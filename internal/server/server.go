@@ -51,7 +51,7 @@ type Server struct {
 	modelOverrides map[string]string // session → model override (SetModel)
 	// titleRuns marks sessions with an in-flight title side call, so
 	// overlapping turns of an untitled session cannot double-fire
-	// generation (ADR-0031).
+	// generation (ADR-0032).
 	titleRuns map[string]struct{}
 
 	closeOnce sync.Once
@@ -537,7 +537,7 @@ func newTurnID() string {
 }
 
 // beginTitleRun reserves the session's title side call; false when one
-// is already in flight (ADR-0031's overlap guard).
+// is already in flight (ADR-0032's overlap guard).
 func (s *Server) beginTitleRun(sessionID string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -581,7 +581,7 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 
 	// The title side call retries on later turns until one lands: every
 	// turn of an untitled session gets a chance (the first user message
-	// names the task regardless of which turn succeeds). ADR-0031 fires
+	// names the task regardless of which turn succeeds). ADR-0032 fires
 	// it alongside the turn instead of after turn_end — the first user
 	// message is known the moment the turn starts, so the title lands
 	// while the agent works, and it is pushed to the requesting client

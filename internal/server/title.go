@@ -32,7 +32,7 @@ const (
 )
 
 // generateTitle asks the provider for a short title covering the session's
-// first exchange and persists it as a session_title record. ADR-0031: it
+// first exchange and persists it as a session_title record. ADR-0032: it
 // runs alongside the turn (not after turn_end), so on success the title
 // is also pushed to the requesting client's connection — clients no
 // longer wait for their next session_list to see it. Failures are logged

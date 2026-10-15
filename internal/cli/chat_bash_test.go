@@ -17,7 +17,7 @@ import (
 )
 
 // bashProvider requests a bash call once, then finishes with text. Title
-// side calls (ADR-0031 fires them at turn start) get a canned stream
+// side calls (ADR-0032 fires them at turn start) get a canned stream
 // without consuming the scripted round, and calls is counted under a
 // mutex because the side call races the agent loop.
 type bashProvider struct {
