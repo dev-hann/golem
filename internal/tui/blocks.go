@@ -20,6 +20,7 @@ const (
 	blockAssistant
 	blockTool
 	blockError
+	blockDim
 )
 
 // block is one transcript entry. Assistant blocks accumulate streamed text;
@@ -63,6 +64,8 @@ func (b block) render(k *kit.Kit, width int) string {
 		return k.WrapPlain(width, b.text)
 	case blockError:
 		return k.ErrLine(width, b.text)
+	case blockDim:
+		return k.DimLine(b.text)
 	case blockTool:
 		return b.renderTool(k, width)
 	default:
@@ -205,7 +208,7 @@ func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, spans []us
 			spans = append(spans, userSpan{start: line, end: line + lines, text: blk.text})
 		case blockTool:
 			toolSpans = append(toolSpans, toolSpan{start: line, end: line + lines, index: i})
-		case blockAssistant, blockError:
+		case blockAssistant, blockError, blockDim:
 			// No span tracking: only user and tool rows are interactive.
 		}
 

@@ -531,8 +531,14 @@ func (m Model) commands() []command {
 		{name: "new session", keys: "ctrl+x n", run: Model.newSessionCmd},
 		{name: "session list", keys: "ctrl+x l", run: Model.openSessions},
 		{name: "model list", keys: "ctrl+x m", run: Model.openModels},
+		{name: "compact session", keys: "/compact", run: Model.paletteCompact},
 		{name: "quit", keys: "ctrl+d", run: Model.quitCmd},
 	}
+}
+
+// paletteCompact runs the compaction from the command palette.
+func (m Model) paletteCompact() (tea.Model, tea.Cmd) {
+	return m.compactCmd()
 }
 
 // filteredCommands returns the palette commands whose names match the
@@ -737,11 +743,36 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 	}
 }
 
+// compactCommand is the composer's manual compaction trigger (ADR-0021).
+const compactCommand = "/compact"
+
+// compactCmd sends a compact_session event for the current session; with
+// no session yet there is nothing to compact.
+func (m Model) compactCmd() (tea.Model, tea.Cmd) {
+	if m.sessionID == "" || m.client == nil {
+		m.blocks = append(m.blocks, block{
+			kind: blockError,
+			text: "no session to compact yet — send a message first",
+		})
+		m.refreshView()
+
+		return m, nil
+	}
+
+	return m, m.send(golemclient.CompactSession{
+		Type: golemclient.TypeCompactSession, Session: m.sessionID,
+	})
+}
+
 // submit sends the composed line as a chat message. Everything typed is
 // content — navigation and lifecycle live on keys, not slash commands.
 // With no session yet the line queues and triggers create_session
 // (ADR-0018): the session is born with the first word, not the launch.
 func (m Model) submit(line string) (tea.Model, tea.Cmd) {
+	if line == compactCommand {
+		return m.compactCmd()
+	}
+
 	if m.client == nil && m.sessionID == "" {
 		m.blocks = append(m.blocks, block{kind: blockUser, text: line})
 		m.pendingMsgs = append(m.pendingMsgs, line)
@@ -1240,6 +1271,12 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		}
 	case golemclient.SessionDeleted:
 		m.applySessionDeleted(e)
+	case golemclient.SessionCompacted:
+		m.blocks = append(m.blocks, blockDimCompacted(e))
+	case golemclient.CompactFailed:
+		m.blocks = append(m.blocks, block{
+			kind: blockError, text: "compact failed: " + e.Reason,
+		})
 	case golemclient.History:
 		tick = m.replayHistory(e)
 	default:
@@ -1383,6 +1420,14 @@ func (m *Model) appendToAssistant(delta string) {
 	last.text += delta
 }
 
+// blockDimCompacted builds the dim block confirming a compaction.
+func blockDimCompacted(e golemclient.SessionCompacted) block {
+	return block{
+		kind: blockDim,
+		text: "∴ context compacted — earlier history summarized:\n" + e.Summary,
+	}
+}
+
 // finishToolBlock marks the matching tool block done with its outcome.
 func (m *Model) finishToolBlock(end golemclient.ToolCallEnd) {
 	for i := len(m.blocks) - 1; i >= 0; i-- {
@@ -1422,6 +1467,15 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 
 	live := replayTurn{}
 
+	// A compaction barrier in the replayed batch drops every block
+	// before it (ADR-0021) — same fold rule the server applies to
+	// context.
+	applyBarrier := func(e golemclient.SessionCompacted) {
+		m.blocks = nil
+		m.blocks = append(m.blocks, blockDimCompacted(e))
+		live = replayTurn{}
+	}
+
 	for _, raw := range hist.Events {
 		ev, err := golemclient.Decode(raw)
 		if err != nil {
@@ -1429,6 +1483,8 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 		}
 
 		switch e := ev.(type) {
+		case golemclient.SessionCompacted:
+			applyBarrier(e)
 		case golemclient.UserMessage:
 			m.blocks = append(m.blocks, block{kind: blockUser, text: e.Text})
 			live = replayTurn{open: true} // a message opens its turn

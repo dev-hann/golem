@@ -14,6 +14,11 @@ type folder struct {
 	title         string
 	firstUserText string
 
+	// compacted flags a session_compacted barrier seen while folding:
+	// everything before it dropped from context, replaced by the
+	// summary message (ADR-0021).
+	compacted bool
+
 	// per-turn accumulation
 	turnUser    *llm.Message
 	asstText    string
@@ -40,14 +45,7 @@ func (f *folder) feed(line []byte) {
 	case "user_message":
 		f.feedUserMessage(line)
 	case "text_delta":
-		var ev struct {
-			Delta string `json:"delta"`
-		}
-		if err := json.Unmarshal(line, &ev); err != nil {
-			return
-		}
-
-		f.asstText += ev.Delta
+		f.feedTextDelta(line)
 	case "tool_call_start":
 		var ev struct {
 			CallID string          `json:"call_id"`
@@ -84,11 +82,58 @@ func (f *folder) feed(line []byte) {
 		}
 
 		f.title = ev.Title
+	case "session_compacted":
+		f.feedCompacted(line)
 	default:
 		// session_meta / error / interrupt events do not change
 		// conversation state.
 	}
 }
+
+// feedTextDelta folds one text_delta line into the assistant buffer.
+func (f *folder) feedTextDelta(line []byte) {
+	var ev struct {
+		Delta string `json:"delta"`
+	}
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return
+	}
+
+	f.asstText += ev.Delta
+}
+
+// feedCompacted decodes one session_compacted line and applies it.
+func (f *folder) feedCompacted(line []byte) {
+	var ev struct {
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(line, &ev); err != nil || ev.Summary == "" {
+		return
+	}
+
+	f.applyCompacted(ev.Summary)
+}
+
+// applyCompacted applies a compaction barrier (ADR-0021): everything
+// folded so far drops from the model's context, replaced by one
+// synthesized user message carrying the summary. Title and the turn
+// count are session facts, not context — both survive. FirstUserText
+// resets so a pending title side call cannot resurrect the compacted
+// opener.
+func (f *folder) applyCompacted(summary string) {
+	f.closeTurn(false)
+
+	f.messages = []llm.Message{{
+		Role: llm.RoleUser,
+		Text: contextSummaryPrefix + summary,
+	}}
+	f.compacted = true
+	f.firstUserText = ""
+}
+
+// contextSummaryPrefix labels the synthesized message a compaction
+// barrier leaves in place of prior history.
+const contextSummaryPrefix = "[Context summary]\n"
 
 // feedUserMessage folds one user_message line: it opens the current turn
 // and, as the session's opening message, names the task for title

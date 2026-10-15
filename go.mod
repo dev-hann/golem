@@ -1,6 +1,6 @@
 module github.com/dev-hann/golem
 
-go 1.25
+go 1.26.0
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -12,6 +12,7 @@ require (
 	github.com/muesli/termenv v0.16.0
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/openai/openai-go v1.12.0
+	golang.org/x/net v0.61.0
 )
 
 require (
@@ -42,7 +43,7 @@ require (
 	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
-	golang.org/x/sync v0.16.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/text v0.27.0 // indirect
+	golang.org/x/sync v0.24.0 // indirect
+	golang.org/x/sys v0.49.0 // indirect
+	golang.org/x/text v0.43.0 // indirect
 )

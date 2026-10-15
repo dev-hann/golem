@@ -58,6 +58,77 @@ func TestAsk_StreamsTextToStdout(t *testing.T) {
 	}
 }
 
+func TestAsk_AppendsDiscoveredAGENTSInstructions(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "AGENTS.md"),
+		[]byte("ASK-AGENTS-MARKER\n"), 0o644); err != nil {
+		t.Fatalf("write AGENTS.md: %v", err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	provider := &capturingProvider{rounds: [][]llm.Event{
+		{{Type: llm.EventTextDelta, Delta: "ok"}},
+	}}
+	err := cli.Ask(t.Context(), cli.AskOptions{
+		Provider: provider,
+		Model:    "stub",
+		Root:     root,
+		Prompt:   "hi",
+		Stdout:   &stdout,
+		Stderr:   &stderr,
+	})
+	if err != nil {
+		t.Fatalf("Ask: %v", err)
+	}
+
+	prompt := provider.lastSystemPrompt()
+	if !strings.Contains(prompt, "You are golem") {
+		t.Errorf("system prompt missing built-in base:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, "ASK-AGENTS-MARKER") {
+		t.Errorf("system prompt missing AGENTS.md content:\n%s", prompt)
+	}
+}
+
+// capturingProvider records system prompts; rounds stream as scripted.
+type capturingProvider struct {
+	rounds  [][]llm.Event
+	next    int
+	prompts []string
+}
+
+func (p *capturingProvider) Stream(
+	_ context.Context,
+	req llm.Request,
+) (<-chan llm.Event, error) {
+	p.prompts = append(p.prompts, req.SystemPrompt)
+
+	if p.next >= len(p.rounds) {
+		return nil, fmt.Errorf("stub: no more rounds")
+	}
+
+	round := p.rounds[p.next]
+	p.next++
+
+	out := make(chan llm.Event, len(round))
+	for _, ev := range round {
+		out <- ev
+	}
+	close(out)
+
+	return out, nil
+}
+
+func (p *capturingProvider) lastSystemPrompt() string {
+	if len(p.prompts) == 0 {
+		return ""
+	}
+
+	return p.prompts[len(p.prompts)-1]
+}
+
 func TestAsk_ToolProgressGoesToStderr(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

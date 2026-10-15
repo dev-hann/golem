@@ -66,6 +66,7 @@ func New(cfg Config) (*Server, error) {
 		tools.BashTool{Root: cfg.Root},
 		tools.GrepTool{Root: cfg.Root},
 		tools.GlobTool{Root: cfg.Root},
+		tools.WebFetchTool{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("server: building tools: %w", err)
@@ -102,6 +103,11 @@ func (s *Server) Close() {
 	s.closeOnce.Do(func() {
 		close(s.closed)
 	})
+}
+
+// Registry exposes the tool registry (for tests and diagnostics).
+func (s *Server) Registry() *tools.Registry {
+	return s.registry
 }
 
 // handleConn reads NDJSON client events and dispatches them.
@@ -149,6 +155,8 @@ func (s *Server) dispatch(_ net.Conn, writer *connWriter, event any) bool {
 		s.handleRenameSession(writer, ev)
 	case golemclient.DeleteSession:
 		s.handleDeleteSession(writer, ev)
+	case golemclient.CompactSession:
+		s.handleCompact(writer, ev)
 	case golemclient.VersionQuery:
 		writer.send(golemclient.ServerHello{
 			Type: golemclient.TypeServerHello, Version: s.cfg.Version,
@@ -444,13 +452,16 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 
 	model := s.turnModel(msg.Session)
 
-	ag := agent.New(s.cfg.Provider, s.registry, model)
-
 	sess, err := s.cfg.Store.Get(msg.Session)
 	if err != nil {
 		writer.send(errorOf(msg.Session, turnID, "internal", err))
 		return
 	}
+
+	// AGENTS.md discovery (ADR-0019): fold the workspace's instruction
+	// files into the system prompt for this turn.
+	ag := agent.New(s.cfg.Provider, s.registry, model,
+		agent.WithInstructions(agent.DiscoverInstructions(sess.Cwd)))
 
 	firstTurn := sess.Turns == 0 && sess.Title == ""
 

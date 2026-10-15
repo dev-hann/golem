@@ -49,7 +49,7 @@ Override the model this session uses for subsequent turns (same provider; switch
 
 ### `create_session` / `list_sessions` / `load_session`
 
-Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `delete_session` → the server cancels a running turn in that session (opencode-style), waits for it to drain, removes the session's file, and confirms with `session_deleted`; a deleted session refuses appends permanently — late writers get an error, never a resurrected file. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
+Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `delete_session` → the server cancels a running turn in that session (opencode-style), waits for it to drain, removes the session's file, and confirms with `session_deleted`; a deleted session refuses appends permanently — late writers get an error, never a resurrected file. `compact_session` → server summarizes the folded history (bounded 60s side call, 16 KiB summary cap — ADR-0022), appends a `session_compacted` barrier record, and confirms with a `session_compacted` event; on failure it emits `compact_failed` and the history is untouched. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
 
 Clients create their session lazily (ADR-0018): no session is minted until the first submitted message — an abandoned launch must leave nothing behind. A client may connect, `list_sessions`, and `load_session` without ever sending `create_session`.
 
@@ -105,7 +105,17 @@ Confirmation that a `delete_session` completed: the session's stored file is gon
 ```json
 {"type":"session_deleted","session":"01J..."}
 ```
+### `session_compacted` / `compact_failed`
 
+Manual compaction (ADR-0022). `compact_session` asks the server to fold the session's history into a summary; the server runs a bounded provider side call, appends a `session_compacted` barrier record (append-only storage — never a rewrite), and confirms:
+
+```json
+{"type":"compact_session","session":"01J..."}
+{"type":"session_compacted","session":"01J...","summary":"Built the auth middleware; edit.go remains..."}
+{"type":"compact_failed","session":"01J...","reason":"summary call failed: 429 rate limited"}
+```
+
+The barrier is a fold rule, not just a receipt: everything before it drops from the model's context, replaced by one synthesized user message carrying the summary. Title, turn count, and cwd survive. Replaying a session (`history`) includes the barrier — clients apply the same rule and render the summary block, not the dropped turns. Refused requests (turn running, empty session) answer `error` with `invalid_request`.
 ### Version handshake
 
 `version_query` asks the running server to identify its build; `server_hello` answers. The launcher uses this to detect (and restart) a stale detached server — a server that cannot answer is treated as outdated.
@@ -144,7 +154,7 @@ Examples:
 |---|---|---|
 | `provider_error` | LLM API call failed (rate limit, auth, 5xx) | Show message; turn ended |
 | `provider_overloaded` | Provider explicitly overloaded | Offer retry |
-| `context_length` | Conversation exceeds model window | Suggest new session (compaction is a non-goal for v1) |
+| `context_length` | Conversation exceeds model window | Offer `/compact` (manual compaction, ADR-0021) or a new session |
 | `session_not_found` | Unknown session ID | Refetch `session_list` |
 | `invalid_request` | Malformed client event | Log; ignore |
 | `internal` | Unexpected server error | Show message |

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/tools"
@@ -51,7 +52,10 @@ type Agent struct {
 	registry *tools.Registry
 	model    string
 	system   string
-	budget   int
+	// extraInstructions is discovered AGENTS.md content appended after
+	// system on every request (ADR-0019).
+	extraInstructions string
+	budget            int
 }
 
 // Option customizes an Agent.
@@ -67,12 +71,36 @@ func WithBudget(bytes int) Option {
 	return func(a *Agent) { a.budget = bytes }
 }
 
+// WithInstructions appends discovered AGENTS.md content after the system
+// prompt (global file first, project file last — ADR-0019). Empty strings
+// are ignored.
+func WithInstructions(instructions string) Option {
+	return func(a *Agent) {
+		if strings.TrimSpace(instructions) == "" {
+			return
+		}
+
+		a.extraInstructions = instructions
+	}
+}
+
 // defaultSystemPrompt is the built-in instruction set for the model.
 const defaultSystemPrompt = `You are golem, a coding agent working in the user's workspace.
 Use the provided tools to read, search, edit files and run commands.
 Prefer the edit tool over rewriting whole files.
 Verify your changes (run tests when available) before claiming completion.
 Be concise.`
+
+// joinedSystemPrompt composes the built-in (or overridden) system prompt
+// with discovered AGENTS.md instructions: base first, instructions after,
+// so project rules read as later — more specific — guidance.
+func (a *Agent) joinedSystemPrompt() string {
+	if strings.TrimSpace(a.extraInstructions) == "" {
+		return a.system
+	}
+
+	return a.system + "\n\n" + a.extraInstructions
+}
 
 // New builds an Agent. model selects the provider model; registry supplies
 // the tool implementations.
@@ -184,7 +212,7 @@ func (a *Agent) streamRound(
 ) (string, []llm.ToolCall, roundUsage, error) {
 	req := llm.Request{
 		Model:        a.model,
-		SystemPrompt: a.system,
+		SystemPrompt: a.joinedSystemPrompt(),
 		Messages:     messages,
 		Tools:        a.registry.Specs(),
 	}

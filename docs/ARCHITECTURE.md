@@ -138,10 +138,10 @@ Design target ≤ 150 MB RSS under normal use, enforced by `GOMEMLIMIT` (config 
 
 ## Allowed dependencies
 
-stdlib, plus: `anthropics/anthropic-sdk-go`, `openai/openai-go`, `ollama/ollama/api`, `BurntSushi/toml`, `charmbracelet/bubbletea` (+`lipgloss`, `bubbles`, `x/ansi` — the ANSI-aware overlay merge in `internal/tui/kit`), `oklog/ulid`. Anything else requires an ADR.
+stdlib, plus: `anthropics/anthropic-sdk-go`, `openai/openai-go`, `ollama/ollama/api`, `BurntSushi/toml`, `charmbracelet/bubbletea` (+`lipgloss`, `bubbles`, `x/ansi` — the ANSI-aware overlay merge in `internal/tui/kit`), `oklog/ulid`, `golang.org/x/net/html` (HTML→text in `internal/tools/webfetch.go` — ADR-0020). Anything else requires an ADR.
 
 ## Non-goals (for v1)
 
-- LSP integration, sub-agents, context compaction — revisit after roadmap phase 5 (see [ROADMAP.md](ROADMAP.md)).
+- LSP integration, sub-agents — revisit after roadmap phase 5 (see [ROADMAP.md](ROADMAP.md)). Manual context compaction landed (ADR-0021); automatic compaction remains deferred.
 - Windows named pipes (unix sockets + TCP only initially).
 - Multi-user / remote auth on the server. Local, single-user by design.

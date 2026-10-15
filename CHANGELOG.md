@@ -33,6 +33,18 @@ config schema may change without notice.
   session (ADR-0018). Confirmation from the server reconciles the list
   (another client's delete drops the row on arrival).
 
+### Added — manual /compact command (2026-10-15)
+
+- `/compact` in the TUI composer (and ctrl+p palette) and `golem chat` summarizes the session's history through a bounded provider side call (60s, 16 KiB summary) and appends a `session_compacted` barrier record (ADR-0022): storage stays append-only; the barrier drops pre-existing context on later turns, replaced by one `[Context summary]` message. Title and turn count survive; a failed summary emits `compact_failed` and leaves history untouched; refused while a turn runs or on an empty session. Automatic compaction stays deferred.
+
+### Added — webfetch tool (2026-10-15)
+
+- New read-only `webfetch` tool (ADR-0021): GET one absolute http(s) URL with a 30s timeout and 256 KiB body cap; HTML pages collapse to visible text (script/style stripped) via `golang.org/x/net/html`; redirect targets are re-checked per hop so a hop to `file:` or any non-http scheme is refused; non-2xx responses error. Registered for server turns and `golem ask`.
+
+### Added — AGENTS.md instructions appended to the system prompt (2026-10-15)
+
+- The agent now discovers `AGENTS.md` files and appends them to the system prompt of every turn (ADR-0020): `~/.config/golem/AGENTS.md` (global) first, `<session cwd>/AGENTS.md` (project) last — the nearer file reads as the more specific override. Each file is clipped at 32 KiB with a truncation marker; missing files are ignored, no configuration needed. Applies to server turns (discovered against the session's cwd) and `golem ask` (against the workspace root).
+
 ### Fixed — the status bar shows a running turn after switching back to its session (2026-10-14)
 
 - Switching sessions while a turn was streaming and then returning to it

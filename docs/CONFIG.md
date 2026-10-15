@@ -27,6 +27,15 @@ Loaded and merged low → high:
 
 Merge rules: tables (maps) deep-merge; arrays (slices) are **replaced**, not concatenated. First file that fails to parse aborts startup with the file path in the error.
 
+## Agent instructions (AGENTS.md)
+
+Every turn appends instruction files to the system prompt (ADR-0019), in this order:
+
+1. `~/.config/golem/AGENTS.md` — machine-level rules (respects `XDG_CONFIG_HOME`).
+2. `<session cwd>/AGENTS.md` — project rules; read last, so nearer overrides read as more specific.
+
+Each file is clipped at 32 KiB with a truncation marker. Missing or blank files are ignored — no configuration required. `golem ask` discovers against its workspace root.
+
 ## Secrets
 
 API keys live in the global config by default (ADR-0015): the wizard writes the validated key as plaintext into `~/.config/golem/config.toml` (mode 0600) — the same shape `gh` and the `aws` CLI use for local credentials. Resolution order per provider:
