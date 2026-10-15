@@ -75,6 +75,8 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.sessionTitle, m.sessionCwd = e.Title, e.Cwd
 		m.metaBusy = e.Busy
 		cmd = m.flushPending()
+	case golemclient.SessionForked:
+		cmd = m.applySessionForked(e)
 	case golemclient.SessionList:
 		tick = m.applySessionList(e)
 	case golemclient.History:
@@ -259,6 +261,8 @@ func (m *Model) applySessionRecord(ev any) {
 		}
 	case golemclient.SessionDeleted:
 		m.applySessionDeleted(e)
+	case golemclient.SessionForked:
+		m.applySessionForked(e)
 	case golemclient.SessionCompacted:
 		m.applyCompacted(e)
 	case golemclient.CompactFailed:
@@ -266,6 +270,35 @@ func (m *Model) applySessionRecord(ev any) {
 	default:
 		// not a session record; nothing to fold
 	}
+}
+
+// applySessionForked folds the fork confirmation: the client switches
+// to the child session — its transcript clears and loads the child's
+// history, exactly like a picker open (ADR-0034). The dim fork notice
+// lands first so the fresh transcript explains why it is a copy.
+func (m *Model) applySessionForked(e golemclient.SessionForked) tea.Cmd {
+	m.sessionID = e.Session
+	m.sessionTitle = e.Title
+	m.clearTranscript()
+
+	m.blocks = append(m.blocks, block{
+		kind: blockDim,
+		text: "⑂ forked — a copy of the parent session through its last turn",
+	})
+
+	// The load runs inline, not as a cmd: the switch must precede any
+	// message the user types next on the wire (flushPending's rule —
+	// tea.Batch executes concurrently). A send failure surfaces as
+	// connErrMsg.
+	if m.client != nil {
+		if err := m.client.Send(golemclient.LoadSession{
+			Type: golemclient.TypeLoadSession, Session: e.Session,
+		}); err != nil {
+			return func() tea.Msg { return connErrMsg{err: err} }
+		}
+	}
+
+	return nil
 }
 
 // applyCompacted folds the compaction barrier confirmation: a dim
