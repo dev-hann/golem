@@ -125,6 +125,7 @@ func TestReplayHistoryRendersCompactionBarrier(t *testing.T) {
 	var (
 		sawSummary bool
 		sawOld     bool
+		sawNew     bool
 	)
 
 	for _, b := range m.blocks {
@@ -134,13 +135,22 @@ func TestReplayHistoryRendersCompactionBarrier(t *testing.T) {
 		if b.text == "old question" {
 			sawOld = true
 		}
+		if b.text == "new question" {
+			sawNew = true
+		}
 	}
 
 	if !sawSummary {
 		t.Errorf("replay missing the summary block: %+v", m.blocks)
 	}
-	if sawOld {
-		t.Error("replay must drop pre-barrier blocks")
+	// The view is the audit surface, not the model's context: the turns
+	// before the barrier stay scrollable (the 2026-10-15 scrollback fix);
+	// only the server's context fold drops them.
+	if !sawOld {
+		t.Error("replay must keep pre-barrier blocks in the view")
+	}
+	if !sawNew {
+		t.Error("replay must render post-barrier blocks")
 	}
 }
 

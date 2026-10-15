@@ -117,7 +117,7 @@ Compaction (ADR-0022 manual, ADR-0025 automatic). `compact_session` asks the ser
 {"type":"compact_failed","session":"01J...","reason":"summary call failed: 429 rate limited"}
 ```
 
-The barrier is a fold rule, not just a receipt: everything before it drops from the model's context, replaced by one synthesized user message carrying the summary. Title, turn count, and cwd survive. Replaying a session (`history`) includes the barrier — clients apply the same rule and render the summary block, not the dropped turns. Refused requests (turn running, empty session) answer `error` with `invalid_request`.
+The barrier is a fold rule, not just a receipt: everything before it drops from the model's context, replaced by one synthesized user message carrying the summary. Title, turn count, and cwd survive. Replaying a session (`history`) includes the barrier — clients render the summary block where it happened. The fold rule scopes to the model's context only: the view keeps the turns before the barrier (they remain in the file and in `history` batches), because the transcript is the audit surface users scroll. Refused compaction requests (turn running, empty session) answer `error` with `invalid_request`.
 
 The server also compacts automatically (ADR-0025): before a `user_message` is appended and its turn starts, a folded history measuring at or above the configured byte threshold (`[session] auto_compact_bytes`, default 128 KiB; 0 disables) compacts through the exact same barrier path. Clients see the same `session_compacted` record before `turn_start`; a failed automatic attempt emits `compact_failed` with a reason prefixed `auto compaction skipped:` and the turn proceeds on the un-compacted history.
 ### Version handshake

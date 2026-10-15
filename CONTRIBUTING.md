@@ -38,6 +38,15 @@ A PR is mergeable only when **all** of the following hold:
 
 ## Driving the TUI (E2E checks)
 
+Manual, not part of `make all`. Two canonical tools — pick by what you need to see:
+
+| Tool | Captures | Use for |
+|---|---|---|
+| `scripts/tui-drive.py` | Raw pty byte stream (`pty.fork`) | Repeatable scenarios: key handling, exit ladders, protocol-driven flow |
+| tmux `send-keys` + `capture-pane` | The **rendered screen** | Visual truth: viewport, scrollback, layout — what the user actually sees |
+
+### tui-drive.py (pty driver) — the default
+
 For pty-level checks of the TUI, use the unified runner instead of writing ad-hoc pty scripts:
 
 ```bash
@@ -45,6 +54,21 @@ printf 'sleep 3\nkeys \x03\n' | scripts/tui-drive.py   # boot, ctrl+c once, dump
 ```
 
 The runner bakes in isolation and cleanup: a fresh temp dir per run (`XDG_DATA_HOME`/`XDG_RUNTIME_DIR`), a fresh `go build` into it, SIGTERM of the spawned `golem serve` via the isolated pidfile, and temp-dir removal. This is load-bearing: the launcher restarts any server whose version differs (`internal/cli/launch.go`), so an ad-hoc script that runs a second build against the default socket will SIGTERM the production server and EOF every live TUI session — exactly the incident this runner replaced. Known fidelity artifact: under a driven pty the ctrl+c exit ladder absorbs one extra press (see the runner's docstring).
+
+### tmux — when you need the rendered screen
+
+The pty runner captures bytes, not screens. When the question is "what does the viewport actually look like" (scroll position, layout, a repaint), run the TUI inside a tmux pane and screenshot it:
+
+```bash
+D=.wt/tmux; mkdir -p "$D/data" "$D/run" && make build
+tmux new-session -d -s gt -x 100 -y 30 \
+  "env XDG_DATA_HOME=$PWD/$D/data XDG_RUNTIME_DIR=$PWD/$D/run ./bin/golem 2>$D/err.log; sleep 600"
+tmux send-keys -t gt C-g      # drive any key: C-x l, Enter, C-g, …
+tmux capture-pane -t gt -p    # prints the rendered viewport
+tmux kill-session -t gt; kill "$(cat "$D/run/golem.sock.pid")" 2>/dev/null
+```
+
+The same isolation contract applies: `XDG_DATA_HOME`/`XDG_RUNTIME_DIR` must point away from the production socket (see the warning above), and the detached `serve` the TUI spawned must be stopped via its isolated pidfile before you delete the dir. Throwaway helper scripts built on this recipe (screenshot ladders, scroll probes) are scaffolding — don't commit them; rebuild from this recipe when needed.
 
 ## Commits
 

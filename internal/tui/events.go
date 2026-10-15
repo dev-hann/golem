@@ -385,12 +385,14 @@ func (m *Model) replayHistory(hist golemclient.History) {
 
 // foldReplayEvent folds one replayed event into transcript blocks,
 // threading the live-turn state, and returns the updated state. A
-// compaction barrier (ADR-0022) drops every block before it — the same
-// fold rule the server applies to context.
+// compaction barrier (ADR-0022) renders as a dim summary block in the
+// view — the transcript keeps the turns before it, because the view is
+// the audit surface, not the model's context; the server's fold rule
+// (drop everything before the barrier) applies to context only.
 func (m *Model) foldReplayEvent(ev any, live replayTurn) replayTurn {
 	switch e := ev.(type) {
 	case golemclient.SessionCompacted:
-		m.blocks = []block{blockDimCompacted(e)}
+		m.blocks = append(m.blocks, blockDimCompacted(e))
 		return replayTurn{}
 	case golemclient.UserMessage:
 		m.blocks = append(m.blocks, block{kind: blockUser, text: e.Text})
