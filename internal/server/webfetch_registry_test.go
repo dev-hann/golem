@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// ADR-0020: webfetch ships in the server registry so TUI turns can use it.
+// ADR-0021: webfetch ships in the server registry so TUI turns can use it.
 func TestServer_RegistryIncludesWebFetch(t *testing.T) {
 	t.Parallel()
 

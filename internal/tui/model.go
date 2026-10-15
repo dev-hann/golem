@@ -716,7 +716,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 	}
 }
 
-// compactCommand is the composer's manual compaction trigger (ADR-0021).
+// compactCommand is the composer's manual compaction trigger (ADR-0022).
 const compactCommand = "/compact"
 
 // compactCmd sends a compact_session event for the current session; with
@@ -1213,62 +1213,17 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.sessionID = e.Session
 		m.metaBusy = e.Busy
 		cmd = m.flushPending()
-	case golemclient.TurnStart:
-		m.turnActive = true
-		m.follow = true
-		m.provider = e.Provider
-		m.modelName = e.Model
-		m.streamedText = false
-		m.reasoned = false
-		m.retryState = nil
-		m.activeTool, m.activeArgs = "", ""
-		m.synthDone = nil
-	case golemclient.TextDelta:
-		m.appendToAssistant(e.Delta)
-		m.streamedText = true
-		m.retryState = nil // a retry only precedes first content
-		m.synthDone = nil  // the model's follow-up has begun
-	case golemclient.ThinkingDelta:
-		m.reasoned = true
-		m.retryState = nil
-	case golemclient.Retry:
-		m.retryState = &retryInfo{Attempt: e.Attempt, Retries: e.Retries, DelayMs: e.DelayMs}
-	case golemclient.ToolCallStart:
-		m.blocks = append(m.blocks, block{
-			kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
-		})
-		m.activeTool, m.activeArgs = e.Tool, string(e.Args)
-		m.synthDone = nil
-	case golemclient.ToolCallEnd:
-		m.finishToolBlock(e)
-		m.synthDone = &toolDone{Tool: m.activeTool, OK: e.OK}
-		m.activeTool, m.activeArgs = "", ""
-		m.retryState = nil
-	case golemclient.ErrorEvent:
-		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
-		m.endTurn()
-	case golemclient.TurnEnd:
-		m.lastUsage = e.Usage
-		m.endTurn()
 	case golemclient.SessionList:
 		tick = m.applySessionList(e)
-	case golemclient.SessionTitle:
-		if i := chosenIndex(m.sessions, e.Session); i >= 0 {
-			m.sessions[i].Title = e.Title
-		}
-	case golemclient.SessionDeleted:
-		m.applySessionDeleted(e)
-	case golemclient.SessionCompacted:
-		m.blocks = append(m.blocks, blockDimCompacted(e))
-	case golemclient.CompactFailed:
-		m.blocks = append(m.blocks, block{
-			kind: blockError, text: "compact failed: " + e.Reason,
-		})
 	case golemclient.History:
-		tick = m.replayHistory(e)
+		m.replayHistory(e)
 	default:
-		// Unknown types (including golemclient.Envelope) are ignored per
-		// PROTOCOL.md forward compatibility.
+		// Turn events fold through applyTurnEvent; session records
+		// (title, deletion, compaction) through applySessionRecord;
+		// anything else is ignored per PROTOCOL.md forward
+		// compatibility.
+		m.applyTurnEvent(ev)
+		m.applySessionRecord(ev)
 	}
 
 	m.refreshView()
@@ -1360,6 +1315,87 @@ func (m *Model) applySessionList(e golemclient.SessionList) tea.Cmd {
 	}
 
 	return nil
+}
+
+// applyTurnEvent folds one turn-lifecycle event — streaming text,
+// reasoning, retries, tool calls, and the turn's terminal events. It is
+// a no-op for anything that is not a turn event.
+func (m *Model) applyTurnEvent(ev any) {
+	switch e := ev.(type) {
+	case golemclient.TurnStart:
+		m.turnActive = true
+		m.follow = true
+		m.provider = e.Provider
+		m.modelName = e.Model
+		m.streamedText = false
+		m.reasoned = false
+		m.retryState = nil
+		m.activeTool, m.activeArgs = "", ""
+		m.synthDone = nil
+	case golemclient.TextDelta:
+		m.appendToAssistant(e.Delta)
+		m.streamedText = true
+		m.retryState = nil // a retry only precedes first content
+		m.synthDone = nil  // the model's follow-up has begun
+	case golemclient.ThinkingDelta:
+		m.reasoned = true
+		m.retryState = nil
+	case golemclient.Retry:
+		m.retryState = &retryInfo{Attempt: e.Attempt, Retries: e.Retries, DelayMs: e.DelayMs}
+	case golemclient.ToolCallStart:
+		m.blocks = append(m.blocks, block{
+			kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
+		})
+		m.activeTool, m.activeArgs = e.Tool, string(e.Args)
+		m.synthDone = nil
+	case golemclient.ToolCallEnd:
+		m.finishToolBlock(e)
+		m.synthDone = &toolDone{Tool: m.activeTool, OK: e.OK}
+		m.activeTool, m.activeArgs = "", ""
+		m.retryState = nil
+	case golemclient.ErrorEvent:
+		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
+		m.endTurn()
+	case golemclient.TurnEnd:
+		m.lastUsage = e.Usage
+		m.endTurn()
+	default:
+		// not a turn event; nothing to fold
+	}
+}
+
+// applySessionRecord folds the non-streaming session record events —
+// title, deletion, compaction, and compaction failure — that carry no
+// turn lifecycle.
+func (m *Model) applySessionRecord(ev any) {
+	switch e := ev.(type) {
+	case golemclient.SessionTitle:
+		if i := chosenIndex(m.sessions, e.Session); i >= 0 {
+			m.sessions[i].Title = e.Title
+		}
+	case golemclient.SessionDeleted:
+		m.applySessionDeleted(e)
+	case golemclient.SessionCompacted:
+		m.applyCompacted(e)
+	case golemclient.CompactFailed:
+		m.applyCompactFailed(e)
+	default:
+		// not a session record; nothing to fold
+	}
+}
+
+// applyCompacted folds the compaction barrier confirmation: a dim
+// summary block lands in the transcript.
+func (m *Model) applyCompacted(e golemclient.SessionCompacted) {
+	m.blocks = append(m.blocks, blockDimCompacted(e))
+}
+
+// applyCompactFailed folds a failed compaction: an error block carrying
+// the reason; the transcript is otherwise untouched.
+func (m *Model) applyCompactFailed(e golemclient.CompactFailed) {
+	m.blocks = append(m.blocks, block{
+		kind: blockError, text: "compact failed: " + e.Reason,
+	})
 }
 
 // applySessionDeleted folds the server's delete confirmation: drop the
@@ -1454,20 +1490,11 @@ type replayTurn struct {
 // mid-turn — persist-before-emit guarantees the in-flight events are
 // already stored — the turn resumes as active, so a client switching
 // away and back renders the running state instead of "idle".
-func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
+func (m *Model) replayHistory(hist golemclient.History) {
 	m.blocks = nil
 	m.follow = true
 
 	live := replayTurn{}
-
-	// A compaction barrier in the replayed batch drops every block
-	// before it (ADR-0021) — same fold rule the server applies to
-	// context.
-	applyBarrier := func(e golemclient.SessionCompacted) {
-		m.blocks = nil
-		m.blocks = append(m.blocks, blockDimCompacted(e))
-		live = replayTurn{}
-	}
 
 	for _, raw := range hist.Events {
 		ev, err := golemclient.Decode(raw)
@@ -1475,44 +1502,7 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 			continue
 		}
 
-		switch e := ev.(type) {
-		case golemclient.SessionCompacted:
-			applyBarrier(e)
-		case golemclient.UserMessage:
-			m.blocks = append(m.blocks, block{kind: blockUser, text: e.Text})
-			live = replayTurn{open: true} // a message opens its turn
-		case golemclient.TurnStart:
-			m.provider, m.modelName = e.Provider, e.Model
-			live = replayTurn{open: true}
-		case golemclient.TextDelta:
-			m.appendToAssistant(e.Delta)
-
-			live.streamedText = true
-		case golemclient.ThinkingDelta:
-			live.reasoned = true
-		case golemclient.Retry:
-			live.retry = &retryInfo{Attempt: e.Attempt, Retries: e.Retries, DelayMs: e.DelayMs}
-		case golemclient.ToolCallStart:
-			m.blocks = append(m.blocks, block{
-				kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
-			})
-
-			live.tool, live.args = e.Tool, string(e.Args)
-			live.done = nil
-		case golemclient.ToolCallEnd:
-			m.finishToolBlock(e)
-
-			live.done = &toolDone{Tool: live.tool, OK: e.OK}
-			live.tool, live.args = "", ""
-		case golemclient.ErrorEvent:
-			m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
-			live = replayTurn{} // errors end the turn
-		case golemclient.TurnEnd:
-			m.lastUsage = e.Usage
-			live = replayTurn{}
-		default:
-			// Unknown types are ignored per PROTOCOL.md forward compatibility.
-		}
+		live = m.foldReplayEvent(ev, live)
 	}
 
 	m.refreshView()
@@ -1522,7 +1512,7 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 	m.metaBusy = false // the flag scopes to this one replay
 
 	if !busy || !live.open {
-		return nil
+		return
 	}
 
 	m.turnActive = true
@@ -1531,8 +1521,63 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 	m.activeTool, m.activeArgs = live.tool, live.args
 	m.synthDone = live.done
 	m.retryState = live.retry
+}
 
-	return nil
+// foldReplayEvent folds one replayed event into transcript blocks,
+// threading the live-turn state, and returns the updated state. A
+// compaction barrier (ADR-0022) drops every block before it — the same
+// fold rule the server applies to context.
+func (m *Model) foldReplayEvent(ev any, live replayTurn) replayTurn {
+	switch e := ev.(type) {
+	case golemclient.SessionCompacted:
+		m.blocks = []block{blockDimCompacted(e)}
+		return replayTurn{}
+	case golemclient.UserMessage:
+		m.blocks = append(m.blocks, block{kind: blockUser, text: e.Text})
+		return replayTurn{open: true} // a message opens its turn
+	case golemclient.TurnStart:
+		m.provider, m.modelName = e.Provider, e.Model
+		return replayTurn{open: true}
+	case golemclient.TextDelta:
+		m.appendToAssistant(e.Delta)
+
+		live.streamedText = true
+
+		return live
+	case golemclient.ThinkingDelta:
+		live.reasoned = true
+
+		return live
+	case golemclient.Retry:
+		live.retry = &retryInfo{Attempt: e.Attempt, Retries: e.Retries, DelayMs: e.DelayMs}
+
+		return live
+	case golemclient.ToolCallStart:
+		m.blocks = append(m.blocks, block{
+			kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
+		})
+
+		live.tool, live.args = e.Tool, string(e.Args)
+		live.done = nil
+
+		return live
+	case golemclient.ToolCallEnd:
+		m.finishToolBlock(e)
+
+		live.done = &toolDone{Tool: live.tool, OK: e.OK}
+		live.tool, live.args = "", ""
+
+		return live
+	case golemclient.ErrorEvent:
+		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
+		return replayTurn{} // errors end the turn
+	case golemclient.TurnEnd:
+		m.lastUsage = e.Usage
+		return replayTurn{}
+	default:
+		// Unknown types are ignored per PROTOCOL.md forward compatibility.
+		return live
+	}
 }
 
 // refreshView pushes the rendered transcript into the viewport. While a
@@ -1629,34 +1674,25 @@ func padScreen(body string) string {
 // statusLine renders the agent-state strip: what the turn is doing (or
 // the model and last usage while idle). The interrupt hint lives on the
 // key itself, not in the strip.
-//
-// States, in priority order: a live retry outranks everything (its stall
-// is the thing needing explanation), then the in-flight tool, then
-// synthesizing (results back at the model), then reasoning, responding,
-// thinking. Reasoned-then-text shows responding — the answer has begun.
 func (m Model) statusLine() string {
+	left, token := m.activeState()
+	return m.kit.StatusBar(m.vp.Width, left, token)
+}
+
+// activeState resolves the status strip's label and token color from the
+// turn state. States, in priority order: a live retry outranks
+// everything (its stall is the thing needing explanation), then the
+// in-flight tool, then synthesizing (results back at the model), then
+// reasoning, responding, thinking. Reasoned-then-text shows responding —
+// the answer has begun.
+func (m Model) activeState() (string, kit.Token) {
+	if m.turnActive {
+		return m.activeTurnState()
+	}
+
 	left, token := "● idle", kit.Dim
 
 	switch {
-	case m.turnActive && m.retryState != nil:
-		left = fmt.Sprintf("↻ retrying %d/%d · %s",
-			m.retryState.Attempt, m.retryState.Retries, shortDur(m.retryState.DelayMs))
-		token = kit.Warn
-	case m.turnActive && m.activeTool != "":
-		left = "◆ " + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs)
-		token = kit.Tool
-	case m.turnActive && m.synthDone != nil:
-		left = "◆ " + synthMark(m.synthDone) + " · working"
-		token = kit.Accent
-	case m.turnActive && m.streamedText:
-		left = "● responding"
-		token = kit.Accent
-	case m.turnActive && m.reasoned:
-		left = "◐ reasoning"
-		token = kit.Accent
-	case m.turnActive:
-		left = "● thinking"
-		token = kit.Accent
 	case m.sessionID == "" && (len(m.pendingMsgs) > 0 || m.pendingModel != ""):
 		left = "● creating session"
 		token = kit.Accent
@@ -1664,7 +1700,27 @@ func (m Model) statusLine() string {
 		left = "● " + m.modelName + usageSummary(m.lastUsage)
 	}
 
-	return m.kit.StatusBar(m.vp.Width, left, token)
+	return left, token
+}
+
+// activeTurnState resolves the strip while a turn runs: retry, tool,
+// synthesizing, responding, reasoning, thinking — in that priority.
+func (m Model) activeTurnState() (string, kit.Token) {
+	switch {
+	case m.retryState != nil:
+		return fmt.Sprintf("↻ retrying %d/%d · %s",
+			m.retryState.Attempt, m.retryState.Retries, shortDur(m.retryState.DelayMs)), kit.Warn
+	case m.activeTool != "":
+		return "◆ " + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs), kit.Tool
+	case m.synthDone != nil:
+		return "◆ " + synthMark(m.synthDone) + " · working", kit.Accent
+	case m.streamedText:
+		return "● responding", kit.Accent
+	case m.reasoned:
+		return "◐ reasoning", kit.Accent
+	default:
+		return "● thinking", kit.Accent
+	}
 }
 
 // retryInfo snapshots one announced provider retry.

@@ -237,6 +237,8 @@ func TestLoop_ConfusedModel_StopsOnlyOnCancellation(t *testing.T) {
 				sawError = true
 			case agent.EventTurnStart, agent.EventTextDelta, agent.EventToolCallEnd, agent.EventTurnEnd:
 				// counted implicitly; not needed for the assertions
+			case agent.EventThinkingDelta, agent.EventRetry:
+				// reasoning and retry noise: not asserted here
 			}
 		}
 	}()

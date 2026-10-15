@@ -60,7 +60,7 @@ type Agent struct {
 	model    string
 	system   string
 	// extraInstructions is discovered AGENTS.md content appended after
-	// system on every request (ADR-0019).
+	// system on every request (ADR-0020).
 	extraInstructions string
 	budget            int
 }
@@ -79,7 +79,7 @@ func WithBudget(bytes int) Option {
 }
 
 // WithInstructions appends discovered AGENTS.md content after the system
-// prompt (global file first, project file last — ADR-0019). Empty strings
+// prompt (global file first, project file last — ADR-0020). Empty strings
 // are ignored.
 func WithInstructions(instructions string) Option {
 	return func(a *Agent) {

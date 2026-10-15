@@ -458,7 +458,7 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 		return
 	}
 
-	// AGENTS.md discovery (ADR-0019): fold the workspace's instruction
+	// AGENTS.md discovery (ADR-0020): fold the workspace's instruction
 	// files into the system prompt for this turn.
 	ag := agent.New(s.cfg.Provider, s.registry, model,
 		agent.WithInstructions(agent.DiscoverInstructions(sess.Cwd)))

@@ -10,7 +10,7 @@ import (
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
-// ADR-0021: compact_session summarizes folded history through a bounded
+// ADR-0022: compact_session summarizes folded history through a bounded
 // side call and appends a session_compacted barrier record. Refused
 // while a turn runs or the session holds no conversation; a failing side
 // call emits compact_failed and leaves history untouched.

@@ -16,7 +16,7 @@ type folder struct {
 
 	// compacted flags a session_compacted barrier seen while folding:
 	// everything before it dropped from context, replaced by the
-	// summary message (ADR-0021).
+	// summary message (ADR-0022).
 	compacted bool
 
 	// per-turn accumulation
@@ -114,7 +114,7 @@ func (f *folder) feedCompacted(line []byte) {
 	f.applyCompacted(ev.Summary)
 }
 
-// applyCompacted applies a compaction barrier (ADR-0021): everything
+// applyCompacted applies a compaction barrier (ADR-0022): everything
 // folded so far drops from the model's context, replaced by one
 // synthesized user message carrying the summary. Title and the turn
 // count are session facts, not context — both survive. FirstUserText

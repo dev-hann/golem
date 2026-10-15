@@ -149,6 +149,8 @@ func TestStream_NormalizesTextDeltasAndUsage(t *testing.T) {
 			t.Fatalf("unexpected error event: %v", ev.Err)
 		case llm.EventToolCalls:
 			t.Fatalf("unexpected tool calls in text test: %+v", ev.ToolCalls)
+		case llm.EventThinkingDelta, llm.EventRetry:
+			// reasoning and retry noise: not asserted here
 		}
 	}
 

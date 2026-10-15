@@ -24,7 +24,7 @@ Rules:
 - Keep technical terms, file paths, and identifiers verbatim.
 - Plain text, no markdown headings, no preamble, at most 400 words.`
 
-// Compaction bounds (ADR-0021): the side call is time-boxed and its
+// Compaction bounds (ADR-0022): the side call is time-boxed and its
 // output capped so a runaway summarizer cannot stall the session or
 // bloat the very context it is meant to shrink.
 const (
@@ -34,7 +34,7 @@ const (
 
 // handleCompact services a compact_session event: it folds the session,
 // asks the provider for a bounded summary of the conversation, and
-// appends a session_compacted barrier record (ADR-0021 — storage stays
+// appends a session_compacted barrier record (ADR-0022 — storage stays
 // append-only; the barrier, not a rewrite, drops prior context).
 func (s *Server) handleCompact(writer *connWriter, ev golemclient.CompactSession) {
 	sess, err := s.cfg.Store.Get(ev.Session)
@@ -107,6 +107,8 @@ func (s *Server) summarizeForCompact(sessionID string, sess *session.Session) (s
 			return "", fmt.Errorf("summary call failed: %w", event.Err)
 		case llm.EventTextDelta:
 			raw.WriteString(event.Delta)
+		case llm.EventThinkingDelta, llm.EventRetry:
+			// reasoning and retry noise never reach the summary
 		case llm.EventToolCalls, llm.EventUsage:
 			// a summary must not call tools; usage is irrelevant here
 		default:

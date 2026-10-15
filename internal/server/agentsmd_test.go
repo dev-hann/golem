@@ -11,7 +11,7 @@ import (
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
-// ADR-0019: AGENTS.md files discovered for a session's cwd are appended
+// ADR-0020: AGENTS.md files discovered for a session's cwd are appended
 // to the system prompt of every turn.
 
 func TestServer_TurnAppendsProjectAGENTSInstructions(t *testing.T) {

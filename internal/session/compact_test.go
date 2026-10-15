@@ -6,7 +6,7 @@ import (
 	"github.com/dev-hann/golem/internal/session"
 )
 
-// ADR-0021: a session_compacted record is a barrier — folding drops
+// ADR-0022: a session_compacted record is a barrier — folding drops
 // every conversation event before it and replaces the context with one
 // synthesized user message carrying the summary. Title and the turn
 // count survive; events after the barrier fold normally.

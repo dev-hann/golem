@@ -16,7 +16,7 @@ const InstructionsMaxBytes = 32 * 1024
 // DiscoverInstructions reads instruction files for a workspace: the
 // user-level ~/.config/golem/AGENTS.md first, then the project-local
 // <cwd>/AGENTS.md — the nearer file comes later, so it reads as the more
-// specific override (ADR-0019). Missing or blank files are skipped; each
+// specific override (ADR-0020). Missing or blank files are skipped; each
 // file is clipped at InstructionsMaxBytes. It returns "" when nothing is
 // discovered.
 func DiscoverInstructions(cwd string) string {

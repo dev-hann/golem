@@ -11,7 +11,7 @@ import (
 	"github.com/dev-hann/golem/internal/session"
 )
 
-// ADR-0021: `golem chat` /compact sends compact_session and reports the
+// ADR-0022: `golem chat` /compact sends compact_session and reports the
 // barrier; compacting an empty (never-spoken) session reports the
 // refusal without crashing.
 

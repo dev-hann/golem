@@ -82,6 +82,9 @@ func renderEvent(stdout, stderr io.Writer, event agent.Event) error {
 		return err
 	case agent.EventTurnStart:
 		return nil
+	case agent.EventThinkingDelta, agent.EventRetry:
+		// reasoning and retry progress stay silent in the one-shot CLI
+		return nil
 	default:
 		return nil
 	}

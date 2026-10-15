@@ -1039,7 +1039,7 @@ func TestServer_RetryEventReachesClient(t *testing.T) {
 
 	// Sleep short-circuits so the test never waits the real backoff.
 	policy := llm.DefaultRetryPolicy()
-	policy.Sleep = func(ctx context.Context, d time.Duration) bool { return true }
+	policy.Sleep = func(_ context.Context, _ time.Duration) bool { return true }
 
 	h := newHarness(t, llm.Retrying(inner, policy))
 	sess := h.createSession()

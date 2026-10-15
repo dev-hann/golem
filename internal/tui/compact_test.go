@@ -8,7 +8,7 @@ import (
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
-// ADR-0021: /compact in the composer triggers a compact_session event;
+// ADR-0022: /compact in the composer triggers a compact_session event;
 // the barrier record renders as a dim summary block, both live and in
 // history replay; a failure renders as an error block.
 

@@ -29,7 +29,7 @@ Merge rules: tables (maps) deep-merge; arrays (slices) are **replaced**, not con
 
 ## Agent instructions (AGENTS.md)
 
-Every turn appends instruction files to the system prompt (ADR-0019), in this order:
+Every turn appends instruction files to the system prompt (ADR-0020), in this order:
 
 1. `~/.config/golem/AGENTS.md` — machine-level rules (respects `XDG_CONFIG_HOME`).
 2. `<session cwd>/AGENTS.md` — project rules; read last, so nearer overrides read as more specific.

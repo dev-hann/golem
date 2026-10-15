@@ -24,7 +24,7 @@ const (
 // WebFetchTool fetches one URL over HTTP(S) with GET and returns its
 // body as text: HTML collapses to visible text (script/style stripped),
 // everything else passes through. It is read-only — no headers, no
-// cookies, no credentials (ADR-0020).
+// cookies, no credentials (ADR-0021).
 type WebFetchTool struct{}
 
 // webFetchArgs are the model-facing arguments of WebFetchTool.
