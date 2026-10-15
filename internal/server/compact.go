@@ -144,8 +144,6 @@ func (s *Server) compactSession(
 		return golemclient.SessionCompacted{}, err
 	}
 
-	s.cfg.Store.Invalidate(sessionID)
-
 	return record, nil
 }
 

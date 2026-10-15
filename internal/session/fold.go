@@ -37,6 +37,41 @@ func newFolder() *folder {
 	return &folder{}
 }
 
+// clone copies the folder's folded state (a shallow copy: message
+// strings are immutable once folded; slices are copied so appends to
+// the clone never alias the live folder's). Per-turn accumulation
+// buffers are copied too, so finishing a partial turn in the clone
+// cannot seal the live folder's open turn.
+func (f *folder) clone() *folder {
+	c := &folder{
+		messages:      make([]llm.Message, len(f.messages)),
+		turns:         f.turns,
+		title:         f.title,
+		firstUserText: f.firstUserText,
+		sawMeta:       f.sawMeta,
+		cwd:           f.cwd,
+		compacted:     f.compacted,
+		asstText:      f.asstText,
+	}
+	copy(c.messages, f.messages)
+
+	if f.turnUser != nil {
+		c.turnUser = &llm.Message{Role: f.turnUser.Role, Text: f.turnUser.Text}
+	}
+
+	if len(f.asstCalls) > 0 {
+		c.asstCalls = make([]llm.ToolCall, len(f.asstCalls))
+		copy(c.asstCalls, f.asstCalls)
+	}
+
+	if len(f.toolResults) > 0 {
+		c.toolResults = make([]llm.ToolResult, len(f.toolResults))
+		copy(c.toolResults, f.toolResults)
+	}
+
+	return c
+}
+
 // feed folds one raw JSON line. Unknown event types are skipped per
 // PROTOCOL.md forward-compatibility rules.
 func (f *folder) feed(line []byte) {

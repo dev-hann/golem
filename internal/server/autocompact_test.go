@@ -204,8 +204,6 @@ func appendWire(t *testing.T, h *harness, id string, lines []string) {
 			t.Fatalf("append wire line: %v", err)
 		}
 	}
-
-	h.store.Invalidate(id)
 }
 
 // TestAutoCompact_InterruptCancelsSummarySideCall reproduces the read-loop

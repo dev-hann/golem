@@ -256,7 +256,7 @@ Status: implemented — parser, renderer, and streaming rules extended; `make al
 
 ---
 
-## Phase 7 — Hardening & release prep (partial: release pipeline + version/update-check landed 2026-10-13)
+## Phase 7 — Hardening & release prep (partial: release pipeline + version/update-check landed 2026-10-13; replay benchmark landed 2026-10-16)
 
 ### Deliverables
 
@@ -274,7 +274,7 @@ Status: implemented — parser, renderer, and streaming rules extended; `make al
 
 - `TestMemLimit_SetsGOMEMLIMIT`
 - `TestSessionCache_BoundRespected`
-- `TestReplayBenchmark_500Turns` (Go benchmark with budget assertion)
+- `TestReplayBenchmark_500Turns` (Go benchmark with budget assertion) — done, 2026-10-16 (ADR-0029; ~3 ms)
 
 ---
 
@@ -286,6 +286,7 @@ Status: implemented — parser, renderer, and streaming rules extended; `make al
 - 2026-10-15 — Status strip animation: the leading glyph of every in-progress state is now the animated braille spinner (100 ms frames) — idle keeps the static `●`. The picker's ticker was generalized into one shared animation ticker (frame counter + generation guard) driving both surfaces; `turn_start`, a busy-session resume, and opening a picker with running sessions arm it, and turn end orphans the generation.
 - 2026-10-15 — TUI session header: a one-row title strip above the transcript (title + cwd tail; dim placeholders for the no-session and untitled states), always rendered on terminals ≥ 16 rows and dropped below that floor (ADR-0024). `session_meta` gains an optional `title` field so a loading client labels the session at once; the header also updates from `session_title` events and optimistic picker renames.
 - 2026-10-15 — TUI sticky question line adopts push-out semantics (ADR-0028): the pin holds the latest user bar pushed above the *rendered window's top* — submitting the next question no longer clears it (the old rule cleared at the turn-start follow snap with a one-row jump); the pin swaps in place when streamed content pushes the new bar past the top.
+- 2026-10-16 — Session cache folds incrementally (ADR-0029): a cached session keeps its live fold and a byte frontier, so `Get` after appends folds only the new lines instead of reloading the whole file; `List` summaries cache per file by (size, mtime). The server's post-turn/rename/compaction `Invalidate` calls are gone — `Get` is always fresh. A 500-turn cold replay folds in ~3 ms (Phase 7 budget 100 ms, `TestReplayBenchmark_500Turns`).
 
 ## Explicitly deferred (needs new ADR before starting)
 

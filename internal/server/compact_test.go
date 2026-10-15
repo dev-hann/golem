@@ -112,7 +112,8 @@ func TestCompact_AppendsBarrierAndReplacesHistory(t *testing.T) {
 
 	// The barrier record is persisted: a reloaded session folds to the
 	// summary plus nothing else (the post-compact turn hasn't run yet).
-	h.store.Invalidate(sess)
+	// No Invalidate needed — Get resumes from the folded frontier
+	// (ADR-0029).
 	reloaded, err := h.store.Get(sess)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
@@ -206,7 +207,6 @@ func TestCompact_FailedSideCallEmitsCompactFailed(t *testing.T) {
 	}
 
 	// History is untouched: no barrier record was appended.
-	h.store.Invalidate(sess)
 	reloaded, err := h.store.Get(sess)
 	if err != nil {
 		t.Fatalf("reload: %v", err)

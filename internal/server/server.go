@@ -361,8 +361,6 @@ func (s *Server) handleRenameSession(writer *connWriter, ev golemclient.RenameSe
 		return
 	}
 
-	s.cfg.Store.Invalidate(ev.Session)
-
 	writer.send(golemclient.SessionTitle{
 		Type: golemclient.TypeSessionTitle, Session: ev.Session, Title: title,
 	})
@@ -471,8 +469,6 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 	defer s.endTurn(msg.Session)
 
 	turnID := newTurnID()
-
-	defer s.cfg.Store.Invalidate(msg.Session)
 
 	model := s.turnModel(msg.Session)
 

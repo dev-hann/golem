@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -44,15 +45,42 @@ type Store struct {
 	dir       string
 	maxCached int
 
-	mu      sync.Mutex
-	cache   map[string]*cacheEntry
-	deleted map[string]struct{} // deleted session ids; Append refuses them forever
+	mu        sync.Mutex
+	cache     map[string]*cacheEntry
+	summaries map[string]summaryInfo // List summaries keyed by session id
+	deleted   map[string]struct{}    // deleted session ids; Append refuses them forever
 }
 
-// cacheEntry tracks recency for eviction.
+// cacheEntry is the cached fold of one session: the live folder, the
+// folded frontier (byte offset of the last complete line), and any
+// unterminated trailing bytes. lastUsed drives eviction.
 type cacheEntry struct {
-	sess     *Session
+	fold     *folder
+	offset   int64
+	tail     []byte // unterminated trailing bytes, folded into snapshots only
 	lastUsed time.Time
+}
+
+// snapshot returns a Session view of the entry with any unterminated
+// tail folded in. The folder is cloned first: building a view closes the
+// trailing partial turn, which must not mutate the live folder (the tail
+// refolds from the frontier once its newline lands).
+func (e *cacheEntry) snapshot(id string) *Session {
+	fold := e.fold.clone()
+	if len(e.tail) > 0 {
+		fold.feed(e.tail)
+	}
+
+	return sessionFromFolder(id, fold)
+}
+
+// sessionFromFolder builds the Session view of a folded file.
+func sessionFromFolder(id string, fold *folder) *Session {
+	return &Session{
+		ID: id, Created: ulidTime(id),
+		Cwd: fold.cwd, Messages: fold.history(),
+		Turns: fold.turns, Title: fold.title, FirstUserText: fold.firstUserText,
+	}
 }
 
 // ErrDeleted reports an Append to a deleted session: the write is
@@ -72,7 +100,8 @@ func NewStore(dir string, cacheSize int) (*Store, error) {
 
 	return &Store{
 		dir: dir, maxCached: cacheSize,
-		cache: make(map[string]*cacheEntry), deleted: make(map[string]struct{}),
+		cache: make(map[string]*cacheEntry), summaries: make(map[string]summaryInfo),
+		deleted: make(map[string]struct{}),
 	}, nil
 }
 
@@ -92,15 +121,37 @@ func (s *Store) Create(cwd string) (*Session, error) {
 		return nil, err
 	}
 
-	sess := &Session{ID: id, Cwd: cwd, Created: created}
+	fold := foldOfMeta(id, cwd)
+
+	sess := sessionFromFolder(id, fold)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.cache[sess.ID] = &cacheEntry{sess: sess, lastUsed: time.Now()}
+	s.cache[sess.ID] = &cacheEntry{fold: fold, lastUsed: time.Now()}
 	s.evictLocked()
 
 	return sess, nil
+}
+
+// foldOfMeta is the folder carrying Create's just-written header line,
+// built separately so Create stays a single locked section.
+func foldOfMeta(id, cwd string) *folder {
+	fold := newFolder()
+
+	meta, err := json.Marshal(map[string]any{
+		"type":    "session_meta",
+		"session": id,
+		"cwd":     cwd,
+		"created": ulidTime(id).UTC().Format(time.RFC3339),
+	})
+	if err != nil {
+		return fold
+	}
+
+	fold.feed(append(meta, '\n'))
+
+	return fold
 }
 
 // RawEvents returns the stored JSONL lines verbatim (for history replay).
@@ -147,6 +198,7 @@ func (s *Store) Invalidate(id string) {
 	defer s.mu.Unlock()
 
 	delete(s.cache, id)
+	delete(s.summaries, id)
 }
 
 // Delete removes a session outright: the cache entry and the JSONL file.
@@ -167,6 +219,7 @@ func (s *Store) Delete(id string) error {
 	defer s.mu.Unlock()
 
 	delete(s.cache, id)
+	delete(s.summaries, id)
 
 	path := s.path(id)
 	if err := os.Remove(path); err != nil {
@@ -183,8 +236,10 @@ func (s *Store) Dir() string {
 	return s.dir
 }
 
-// Get returns a session by id, loading and folding its JSONL file on cache
-// miss.
+// Get returns a session by id, loading and folding its JSONL file on
+// cache miss. On a hit the fold resumes from the entry's byte frontier,
+// so the returned session always reflects every appended line
+// (ADR-0029).
 func (s *Store) Get(id string) (*Session, error) {
 	if !validID(id) {
 		return nil, fmt.Errorf("session: invalid id %q", id)
@@ -193,21 +248,119 @@ func (s *Store) Get(id string) (*Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if entry, ok := s.cache[id]; ok {
-		entry.lastUsed = time.Now()
-		return entry.sess, nil
+	entry, ok := s.cache[id]
+	if !ok {
+		loaded, err := s.loadEntry(id)
+		if err != nil {
+			return nil, err
+		}
+
+		s.cache[id] = loaded
+		s.evictLocked()
+
+		entry = loaded
 	}
 
-	sess, err := s.load(id)
-	if err != nil {
-		return nil, err
+	if err := s.resumeEntry(id, entry); err != nil {
+		// The file changed shape under the cache (shrank or vanished);
+		// fall back to a full reload.
+		fresh, err := s.loadEntry(id)
+		if err != nil {
+			return nil, err
+		}
+
+		s.cache[id] = fresh
+		entry = fresh
 	}
 
-	s.cache[id] = &cacheEntry{sess: sess, lastUsed: time.Now()}
-	s.evictLocked()
+	entry.lastUsed = time.Now()
 
-	return sess, nil
+	return entry.snapshot(id), nil
 }
+
+// resumeEntry folds every newly complete line since the entry's frontier,
+// keeping Get fresh on cache hits (ADR-0029). The frontier advances past
+// newlines only: an unterminated trailing line waits in entry.tail and
+// refolds from the frontier once its newline lands, so a partially
+// written line is never consumed twice. A file shorter than the frontier
+// (external rewrite) reports os.ErrNotExist to force a reload.
+func (s *Store) resumeEntry(id string, entry *cacheEntry) error {
+	path := s.path(id)
+
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stating %s: %w", path, err)
+	}
+
+	if info.Size() < entry.offset {
+		return fmt.Errorf("%s shrank from %d to %d bytes: %w",
+			path, entry.offset, info.Size(), os.ErrNotExist)
+	}
+
+	if info.Size() == entry.offset {
+		return nil // unchanged
+	}
+
+	f, err := os.Open(path) //nolint:gosec // id validated against ULID format
+	if err != nil {
+		return fmt.Errorf("opening %s: %w", path, err)
+	}
+	defer f.Close() //nolint:errcheck // read-only handle
+
+	if _, err := f.Seek(entry.offset, io.SeekStart); err != nil {
+		return fmt.Errorf("seeking %s to %d: %w", path, entry.offset, err)
+	}
+
+	tail, offset, err := foldCompleteLines(f, entry.fold)
+	if err != nil {
+		return err
+	}
+
+	entry.tail, entry.offset = tail, entry.offset+offset
+
+	return nil
+}
+
+// maxLineBytes bounds one stored line while folding (the append-side
+// scanner buffers use the same cap).
+const maxLineBytes = 4 * 1024 * 1024
+
+// foldCompleteLines feeds the folder every newline-terminated line from
+// r and returns the trailing unterminated bytes plus the byte count of
+// the complete lines consumed (the caller adds its base offset).
+// Lines longer than maxLineBytes stop the fold with an error rather
+// than growing without bound.
+func foldCompleteLines(r io.Reader, fold *folder) (tail []byte, complete int64, err error) {
+	reader := bufio.NewReaderSize(r, lineReadChunk)
+
+	var completed int64
+
+	for {
+		line, err := reader.ReadBytes('\n')
+		if len(line) > maxLineBytes {
+			return nil, 0, fmt.Errorf("line exceeds %d bytes: %w", maxLineBytes, bufio.ErrBufferFull)
+		}
+
+		if err == nil {
+			completed += int64(len(line))
+			fold.feed(line)
+
+			continue
+		}
+
+		if errors.Is(err, io.EOF) {
+			tail := make([]byte, len(line))
+			copy(tail, line)
+
+			return tail, completed, nil
+		}
+
+		return nil, 0, fmt.Errorf("reading lines: %w", err)
+	}
+}
+
+// lineReadChunk is the buffering chunk for line reads while folding.
+const lineReadChunk = 64 * 1024
 
 // Append writes one event as a JSON line to the session file. The in-memory
 // copy, if cached, is not modified here; the cache is invalidated by the
@@ -282,12 +435,17 @@ type Summary struct {
 	LastActive time.Time
 }
 
-// List summarizes all sessions, most recently active first.
+// List summarizes all sessions, most recently active first. Summaries
+// are cached per file (size+mtime), so refreshing an unchanged listing
+// costs only directory stats.
 func (s *Store) List() ([]Summary, error) {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
 		return nil, fmt.Errorf("session: reading dir: %w", err)
 	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	var summaries []Summary
 
@@ -317,7 +475,9 @@ func (s *Store) List() ([]Summary, error) {
 	return summaries, nil
 }
 
-// summarize builds one Summary from disk.
+// summarize builds one Summary for a session file, caching by
+// (size, mtime) so a refreshed listing does not refold unchanged files.
+// The caller holds s.mu.
 func (s *Store) summarize(id string) (Summary, error) {
 	path := s.path(id)
 
@@ -326,25 +486,43 @@ func (s *Store) summarize(id string) (Summary, error) {
 		return Summary{}, fmt.Errorf("stating %s: %w", path, err)
 	}
 
-	sess, err := s.load(id)
+	if cached, ok := s.summaries[id]; ok && cached.size == info.Size() && cached.mtime.Equal(info.ModTime()) {
+		return cached.summary, nil
+	}
+
+	entry, err := s.loadEntry(id)
 	if err != nil {
 		return Summary{}, err
 	}
 
-	return Summary{
+	sess := entry.snapshot(id)
+
+	summary := Summary{
 		ID:         id,
 		Title:      sess.Title,
 		Cwd:        sess.Cwd,
 		Created:    sess.Created,
 		Turns:      sess.Turns,
 		LastActive: info.ModTime(),
-	}, nil
+	}
+
+	s.summaries[id] = summaryInfo{summary: summary, size: info.Size(), mtime: info.ModTime()}
+
+	return summary, nil
 }
 
-// load reads and folds a session file in one pass: conversation state
-// and identity (cwd, from the session_meta header line) come out of the
-// same scan.
-func (s *Store) load(id string) (*Session, error) {
+// summaryInfo is one cached List summary plus the file identity it was
+// built from.
+type summaryInfo struct {
+	summary Summary
+	size    int64
+	mtime   time.Time
+}
+
+// loadEntry fully reads and folds a session file in one pass:
+// conversation state and identity (cwd, from the session_meta header
+// line) come out of the same scan.
+func (s *Store) loadEntry(id string) (*cacheEntry, error) {
 	path := s.path(id)
 
 	f, err := os.Open(path) //nolint:gosec // id validated against ULID format
@@ -353,26 +531,14 @@ func (s *Store) load(id string) (*Session, error) {
 	}
 	defer f.Close() //nolint:errcheck // read-only handle
 
-	sess := &Session{ID: id, Created: ulidTime(id)}
 	fold := newFolder()
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 
-	for scanner.Scan() {
-		fold.feed(scanner.Bytes())
+	tail, offset, err := foldCompleteLines(f, fold)
+	if err != nil {
+		return nil, err
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("session: scanning %s: %w", path, err)
-	}
-
-	sess.Cwd = fold.cwd
-	sess.Messages = fold.history()
-	sess.Turns = fold.turns
-	sess.Title = fold.title
-	sess.FirstUserText = fold.firstUserText
-
-	return sess, nil
+	return &cacheEntry{fold: fold, offset: offset, tail: tail, lastUsed: time.Now()}, nil
 }
 
 // path is the JSONL file for a session id.

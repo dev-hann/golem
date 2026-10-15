@@ -47,7 +47,7 @@ golem is a coding agent split into a long-lived **agent server** and thin **clie
 | `internal/agent` | implemented | Agent loop: send context → receive tool calls → dispatch tools → append results → repeat until turn end. | `internal/llm`, `internal/tools`, `internal/session` |
 | `internal/tools` | implemented | Built-in tools: read, write, edit, bash, grep, glob. Pure execution, no LLM knowledge. | stdlib |
 | `internal/server` | implemented | Transport listeners (unix socket, TCP, WS later), connection handling, event routing. A turn runs entirely in its own goroutine — only the one-turn-per-session check happens on the connection's read loop, so a slow pre-turn compaction never delays reading interrupts (ADR-0025). | `internal/agent`, `internal/session`, `pkg/golemclient` |
-| `internal/session` | implemented | Append-only JSONL session store + in-memory cache with bounded size. Replay on load. | stdlib |
+| `internal/session` | implemented | Append-only JSONL session store + in-memory cache with bounded size. A cached session keeps its live fold and byte frontier, so a `Get` after appends folds only the new lines (ADR-0029); `List` summaries cache per file (size+mtime). Replay on load. | stdlib |
 | `internal/mcp` | planned (phase 6) | MCP client: process lifecycle, JSON-RPC over stdio, tool discovery. | stdlib (or MCP Go SDK — ADR required to adopt) |
 | `internal/config` | partial | Layered TOML config load & merge. Bootstrapped: defaults, global file (`[provider]` sections), `GOLEM_PROVIDER`/`GOLEM_MODEL` env overrides, `ref:` secret resolution. Remaining sections and precedence layers land in phase 4–5. | stdlib, `BurntSushi/toml` |
 | `pkg/golemclient` | implemented | **Public** client library. Protocol types + a typed client over any transport. Future apps build on this. | stdlib only — never `internal/*` |
@@ -85,7 +85,7 @@ Hard rules:
 
 - Storage: `~/.local/share/golem/sessions/<id>.jsonl` — one JSON event per line, append-only.
 - Replay = read file, fold events into conversation state. No second format, no migration.
-- In-memory cache holds the N most recently active sessions (config `server.session_cache`); others load on demand.
+- In-memory cache holds the N most recently active sessions (config `server.session_cache`); others load on demand. A cache hit is not a stale copy: the entry keeps its live fold and byte frontier, and `Get` folds only the newly appended lines (ADR-0029) — the server needs no post-turn invalidation.
 - Session IDs: ULIDs (sortable, no coordination).
 
 ## Transport & protocol
