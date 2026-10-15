@@ -65,9 +65,17 @@ func TestServer_TurnWorksWithoutAGENTSFiles(t *testing.T) {
 	}
 	h.expectType(golemclient.TypeTurnEnd)
 
-	// No AGENTS.md anywhere: the prompt stays the built-in one.
-	if got := provider.lastTurnRequest().SystemPrompt; strings.Contains(got, "AGENTS.md") {
+	// No AGENTS.md anywhere: the prompt stays the built-in one plus the
+	// session's environment block (ADR-0031); no AGENTS.md line.
+	got := provider.lastTurnRequest().SystemPrompt
+	if strings.Contains(got, "AGENTS.md") {
 		t.Errorf("system prompt must stay built-in, got:\n%s", got)
+	}
+	if !strings.Contains(got, "Working directory") {
+		t.Errorf("system prompt missing environment block, got:\n%s", got)
+	}
+	if !strings.Contains(got, h.root) {
+		t.Errorf("environment block must name the workspace root, got:\n%s", got)
 	}
 }
 

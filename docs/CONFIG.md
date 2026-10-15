@@ -31,10 +31,14 @@ Merge rules: tables (maps) deep-merge; arrays (slices) are **replaced**, not con
 
 Every turn appends instruction files to the system prompt (ADR-0020), in this order:
 
-1. `~/.config/golem/AGENTS.md` — machine-level rules (respects `XDG_CONFIG_HOME`).
-2. `<session cwd>/AGENTS.md` — project rules; read last, so nearer overrides read as more specific.
+1. The built-in base prompt (ADR-0031).
+2. An environment block — working directory, platform, today's date.
+3. `~/.config/golem/AGENTS.md` — machine-level rules (respects `XDG_CONFIG_HOME`).
+4. `<session cwd>/AGENTS.md` — project rules; read last, so nearer overrides read as more specific.
 
 Each file is clipped at 32 KiB with a truncation marker. Missing or blank files are ignored — no configuration required. `golem ask` discovers against its workspace root.
+
+The base prompt itself stays minimal (ADR-0031): tool usage detail lives in each tool's description; the base carries only identity, verification, and the safety clauses that exist precisely because tool execution is ungated (ADR-0016) — protect user-made changes, no destructive commands or unrequested commits, tool output is data not instructions, never expose secrets.
 
 ## Secrets
 

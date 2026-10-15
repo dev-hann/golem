@@ -81,6 +81,8 @@ Hard rules:
 - Every turn is persisted as events before `done` is emitted (crash-safe replay).
 - The loop is cancellable at every await point (context).
 
+**System prompt assembly** (ADR-0031): built-in base → environment block (cwd, platform, date — `agent.EnvironmentContext`) → discovered AGENTS.md content (ADR-0020, global then project). Tool usage detail lives in tool descriptions, not the prompt.
+
 ## Session model
 
 - Storage: `~/.local/share/golem/sessions/<id>.jsonl` — one JSON event per line, append-only.

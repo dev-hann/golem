@@ -546,8 +546,10 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 	}
 
 	// AGENTS.md discovery (ADR-0020): fold the workspace's instruction
-	// files into the system prompt for this turn.
+	// files into the system prompt for this turn. The environment block
+	// (ADR-0031) sits between the base prompt and the instructions.
 	ag := agent.New(s.cfg.Provider, s.registry, model,
+		agent.WithEnvironment(agent.EnvironmentContext(sess.Cwd, time.Now())),
 		agent.WithInstructions(agent.DiscoverInstructions(sess.Cwd)))
 
 	firstTurn := sess.Turns == 0 && sess.Title == ""

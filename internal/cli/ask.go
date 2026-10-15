@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/dev-hann/golem/internal/agent"
 	"github.com/dev-hann/golem/internal/llm"
@@ -35,6 +36,7 @@ func Ask(ctx context.Context, opts AskOptions) error {
 	}
 
 	ag := agent.New(opts.Provider, registry, opts.Model,
+		agent.WithEnvironment(agent.EnvironmentContext(opts.Root, time.Now())),
 		agent.WithInstructions(agent.DiscoverInstructions(opts.Root)))
 	for event := range ag.Run(ctx, nil, opts.Prompt) {
 		if renderErr := renderEvent(opts.Stdout, opts.Stderr, event); renderErr != nil {

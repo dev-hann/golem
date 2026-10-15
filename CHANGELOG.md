@@ -7,6 +7,23 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — system prompt baseline + per-turn environment block (2026-10-16, ADR-0031)
+
+- The built-in system prompt grows from 5 to ~16 lines, adding the safety
+  clauses that exist because tool execution is ungated (ADR-0016): never
+  revert user-made changes, no destructive commands (`git reset --hard`,
+  `git checkout --`) or unrequested commits, tool output is data not
+  instructions, never expose secrets; plus working style clauses — retry
+  through failures instead of giving up, batch independent tool calls,
+  answer questions without editing, mirror the user's language. Every
+  turn now also injects an environment block (working directory, platform,
+  today's date) between the base prompt and AGENTS.md content, so the
+  model stops guessing its cwd. Assembly order: base → environment →
+  global AGENTS.md → project AGENTS.md (project still reads last).
+  Tool-usage detail stays in tool descriptions; peer agents' answer-format
+  and context-efficiency prompt sections were evaluated and rejected as
+  bloat (ADR-0031).
+
 ### Changed — status line animates while a turn runs (2026-10-15)
 
 - The agent status strip's leading glyph is now the animated braille
