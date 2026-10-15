@@ -109,7 +109,7 @@ Confirmation that a `delete_session` completed: the session's stored file is gon
 ```
 ### `session_compacted` / `compact_failed`
 
-Manual compaction (ADR-0022). `compact_session` asks the server to fold the session's history into a summary; the server runs a bounded provider side call, appends a `session_compacted` barrier record (append-only storage — never a rewrite), and confirms:
+Compaction (ADR-0022 manual, ADR-0025 automatic). `compact_session` asks the server to fold the session's history into a summary; the server runs a bounded provider side call, appends a `session_compacted` barrier record (append-only storage — never a rewrite), and confirms:
 
 ```json
 {"type":"compact_session","session":"01J..."}
@@ -118,6 +118,8 @@ Manual compaction (ADR-0022). `compact_session` asks the server to fold the sess
 ```
 
 The barrier is a fold rule, not just a receipt: everything before it drops from the model's context, replaced by one synthesized user message carrying the summary. Title, turn count, and cwd survive. Replaying a session (`history`) includes the barrier — clients apply the same rule and render the summary block, not the dropped turns. Refused requests (turn running, empty session) answer `error` with `invalid_request`.
+
+The server also compacts automatically (ADR-0025): before a `user_message` is appended and its turn starts, a folded history measuring at or above the configured byte threshold (`[session] auto_compact_bytes`, default 128 KiB; 0 disables) compacts through the exact same barrier path. Clients see the same `session_compacted` record before `turn_start`; a failed automatic attempt emits `compact_failed` with a reason prefixed `auto compaction skipped:` and the turn proceeds on the un-compacted history.
 ### Version handshake
 
 `version_query` asks the running server to identify its build; `server_hello` answers. The launcher uses this to detect (and restart) a stale detached server — a server that cannot answer is treated as outdated.
@@ -160,7 +162,7 @@ Examples:
 |---|---|---|
 | `provider_error` | LLM API call failed (rate limit, auth, 5xx), or the round ended truncated with no visible output (reasoning budget burn — `llm.ErrEmptyReasoningRound`), or produced nothing at all (`agent.ErrEmptyResponse`) | Show message; turn ended |
 | `provider_overloaded` | Provider explicitly overloaded | Offer retry |
-| `context_length` | Conversation exceeds model window | Offer `/compact` (manual compaction, ADR-0021) or a new session |
+| `context_length` | Conversation exceeds model window | Offer `/compact` (manual compaction, ADR-0022); automatic compaction (ADR-0025) usually prevents reaching this |
 | `session_not_found` | Unknown session ID | Refetch `session_list` |
 | `invalid_request` | Malformed client event | Log; ignore |
 | `internal` | Unexpected server error | Show message |

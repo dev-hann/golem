@@ -35,6 +35,10 @@ type Config struct {
 	// Version labels this build for client freshness checks; "" hides
 	// the server from version handshake (development default).
 	Version string
+	// AutoCompactBytes is the folded-history byte threshold that triggers
+	// an automatic compaction before a turn starts (ADR-0025). 0 disables
+	// automatic compaction; manual /compact stays available.
+	AutoCompactBytes int
 }
 
 // Server accepts client connections and runs agent turns.
@@ -263,6 +267,13 @@ func (s *Server) handleUserMessage(writer *connWriter, ev golemclient.UserMessag
 		return
 	}
 	// Persist the user message before any turn events reference it.
+	// ADR-0025: the auto-compaction trigger runs first, so any barrier
+	// lands before this line and the fresh question always survives the
+	// fold. The turn is already reserved (beginTurn), so interrupts
+	// cancel the summary side call, and manual /compact sees the session
+	// busy — one compaction at a time.
+	s.autoCompact(turnCtx, writer, ev.Session)
+
 	if err := s.cfg.Store.Append(ev.Session, ev); err != nil {
 		cancel()
 		s.endTurn(ev.Session)

@@ -287,6 +287,27 @@ func (s *Store) FinishTurn(id string) error {
 	return nil
 }
 
+// ContextBytes returns the byte size of the folded conversation as the
+// model will see it: message text, tool-call argument payloads, and tool
+// result outputs (ADR-0025 — the auto-compaction trigger measures the
+// history a turn is about to replay).
+func (s *Session) ContextBytes() int {
+	total := 0
+	for _, m := range s.Messages {
+		total += len(m.Text)
+
+		for _, call := range m.ToolCalls {
+			total += len(call.Args)
+		}
+
+		for _, result := range m.ToolResults {
+			total += len(result.Output)
+		}
+	}
+
+	return total
+}
+
 // Summary describes one session for listings.
 type Summary struct {
 	ID         string

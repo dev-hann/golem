@@ -20,7 +20,7 @@ You output ONLY the summary. Nothing else.
 
 Rules:
 - Capture what was asked, what was done (files, commands, decisions), and
-  the current state and next steps, in that order.
+the current state and next steps, in that order.
 - Keep technical terms, file paths, and identifiers verbatim.
 - Plain text, no markdown headings, no preamble, at most 400 words.`
 
@@ -31,6 +31,13 @@ const (
 	compactTimeout  = 60 * time.Second
 	compactMaxBytes = 16 * 1024
 )
+
+// DefaultAutoCompactBytes is the folded-history size that triggers an
+// automatic compaction before a turn starts (ADR-0025). 128 KiB keeps
+// roughly 30k tokens of context — large enough for normal work, small
+// enough that reasoning-heavy models never see the runaway histories
+// that burn their output budget (ADR-0023).
+const DefaultAutoCompactBytes = 128 * 1024
 
 // handleCompact services a compact_session event: it folds the session,
 // asks the provider for a bounded summary of the conversation, and
@@ -58,7 +65,7 @@ func (s *Server) handleCompact(writer *connWriter, ev golemclient.CompactSession
 		return
 	}
 
-	summary, err := s.summarizeForCompact(ev.Session, sess)
+	record, err := s.compactSession(ev.Session, sess)
 	if err != nil {
 		// The session is untouched — no barrier record was appended.
 		writer.send(golemclient.CompactFailed{
@@ -68,20 +75,75 @@ func (s *Server) handleCompact(writer *connWriter, ev golemclient.CompactSession
 		return
 	}
 
-	record := golemclient.SessionCompacted{
-		Type: golemclient.TypeSessionCompacted, Session: ev.Session, Summary: summary,
+	writer.send(record)
+}
+
+// autoCompact runs the ADR-0025 pre-turn trigger: when the folded
+// history measures at or above the configured threshold, compact it
+// through the same barrier path manual /compact uses. The turn always
+// proceeds: a failed compaction emits compact_failed and the turn runs
+// on the un-compacted history (compaction is an optimization, never a
+// gate). The caller invokes this before appending the pending user
+// message, so that message lands after any barrier and always survives.
+func (s *Server) autoCompact(ctx context.Context, writer *connWriter, sessionID string) {
+	if s.cfg.AutoCompactBytes <= 0 {
+		return
 	}
-	if err := s.cfg.Store.Append(ev.Session, record); err != nil {
+
+	// The summary side call must die with the turn: an interrupt (or
+	// delete_session's cancel) cannot leave it streaming in the
+	// background.
+	if ctx.Err() != nil {
+		return
+	}
+
+	sess, err := s.cfg.Store.Get(sessionID)
+	if err != nil {
+		// A load failure cannot compact, but must not kill the turn;
+		// runTurn re-reads the session and reports load errors there.
+		return
+	}
+
+	if sess.ContextBytes() < s.cfg.AutoCompactBytes {
+		return
+	}
+
+	record, err := s.compactSession(sessionID, sess)
+	if err != nil {
 		writer.send(golemclient.CompactFailed{
-			Type: golemclient.TypeCompactFailed, Session: ev.Session, Reason: err.Error(),
+			Type: golemclient.TypeCompactFailed, Session: sessionID,
+			Reason: "auto compaction skipped: " + err.Error(),
 		})
 
 		return
 	}
 
-	s.cfg.Store.Invalidate(ev.Session)
-
 	writer.send(record)
+}
+
+// compactSession summarizes a session's folded history and appends the
+// session_compacted barrier record (the shared body of the manual and
+// automatic paths, ADR-0022/ADR-0025). The cache is invalidated so the
+// next Get folds from disk.
+func (s *Server) compactSession(
+	sessionID string,
+	sess *session.Session,
+) (golemclient.SessionCompacted, error) {
+	summary, err := s.summarizeForCompact(sessionID, sess)
+	if err != nil {
+		return golemclient.SessionCompacted{}, err
+	}
+
+	record := golemclient.SessionCompacted{
+		Type: golemclient.TypeSessionCompacted, Session: sessionID, Summary: summary,
+	}
+	if err := s.cfg.Store.Append(sessionID, record); err != nil {
+		return golemclient.SessionCompacted{}, err
+	}
+
+	s.cfg.Store.Invalidate(sessionID)
+
+	return record, nil
 }
 
 // summarizeForCompact runs the bounded summary side call over a

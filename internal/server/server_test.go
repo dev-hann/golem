@@ -110,7 +110,16 @@ func shortTempDir(t *testing.T) string {
 	return dir
 }
 
+// newHarness wires a server over a unix socket and returns a connected
+// client.
 func newHarness(t *testing.T, provider llm.Provider) *harness {
+	t.Helper()
+	return newHarnessWithConfig(t, provider, server.Config{})
+}
+
+// newHarnessWithConfig is newHarness with server.Config overrides
+// merged in (tests configure ADR-0025's auto-compaction threshold).
+func newHarnessWithConfig(t *testing.T, provider llm.Provider, overrides server.Config) *harness {
 	t.Helper()
 	root := t.TempDir()
 	storeDir := filepath.Join(t.TempDir(), "sessions")
@@ -122,6 +131,23 @@ func newHarness(t *testing.T, provider llm.Provider) *harness {
 		Provider: provider, Model: "stub-model", Root: root,
 		Store: store, Version: "test-version",
 	}
+	if overrides.Provider != nil {
+		cfg.Provider = overrides.Provider
+	}
+	if overrides.Model != "" {
+		cfg.Model = overrides.Model
+	}
+	if overrides.Root != "" {
+		cfg.Root = overrides.Root
+	}
+	if overrides.Store != nil {
+		cfg.Store = overrides.Store
+		store = overrides.Store
+	}
+	if overrides.Version != "" {
+		cfg.Version = overrides.Version
+	}
+	cfg.AutoCompactBytes = overrides.AutoCompactBytes
 	srv, err := server.New(cfg)
 	if err != nil {
 		t.Fatalf("server.New: %v", err)
