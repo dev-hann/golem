@@ -379,13 +379,16 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 
 	model := s.turnModel(msg.Session)
 
-	ag := agent.New(s.cfg.Provider, s.registry, model)
-
 	sess, err := s.cfg.Store.Get(msg.Session)
 	if err != nil {
 		writer.send(errorOf(msg.Session, turnID, "internal", err))
 		return
 	}
+
+	// AGENTS.md discovery (ADR-0019): fold the workspace's instruction
+	// files into the system prompt for this turn.
+	ag := agent.New(s.cfg.Provider, s.registry, model,
+		agent.WithInstructions(agent.DiscoverInstructions(sess.Cwd)))
 
 	firstTurn := sess.Turns == 0 && sess.Title == ""
 

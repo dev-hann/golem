@@ -7,6 +7,10 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — AGENTS.md instructions appended to the system prompt (2026-10-15)
+
+- The agent now discovers `AGENTS.md` files and appends them to the system prompt of every turn (ADR-0019): `~/.config/golem/AGENTS.md` (global) first, `<session cwd>/AGENTS.md` (project) last — the nearer file reads as the more specific override. Each file is clipped at 32 KiB with a truncation marker; missing files are ignored, no configuration needed. Applies to server turns (discovered against the session's cwd) and `golem ask` (against the workspace root).
+
 ### Fixed — the status bar shows a running turn after switching back to its session (2026-10-14)
 
 - Switching sessions while a turn was streaming and then returning to it
