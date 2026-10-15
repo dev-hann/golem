@@ -6,26 +6,44 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/dev-hann/golem/internal/cli"
 	"github.com/dev-hann/golem/internal/llm"
+	"github.com/dev-hann/golem/internal/server"
 	"github.com/dev-hann/golem/internal/session"
 )
 
-// bashProvider requests a bash call once, then finishes with text.
+// bashProvider requests a bash call once, then finishes with text. Title
+// side calls (ADR-0032 fires them at turn start) get a canned stream
+// without consuming the scripted round, and calls is counted under a
+// mutex because the side call races the agent loop.
 type bashProvider struct {
+	mu    sync.Mutex
 	calls int
 }
 
 func (p *bashProvider) Stream(
 	_ context.Context,
-	_ llm.Request,
+	req llm.Request,
 ) (<-chan llm.Event, error) {
+	if req.SystemPrompt == server.TitleSystemPrompt {
+		out := make(chan llm.Event, 1)
+		out <- llm.Event{Type: llm.EventTextDelta, Delta: "Test title"}
+		close(out)
+
+		return out, nil
+	}
+
+	p.mu.Lock()
 	p.calls++
+	calls := p.calls
+	p.mu.Unlock()
+
 	out := make(chan llm.Event, 2)
-	if p.calls == 1 {
+	if calls == 1 {
 		out <- llm.Event{
 			Type: llm.EventToolCalls,
 			ToolCalls: []llm.ToolCall{{
