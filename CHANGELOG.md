@@ -7,6 +7,15 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Fixed — the session picker shows what you type (2026-10-15)
+
+- The picker's search field vanished in the row redesign (aligned
+  columns, age): typing filtered the list but nothing rendered the
+  query, so a typo had no visible correction and "no matches" gave no
+  clue why. The `› query_` prompt line is back (the command palette's
+  shape), below the rows and above the key hints — it coexists with
+  rename mode, where the selected row still swaps to the rename input.
+
 ### Added — session deletion (ctrl+d in the picker, 2026-10-15)
 
 - `delete_session` removes a session from the server, opencode-style:

@@ -1744,7 +1744,11 @@ func (m Model) sessionsBody() string {
 		fmt.Fprintf(&b, "%s\n", m.kit.Row(row, i == m.pickIndex)) //nolint:errcheck // strings.Builder
 	}
 
-	b.WriteString("\n" + m.kit.DimLine("type to filter · ctrl+r rename · ctrl+d delete · enter open · esc cancel"))
+	// The search field: without it nothing shows what the user typed —
+	// rows narrowing is the only feedback, and a typo has no visible
+	// correction. Mirrors the command palette's prompt line.
+	b.WriteString("\n" + m.kit.Prompt("› "+m.sessQuery+"_") + "\n")
+	b.WriteString(m.kit.DimLine("type to filter · ctrl+r rename · ctrl+d delete · enter open · esc cancel"))
 
 	return b.String()
 }

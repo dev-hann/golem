@@ -1729,3 +1729,34 @@ func TestModel_SessionPickerFooterMentionsDelete(t *testing.T) {
 		t.Errorf("picker footer must mention ctrl+d delete:\n%s", m.View())
 	}
 }
+
+func TestModel_SessionPickerShowsLiveQuery(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "Fix auth middleware", Cwd: "/a"},
+			{ID: "s2", Title: "Add session tests", Cwd: "/b"},
+		},
+	})
+
+	for _, r := range "fix" {
+		m = key(t, m, rkey(r))
+	}
+
+	if got := m.View(); !strings.Contains(got, "› fix_") {
+		t.Errorf("picker must show the live query — nothing renders what the user typed:\n%s", got)
+	}
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+
+	if got := m.View(); !strings.Contains(got, "› _") {
+		t.Errorf("backspaces must empty the visible query:\n%s", got)
+	}
+}
