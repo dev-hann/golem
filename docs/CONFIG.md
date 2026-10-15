@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-12. Schema changes require updating this file in the same commit.
 
-> **Status: partially implemented.** The config parser (`internal/config`) is bootstrapped: built-in defaults, the global file, `GOLEM_PROVIDER`/`GOLEM_MODEL` overrides, `[provider]` sections, and `ref:` secret resolution. Project files, CLI flags, and the remaining sections (`[server]`, `[tools]`, `[plugins]`) land with roadmap phases 4–6. Providers beyond Anthropic arrive in phase 5; MCP support in phase 6. This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
+> **Status: partially implemented.** The config parser (`internal/config`) covers the precedence chain: built-in defaults, the global file, the project file (`<cwd>/.golem.toml`), and `GOLEM_PROVIDER`/`GOLEM_MODEL` overrides, with deep-merged maps, replaced slices, and the project-file plaintext-key rejection (ADR-0015). `[provider]` and `[session]` are consumed; `[plugins.mcp]` is parsed and validated (its `internal/mcp` runtime lands with phase 6); `[server]` and `[tools]` parsing is pending, and CLI flags are not yet a layer. Provider *resolution* (`cli.ResolveProvider`) still reads the global file only — layered provider picks land with the per-session `/model` switch. This document is the contract those phases must implement against; schema changes still require updating this file in the same commit. Parsed by `internal/config` (`BurntSushi/toml`, ADR-0012).
 
 ## First-run onboarding
 
@@ -48,7 +48,7 @@ API keys live in the global config by default (ADR-0015): the wizard writes the 
 2. `api_key = "ref:SOME_ENV_VAR"` in config — env indirection for users who prefer it; a missing referenced var is a startup warning naming the key and turns fail per turn.
 3. Dedicated env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `ZAI_API_KEY` — both zai plans read the same console key) when the config sets none.
 
-Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The future project-level `.golem.toml` (committable) will reject plaintext keys.
+Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The project-level `.golem.toml` (committable) rejects plaintext keys — `api_key` there must be `ref:ENV_VAR`, and a literal key aborts startup naming the provider.
 
 ## Schema
 

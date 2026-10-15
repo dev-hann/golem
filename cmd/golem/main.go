@@ -169,9 +169,12 @@ func runServe(ctx context.Context) int {
 		return 1
 	}
 
+	globalPath := config.DefaultPath()
+	projectPath := config.ProjectPath(root)
+
 	reg := cli.NewStatusRegistry()
 
-	choice, err := cli.ResolveProviderForServe(config.DefaultPath(), reg)
+	choice, err := cli.ResolveProviderForServe(globalPath, reg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
 		return 1
@@ -180,12 +183,12 @@ func runServe(ctx context.Context) int {
 	fmt.Fprintf(os.Stderr, "golem provider: %s (model %s)\n", choice.ID, choice.Model) //nolint:errcheck // terminal output
 
 	reg.ProbeAll(ctx, cli.ProbeConfig{
-		ConfigPath: config.DefaultPath(),
+		ConfigPath: globalPath,
 		ListModels: cli.LiveListModels,
 		Log:        os.Stderr,
 	})
 
-	cfg, err := config.Load(config.DefaultPath())
+	cfg, err := config.LoadChain(globalPath, projectPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
 		return 1

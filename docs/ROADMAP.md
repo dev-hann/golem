@@ -234,7 +234,7 @@ Status: `/new` and `/resume` (session picker) implemented. Added 2026-10-16: ses
 
 ---
 
-## Phase 5 — Remaining providers + config system (in progress: config bootstrap landed 2026-10-13)
+## Phase 5 — Remaining providers + config system (in progress: config precedence chain + project files landed 2026-10-15)
 
 ### Deliverables
 
@@ -250,9 +250,10 @@ Status: `/new` and `/resume` (session picker) implemented. Added 2026-10-16: ses
 
 ### Test list
 
-- `TestConfig_PrecendenceFullChain`
-- `TestConfig_DeepMergeMaps_ReplaceSlices`
-- `TestConfig_RefSecretResolution_MissingKeyFails`
+- `TestConfig_PrecendenceFullChain` — done, 2026-10-15 (as `TestConfig_PrecedenceFullChain`)
+- `TestConfig_DeepMergeMaps_ReplaceSlices` — done, 2026-10-15
+- `TestConfig_RefSecretResolution_MissingKeyFails` — done (bootstrap, 2026-10-13)
+- `[plugins.mcp]` parsing + validation for phase 6 (`TestLoad_ParsesMCPPlugins` et al.) — done, 2026-10-15; the `internal/mcp` runtime follows in phase 6
 - `TestOpenAIAdapter_NormalizesToolCalls` (stub)
 - `TestZaiAdapter_UsesBaseURLOverride` (stub)
 - `TestOllamaAdapter_NormalizesStream` (stub)
