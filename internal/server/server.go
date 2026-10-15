@@ -59,6 +59,11 @@ type turnState struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{} // closed by endTurn; delete_session waits on it
+	// drain is set just before the turn's terminal event (turn_end or
+	// error) goes on the wire: the turn is microseconds from teardown,
+	// so a request arriving behind the event waits for done instead of
+	// seeing the session busy (the teardown race, busywindow_test.go).
+	drain bool
 }
 
 // New builds a Server.
@@ -243,12 +248,33 @@ func (s *Server) sessionBusy(sessionID string) bool {
 	return busy
 }
 
+// waitDraining waits out a session whose turn is draining its terminal
+// event — a no-op when the session is free or running a live turn. It
+// closes the emit→teardown gap a client falls into when it reacts to
+// turn_end instantly (busywindow_test.go).
+func (s *Server) waitDraining(sessionID string) {
+	s.mu.Lock()
+	state := s.turns[sessionID]
+	draining := state != nil && state.drain
+	s.mu.Unlock()
+
+	if !draining {
+		return
+	}
+
+	s.waitTurnDone(sessionID)
+}
+
 // handleUserMessage runs one turn if the session is free.
 func (s *Server) handleUserMessage(writer *connWriter, ev golemclient.UserMessage) {
 	if _, err := s.cfg.Store.Get(ev.Session); err != nil {
 		writer.send(errorOf(ev.Session, "", "session_not_found", err))
 		return
 	}
+
+	// A turn draining its terminal event is microseconds from teardown;
+	// wait it out instead of rejecting the request (teardown race).
+	s.waitDraining(ev.Session)
 
 	turnCtx, cancel := context.WithCancel(context.Background())
 	if !s.beginTurn(turnCtx, ev.Session, cancel) {
@@ -429,6 +455,47 @@ func (s *Server) turnModel(sessionID string) string {
 	return s.cfg.Model
 }
 
+// drainWait bounds how long a request waits for a draining turn's
+// teardown before giving up and answering busy. The teardown is a map
+// delete and a channel close — microseconds even on a loaded runner —
+// so this bound only ever fires if the process is wedged.
+const drainWait = 2 * time.Second
+
+// markDrain flags the session's active turn as draining (about to emit
+// its terminal event). Requests arriving behind that event wait for the
+// turn to finish instead of rejecting with "busy".
+func (s *Server) markDrain(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if state := s.turns[sessionID]; state != nil {
+		state.drain = true
+	}
+}
+
+// waitTurnDone blocks until the session's turn teardown completes (or
+// drainWait elapses), reporting whether the session is now free. A nil
+// state means no turn ever registered for the session.
+func (s *Server) waitTurnDone(sessionID string) bool {
+	s.mu.Lock()
+	state := s.turns[sessionID]
+	s.mu.Unlock()
+
+	if state == nil {
+		return true
+	}
+
+	timer := time.NewTimer(drainWait)
+	defer timer.Stop()
+
+	select {
+	case <-state.done:
+		return true
+	case <-timer.C:
+		return false
+	}
+}
+
 // beginTurn registers an active turn; false when one already runs.
 func (s *Server) beginTurn(ctx context.Context, sessionID string, cancel context.CancelFunc) bool {
 	s.mu.Lock()
@@ -500,6 +567,14 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 		if wire == nil {
 			continue
 		}
+
+		// The terminal event (turn_end or error) is the last thing this
+		// turn emits; flag the drain before persisting it so a request
+		// arriving behind the emission waits for teardown instead of
+		// seeing the session busy (the teardown race, busywindow_test.go).
+		if isTerminalWire(wire) {
+			s.markDrain(msg.Session)
+		}
 		// Persist before emit: a crash between the two leaves storage
 		// ahead of the client, which replay repairs (ROADMAP phase 2).
 		if err := s.cfg.Store.Append(msg.Session, wire); err != nil {
@@ -556,6 +631,17 @@ func (s *Server) wireEvent(sessionID, turnID, model string, event agent.Event) a
 		}
 	default:
 		return nil
+	}
+}
+
+// isTerminalWire reports whether the wire event is one a turn emits
+// last: turn_end, or the error that aborts the turn.
+func isTerminalWire(wire any) bool {
+	switch wire.(type) {
+	case golemclient.TurnEnd, golemclient.ErrorEvent:
+		return true
+	default:
+		return false
 	}
 }
 

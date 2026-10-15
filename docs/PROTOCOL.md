@@ -142,7 +142,7 @@ Emitted in order during a turn. All carry `turn`.
 | `tool_call_start` | `call_id`, `tool`, `args` | Tool invocation; `args` is the parsed JSON object |
 | `tool_call_end` | `call_id`, `ok`, `result` | Tool finished. Failures carry the error text in `result`; `result` truncated to 16 KiB display budget |
 | `error` | `code`, `message` | Recoverable error within the turn (tool failures already reported via `tool_call_end`; this is loop/provider level) |
-| `turn_end` | `usage` | Turn complete. `usage`: `{"input_tokens":n,"output_tokens":n}` |
+| `turn_end` | `usage` | Turn complete. `usage`: `{"input_tokens":n,"output_tokens":n}`. Once a client observes `turn_end` (or a terminal `error`), the session accepts its next request — the server drains the turn's teardown before processing it |
 
 Examples:
 

@@ -51,6 +51,10 @@ func (s *Server) handleCompact(writer *connWriter, ev golemclient.CompactSession
 		return
 	}
 
+	// A draining turn is microseconds from teardown; wait it out so a
+	// /compact issued right behind turn_end lands (teardown race).
+	s.waitDraining(ev.Session)
+
 	if s.sessionBusy(ev.Session) {
 		writer.send(errorOf(ev.Session, "", "invalid_request",
 			errors.New("a turn is in progress for this session")))
