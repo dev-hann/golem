@@ -74,6 +74,7 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.sessionID = e.Session
 		m.sessionTitle, m.sessionCwd = e.Title, e.Cwd
 		m.metaBusy = e.Busy
+		m.usageIn, m.usageOut = e.Usage.InputTokens, e.Usage.OutputTokens
 		cmd = m.flushPending()
 	case golemclient.SessionForked:
 		cmd = m.applySessionForked(e)
@@ -240,6 +241,8 @@ func (m *Model) applyTurnEvent(ev any) {
 		m.endTurn()
 	case golemclient.TurnEnd:
 		m.lastUsage = e.Usage
+		m.usageIn += e.Usage.InputTokens
+		m.usageOut += e.Usage.OutputTokens
 		m.endTurn()
 	default:
 		// not a turn event; nothing to fold
@@ -468,6 +471,9 @@ func (m *Model) foldReplayEvent(ev any, live replayTurn) replayTurn {
 		return replayTurn{} // errors end the turn
 	case golemclient.TurnEnd:
 		m.lastUsage = e.Usage
+		m.usageIn += e.Usage.InputTokens
+		m.usageOut += e.Usage.OutputTokens
+
 		return replayTurn{}
 	default:
 		// Unknown types are ignored per PROTOCOL.md forward compatibility.

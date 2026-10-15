@@ -80,6 +80,8 @@ type Model struct {
 	retryState      *retryInfo        // live provider retry, nil when none runs
 	synthDone       *toolDone         // last ToolCallEnd while synthesizing follows-up
 	metaBusy        bool              // the loaded session's live busy flag (session_meta)
+	usageIn         int64             // session-cumulative input tokens (meta-restored)
+	usageOut        int64             // session-cumulative output tokens (meta-restored)
 }
 
 // New builds the model for a socket path.

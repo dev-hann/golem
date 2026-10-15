@@ -78,6 +78,12 @@ Clients create their session lazily (ADR-0018): no session is minted until the f
 
 `title` is the session's folded title (rename or generation) at create/load time, omitted while untitled — clients render a placeholder until a `session_title` event or their next `session_list` arrives.
 
+`usage` carries the session's cumulative token totals as of this event (`{"input_tokens":n,"output_tokens":n}`, folded from every `turn_end`): absent on creation, where it is zero. Clients restore their running usage displays from it on load.
+
+```json
+{"type":"session_meta","session":"01J...","cwd":"/home/user/project","created":"2026-09-27T10:00:00Z","turns":12,"title":"Fix auth middleware","usage":{"input_tokens":4200,"output_tokens":380}}
+```
+
 ### `history`
 
 Replay batch after `load_session`. Contains zero or more compacted prior events so a reconnecting client can render the transcript.

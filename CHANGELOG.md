@@ -113,6 +113,15 @@ config schema may change without notice.
   in the serializable theme. `muesli/termenv` is no longer a direct
   dependency.
 
+### Added — cumulative token usage on the status line (2026-10-14)
+
+- `turn_end` usage is folded into session totals (`TokensIn`/`TokensOut`),
+  surfaced on `session_meta.usage` (optional field), and rendered as a
+  suffix on the idle status strip: `● model · ↑4.2k ↓380 · Σ4.6k` — the
+  last turn's counts plus the session-cumulative total (Σ, compact k/M
+  formatting). Totals restore on session load (from meta) and reset on
+  new session / picker switch.
+
 ### Changed — status line animates while a turn runs (2026-10-15)
 
 - The agent status strip's leading glyph is now the animated braille

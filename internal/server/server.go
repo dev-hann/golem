@@ -719,6 +719,7 @@ func metaOf(sess *session.Session, busy bool) golemclient.SessionMeta {
 		Type: golemclient.TypeSessionMeta, Session: sess.ID, Cwd: sess.Cwd,
 		Created: sess.Created.UTC().Format(rfc3339), Turns: sess.Turns, Busy: busy,
 		Title: sess.Title,
+		Usage: golemclient.Usage{InputTokens: sess.TokensIn, OutputTokens: sess.TokensOut},
 	}
 }
 

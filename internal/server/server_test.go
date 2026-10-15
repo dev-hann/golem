@@ -715,6 +715,36 @@ func TestServer_LoadSessionMetaCarriesTitle(t *testing.T) {
 	}
 }
 
+func TestServer_MetaCarriesCumulativeUsage(t *testing.T) {
+	t.Parallel()
+	provider := &scriptedProvider{rounds: [][]llm.Event{
+		{{Type: llm.EventTextDelta, Delta: "one"}, {Type: llm.EventUsage, InputTokens: 100, OutputTokens: 10}},
+		{{Type: llm.EventTextDelta, Delta: "two"}, {Type: llm.EventUsage, InputTokens: 50, OutputTokens: 5}},
+	}}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+
+	for _, text := range []string{"first", "second"} {
+		if err := h.client.Send(golemclient.UserMessage{
+			Type: golemclient.TypeUserMessage, Session: sess, Text: text,
+		}); err != nil {
+			t.Fatalf("send: %v", err)
+		}
+		h.expectType(golemclient.TypeTurnEnd)
+	}
+
+	if err := h.client.Send(golemclient.LoadSession{
+		Type: golemclient.TypeLoadSession, Session: sess,
+	}); err != nil {
+		t.Fatalf("send load: %v", err)
+	}
+
+	meta := h.expectType(golemclient.TypeSessionMeta).(golemclient.SessionMeta)
+	if meta.Usage.InputTokens != 150 || meta.Usage.OutputTokens != 15 {
+		t.Errorf("meta usage = %d/%d, want 150/15", meta.Usage.InputTokens, meta.Usage.OutputTokens)
+	}
+}
+
 func TestServer_EventsPersistedBeforeEmission(t *testing.T) {
 	t.Parallel()
 	gate := make(chan struct{})

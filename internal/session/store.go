@@ -27,12 +27,14 @@ const fileSuffix = ".jsonl"
 // Session is a conversation: identity plus folded message history.
 // Session is the folded state of one stored session.
 type Session struct {
-	ID       string
-	Cwd      string
-	Title    string
-	Created  time.Time
-	Turns    int
-	Messages []llm.Message
+	ID        string
+	Cwd       string
+	Title     string
+	Created   time.Time
+	Turns     int
+	TokensIn  int64
+	TokensOut int64
+	Messages  []llm.Message
 
 	// FirstUserText is the session's opening user message, used by the
 	// server's title side call (and its retries — whichever turn they
@@ -80,6 +82,7 @@ func sessionFromFolder(id string, fold *folder) *Session {
 		ID: id, Created: ulidTime(id),
 		Cwd: fold.cwd, Messages: fold.history(),
 		Turns: fold.turns, Title: fold.title, FirstUserText: fold.firstUserText,
+		TokensIn: fold.tokensIn, TokensOut: fold.tokensOut,
 	}
 }
 
