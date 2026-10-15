@@ -13,6 +13,8 @@ type folder struct {
 	turns         int
 	title         string
 	firstUserText string
+	tokensIn      int64
+	tokensOut     int64
 
 	// sawMeta records that the session_meta header line was folded;
 	// cwd carries what it said (first wins — the file may grow stray
@@ -48,6 +50,8 @@ func (f *folder) clone() *folder {
 		turns:         f.turns,
 		title:         f.title,
 		firstUserText: f.firstUserText,
+		tokensIn:      f.tokensIn,
+		tokensOut:     f.tokensOut,
 		sawMeta:       f.sawMeta,
 		cwd:           f.cwd,
 		compacted:     f.compacted,
@@ -113,7 +117,7 @@ func (f *folder) feed(line []byte) {
 			CallID: ev.CallID, OK: ev.OK, Output: ev.Result,
 		})
 	case "turn_end":
-		f.closeTurn(true)
+		f.feedTurnEnd(line)
 	case "session_title":
 		var ev struct {
 			Title string `json:"title"`
@@ -150,6 +154,23 @@ func (f *folder) feedSessionMeta(line []byte) {
 	}
 
 	f.cwd = ev.Cwd
+}
+
+// feedTurnEnd accumulates the turn's reported token usage into the
+// session totals, then seals the turn.
+func (f *folder) feedTurnEnd(line []byte) {
+	var ev struct {
+		Usage struct {
+			Input  int64 `json:"input_tokens"`
+			Output int64 `json:"output_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(line, &ev); err == nil {
+		f.tokensIn += ev.Usage.Input
+		f.tokensOut += ev.Usage.Output
+	}
+
+	f.closeTurn(true)
 }
 
 // feedTextDelta folds one text_delta line into the assistant buffer.

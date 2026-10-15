@@ -218,6 +218,7 @@ func (m *Model) clearTranscript() {
 	m.provider, m.modelName = "", ""
 	m.endTurn()
 	m.lastUsage = golemclient.Usage{}
+	m.usageIn, m.usageOut = 0, 0
 	m.metaBusy = false
 	m.sessionTitle, m.sessionCwd = "", ""
 	m.refreshView()

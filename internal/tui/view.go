@@ -168,7 +168,7 @@ func (m Model) activeState() (string, kit.Token) {
 		left = "● creating session"
 		token = kit.Accent
 	case m.modelName != "":
-		left = "● " + m.modelName + usageSummary(m.lastUsage)
+		left = "● " + m.modelName + usageSummary(m.lastUsage) + sessionUsageSuffix(m.usageIn, m.usageOut)
 	}
 
 	return left, token
@@ -238,6 +238,17 @@ func usageSummary(u golemclient.Usage) string {
 	}
 
 	return fmt.Sprintf(" · ↑%s ↓%s", tokenCount(u.InputTokens), tokenCount(u.OutputTokens))
+}
+
+// sessionUsageSuffix renders the session-cumulative token total, or ""
+// while the session has no recorded usage yet (restored from
+// session_meta.usage, accumulated from turn_end events).
+func sessionUsageSuffix(in, out int64) string {
+	if in == 0 && out == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf(" · Σ%s", tokenCount(in+out))
 }
 
 // tokenCount shortens a token count (1.2k, 15k, 2.1M).

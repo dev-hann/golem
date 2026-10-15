@@ -97,6 +97,9 @@ type SessionMeta struct {
 	// at load time, so a client resuming a busy session can restore its
 	// status line from the replay (omitted when false: create, idle load).
 	Busy bool `json:"busy,omitempty"`
+	// Usage carries the session's cumulative token totals as of this
+	// event (absent on creation, where it is zero).
+	Usage Usage `json:"usage,omitempty"`
 }
 
 // History replays stored events after LoadSession.
