@@ -193,6 +193,9 @@ func TestSticky_SwapBoundaryAtWindowTop(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
+			// Copy per subtest: the closure would otherwise share one
+			// model variable across parallel writers (data race).
+			m := m
 			m.vp.YOffset = tt.offset
 
 			if got := m.stickyText(); got != tt.want {
