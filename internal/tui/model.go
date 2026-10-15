@@ -101,10 +101,14 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 	// ceiling, so the two agree past 99 content rows.
 	input.DynamicHeight = true
 	input.MinHeight = minInputHeight
+	// The real terminal cursor replaces the in-text virtual block (Phase
+	// 8.2): textarea.Cursor() then reports caret coordinates the View
+	// pins onto the screen.
+	input.SetVirtualCursor(false)
 	input.SetStyles(restyleInput(input, k).Styles())
 	input.SetHeight(minInputHeight)
 	input.SetWidth(startWidth - inputBorderCols)
-	input.Focus() // the blink cmd is dropped: the composer renders a real cursor
+	input.Focus() // no blink-cmd bookkeeping: the runtime blinks the real cursor
 
 	vp := viewport.New(viewport.WithWidth(startWidth), viewport.WithHeight(startHeight-minInputHeight-inputBorderRows))
 	vp.SoftWrap = true // the transcript wraps at the terminal edge (v1 behavior)
@@ -350,6 +354,11 @@ func restyleInput(input textarea.Model, k *kit.Kit) textarea.Model {
 	styles.Focused.Text = k.Style(kit.Fg)
 	styles.Focused.Placeholder = k.Style(kit.Dim)
 	styles.Blurred = styles.Focused
+	// The terminal's real cursor (Phase 8.2): its color comes from the
+	// kit; shape and blink stay the bubbles defaults — blinking is the
+	// runtime's job, no model-side timer.
+	styles.Cursor.Color = k.Color(kit.Accent)
+	styles.Cursor.Shape = tea.CursorBlock
 	input.SetStyles(styles)
 
 	return input

@@ -338,6 +338,8 @@ The one thing `DynamicHeight` does **not** know is golem's layout rule: the comp
 
 ### 8.2 Real terminal cursor in the composer (`tea.Cursor`)
 
+**Done 2026-10-17** — the composer runs with `SetVirtualCursor(false)`; `textarea.Cursor()` reports caret coordinates and `View()` pins them with the frame offsets (`composerScreenRow` walks the same layout branches `layout()` renders, so they cannot drift). Cursor color comes from the kit (Accent) via `restyleInput`; shape and blink stay bubbles' defaults — no blink state or timer on the Model. Cursor assertions are made against rendered lines, never hand-computed constants.
+
 The composer still renders bubbles' in-text virtual cursor block. Bubble Tea v2 can drive the terminal's own cursor: `textarea.SetVirtualCursor(false)` makes `textarea.Cursor()` (nil while blurred) return a `*tea.Cursor` carrying screen coordinates relative to the component's top-left; the top-level View pins it (`v.Cursor = m.input.Cursor()`) offset by the composer's frame — `kit.Box` border, `screenPadH`/`screenPadV`, and the gap row above the composer. Blinking is the runtime's job via `tea.Cursor.Blink` — no blink-cmd bookkeeping on the model.
 
 **Deliverable**

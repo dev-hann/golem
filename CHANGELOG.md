@@ -7,6 +7,20 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — the composer drives the terminal's real cursor (2026-10-17, Phase 8.2)
+
+- The TUI composer no longer renders bubbles' in-text virtual cursor
+  block: the textarea runs with `SetVirtualCursor(false)` and the View
+  pins `textarea.Cursor()`'s caret coordinates onto the screen — offset
+  by the screen padding and the composer's rounded border, with the
+  composer's screen row computed from the same layout branches the
+  renderer walks (header, sticky pin, welcome banner, viewport, status
+  strip). The cursor hides while any modal is open, while blurred, and
+  in the connection-error state. Its color comes from the theme's Accent
+  token via the kit; blinking is the runtime's job — no blink state or
+  timer on the model. No protocol or storage change. Docs: ROADMAP 8.2
+  and ADR-0035 updated in the same change.
+
 ### Changed — composer self-sizes via textarea.DynamicHeight (2026-10-17, Phase 8.1)
 
 - The TUI composer (input box) no longer measures itself by rendering the
