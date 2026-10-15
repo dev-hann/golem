@@ -90,6 +90,13 @@ func TestAsk_AppendsDiscoveredAGENTSInstructions(t *testing.T) {
 	if !strings.Contains(prompt, "ASK-AGENTS-MARKER") {
 		t.Errorf("system prompt missing AGENTS.md content:\n%s", prompt)
 	}
+	// ADR-0031: ask injects the workspace environment block too.
+	if !strings.Contains(prompt, "Working directory") {
+		t.Errorf("system prompt missing environment block:\n%s", prompt)
+	}
+	if !strings.Contains(prompt, root) {
+		t.Errorf("environment block must name the workspace root:\n%s", prompt)
+	}
 }
 
 // capturingProvider records system prompts; rounds stream as scripted.
