@@ -46,7 +46,7 @@ type Store struct {
 
 	mu      sync.Mutex
 	cache   map[string]*cacheEntry
-	deleted map[string]struct{} // sessions mid-delete; Append refuses them
+	deleted map[string]struct{} // deleted session ids; Append refuses them forever
 }
 
 // cacheEntry tracks recency for eviction.
@@ -55,9 +55,9 @@ type cacheEntry struct {
 	lastUsed time.Time
 }
 
-// ErrDeleted reports an Append to a session being deleted: the write is
+// ErrDeleted reports an Append to a deleted session: the write is
 // refused instead of resurrecting the removed file.
-var ErrDeleted = errors.New("session: session is being deleted")
+var ErrDeleted = errors.New("session: session is deleted")
 
 // NewStore opens (creating if needed) a session directory. cacheSize bounds
 // in-memory sessions; others reload from disk on demand.
@@ -151,52 +151,31 @@ func (s *Store) Invalidate(id string) {
 
 // Delete removes a session outright: the cache entry and the JSONL file.
 // It does not mutate records (ADR-0008 governs appends); removal is a
-// whole-file operation, ADR-0019. Callers bracket a running turn's drain
-// with MarkDeleted/UnmarkDeleted so Appends cannot resurrect the file.
+// whole-file operation, ADR-0019. The delete flag is permanent: once a
+// session is deleted, Appends to its id fail with ErrDeleted forever —
+// there is no window where a concurrent or late Append (a turn goroutine
+// that outlived the drain bound, the title side call) can re-create the
+// file. Both the flag write and the remove happen under the store lock,
+// so an Append either lands before the remove (the file goes away with
+// it) or fails the flag check — never resurrects.
 func (s *Store) Delete(id string) error {
 	if !validID(id) {
 		return fmt.Errorf("session: invalid id %q", id)
 	}
 
 	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	delete(s.cache, id)
-	s.mu.Unlock()
 
 	path := s.path(id)
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("session: deleting %s: %w", path, err)
 	}
 
-	return nil
-}
-
-// MarkDeleted flags a session as mid-delete; Appends to it fail with
-// ErrDeleted until UnmarkDeleted. Bracketing delete_session this way
-// stops a turn goroutine (or the title side call) from re-creating the
-// file after its removal.
-func (s *Store) MarkDeleted(id string) {
-	if !validID(id) {
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	s.deleted[id] = struct{}{}
-}
 
-// UnmarkDeleted clears the mid-delete flag (the deletion finished —
-// either the file is gone and stays gone, or the delete failed and the
-// session lives on).
-func (s *Store) UnmarkDeleted(id string) {
-	if !validID(id) {
-		return
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	delete(s.deleted, id)
+	return nil
 }
 
 // Dir returns the directory backing the store (used by tests and tooling).
@@ -243,17 +222,17 @@ func (s *Store) Append(id string, event any) error {
 		return fmt.Errorf("session: marshaling event: %w", err)
 	}
 
-	// Register mid-delete under the lock so a concurrent Delete's
-	// os.Remove and this Append's O_CREATE cannot interleave into a
-	// resurrected file: whoever takes the lock second sees the other's
-	// outcome (Delete removed the entry; Append refuses the flag).
+	// The whole check-open-write sequence holds the store lock: a
+	// concurrent Delete's flag+remove cannot interleave between the
+	// check and the O_CREATE — whichever side takes the lock second sees
+	// the first's outcome (a flagged Append fails; an unflagged file is
+	// removed together with any just-appended line).
 	s.mu.Lock()
-	if _, gone := s.deleted[id]; gone {
-		s.mu.Unlock()
+	defer s.mu.Unlock()
 
+	if _, gone := s.deleted[id]; gone {
 		return fmt.Errorf("session: appending to %s: %w", id, ErrDeleted)
 	}
-	s.mu.Unlock()
 
 	path := s.path(id)
 

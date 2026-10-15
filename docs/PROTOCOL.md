@@ -49,7 +49,7 @@ Override the model this session uses for subsequent turns (same provider; switch
 
 ### `create_session` / `list_sessions` / `load_session`
 
-Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `delete_session` → the server cancels a running turn in that session (opencode-style), waits for it to drain, removes the session's file, and confirms with `session_deleted`; a mid-delete session refuses appends until the delete resolves. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
+Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `delete_session` → the server cancels a running turn in that session (opencode-style), waits for it to drain, removes the session's file, and confirms with `session_deleted`; a deleted session refuses appends permanently — late writers get an error, never a resurrected file. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
 
 Clients create their session lazily (ADR-0018): no session is minted until the first submitted message — an abandoned launch must leave nothing behind. A client may connect, `list_sessions`, and `load_session` without ever sending `create_session`.
 
@@ -151,7 +151,7 @@ Examples:
 
 ## Session persistence mirror
 
-Every event in this protocol (except `interrupt` and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format. Sessions recorded before the approval gate's removal may still contain legacy `approval_request` lines; replay skips unknown event types. Deletion (`delete_session`) removes the whole file (ADR-0019); a session mid-delete refuses appends until the delete resolves.
+Every event in this protocol (except `interrupt` and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format. Sessions recorded before the approval gate's removal may still contain legacy `approval_request` lines; replay skips unknown event types. Deletion (`delete_session`) removes the whole file (ADR-0019); appends to a deleted session fail permanently — the file can never resurrect.
 
 ## Versioning
 

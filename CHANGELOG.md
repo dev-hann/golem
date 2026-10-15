@@ -12,8 +12,10 @@ config schema may change without notice.
 - `delete_session` removes a session from the server, opencode-style:
   a running turn is cancelled first and drained (bounded wait), then
   the JSONL file is deleted and confirmed with `session_deleted`.
-  A session mid-delete refuses appends — a turn goroutine or the title
-  side call can no longer resurrect the removed file (ADR-0019).
+  Deletion is permanent in the store: a racing or late writer (a turn
+  goroutine, the title side call) gets `ErrDeleted` instead of
+  re-creating the file — the append/check/open sequence and the flag
+  sit under one lock, so no resurrection window exists (ADR-0019).
 - The session picker binds `ctrl+d` to delete: the first press arms the
   row (its title swaps to `ctrl+d again to confirm` in the error
   color), the second removes it optimistically and sends the request;
