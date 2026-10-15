@@ -58,13 +58,13 @@ func TestModel_DragSelectsLines(t *testing.T) {
 
 	m := selectionTranscript(t)
 
-	m = press(m, screenPadV+2)
+	m = press(m, stickyTopRow(m)+2)
 	if !m.selecting || m.selAnchor != 2 || m.selHead != 2 {
 		t.Fatalf("press at y=2: selecting=%v anchor=%d head=%d; want true 2 2",
 			m.selecting, m.selAnchor, m.selHead)
 	}
 
-	m = dragMove(m, screenPadV+5)
+	m = dragMove(m, stickyTopRow(m)+5)
 	if m.selHead != 5 {
 		t.Errorf("drag to y=5: head=%d; want 5", m.selHead)
 	}
@@ -83,12 +83,12 @@ func TestModel_DragSelectsLines(t *testing.T) {
 
 	// The highlight renders on the selected screen rows only.
 	view := strings.Split(m.View(), "\n")
-	for y := screenPadV + 2; y <= screenPadV+5; y++ {
+	for y := stickyTopRow(m) + 2; y <= stickyTopRow(m)+5; y++ {
 		if !strings.Contains(view[y], "\x1b[7m") {
 			t.Errorf("view row %d must carry the reverse marker:\n%q", y, view[y])
 		}
 	}
-	for _, y := range []int{screenPadV + 1, screenPadV + 6} {
+	for _, y := range []int{stickyTopRow(m) + 1, stickyTopRow(m) + 6} {
 		if strings.Contains(view[y], "\x1b[7m") {
 			t.Errorf("view row %d must not be highlighted:\n%q", y, view[y])
 		}
@@ -101,14 +101,14 @@ func TestModel_DragClampsToContent(t *testing.T) {
 	m := selectionTranscript(t)
 
 	// Dragging far past the last content line selects through l9 only.
-	m = press(m, screenPadV+2)
+	m = press(m, stickyTopRow(m)+2)
 	m = dragMove(m, m.vp.Height+10)
 	if m.selHead != 9 {
 		t.Errorf("clamped head=%d; want 9 (last content line)", m.selHead)
 	}
 
 	// Dragging back up re-selects downward-only range from the anchor.
-	m = dragMove(m, screenPadV+3)
+	m = dragMove(m, stickyTopRow(m)+3)
 	if m.selHead != 3 {
 		t.Errorf("head after drag back=%d; want 3", m.selHead)
 	}
@@ -126,10 +126,10 @@ func TestModel_SelectionSkipsComposerStickyAndModals(t *testing.T) {
 	}
 
 	// A modal backdrop swallows the press.
-	m = press(m, screenPadV+2)
+	m = press(m, stickyTopRow(m)+2)
 	m = releaseMouse(m)
 	m.mode = modeSessions
-	m = press(m, screenPadV+3)
+	m = press(m, stickyTopRow(m)+3)
 	if m.selecting || m.selectedText() != "" {
 		t.Errorf("press behind a modal must not start a selection (selecting=%v)", m.selecting)
 	}
@@ -148,12 +148,12 @@ func TestModel_SelectionSkipsComposerStickyAndModals(t *testing.T) {
 		t.Fatalf("precondition: sticky bar must be pinned, got %q", sticky.stickyText())
 	}
 
-	sticky = press(sticky, screenPadV)
+	sticky = press(sticky, stickyTopRow(sticky)-1) // the sticky bar sits one row above the transcript
 	if sticky.selecting || sticky.selectedText() != "" {
 		t.Error("press on the sticky bar must not start a selection")
 	}
 
-	sticky = press(sticky, screenPadV+1)
+	sticky = press(sticky, stickyTopRow(sticky))
 	if !sticky.selecting || sticky.selAnchor != 30 {
 		t.Errorf("press below the sticky: selecting=%v anchor=%d; want true 30",
 			sticky.selecting, sticky.selAnchor)
@@ -171,8 +171,8 @@ func TestModel_CtrlC_CopiesSelectionThenLadder(t *testing.T) {
 		return nil
 	}
 
-	m = press(m, screenPadV+2)
-	m = dragMove(m, screenPadV+5)
+	m = press(m, stickyTopRow(m)+2)
+	m = dragMove(m, stickyTopRow(m)+5)
 	m = releaseMouse(m)
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -212,8 +212,8 @@ func TestModel_CtrlC_CopyFailureShowsError(t *testing.T) {
 
 	m.copier = func(string) error { return errors.New("no clipboard") }
 
-	m = press(m, screenPadV+2)
-	m = dragMove(m, screenPadV+5)
+	m = press(m, stickyTopRow(m)+2)
+	m = dragMove(m, stickyTopRow(m)+5)
 	m = releaseMouse(m)
 
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -241,7 +241,7 @@ func TestModel_ZeroWidthPressKeepsLadder(t *testing.T) {
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "l0\nl1\nl2"})
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
 
-	m = press(m, screenPadV+1)
+	m = press(m, stickyTopRow(m)+1)
 	m = releaseMouse(m)
 
 	if m.selectedText() != "" {
@@ -250,7 +250,7 @@ func TestModel_ZeroWidthPressKeepsLadder(t *testing.T) {
 
 	// ctrl+c during the turn interrupts rather than copying nothing.
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-	m = press(m, screenPadV+1)
+	m = press(m, stickyTopRow(m)+1)
 	m = releaseMouse(m)
 
 	key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
@@ -265,8 +265,8 @@ func TestModel_EscClearsSelection(t *testing.T) {
 
 	m := selectionTranscript(t)
 
-	m = press(m, screenPadV+2)
-	m = dragMove(m, screenPadV+5)
+	m = press(m, stickyTopRow(m)+2)
+	m = dragMove(m, stickyTopRow(m)+5)
 
 	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	m = next.(Model)
@@ -284,8 +284,8 @@ func TestModel_ResizeClearsSelection(t *testing.T) {
 
 	m := selectionTranscript(t)
 
-	m = press(m, screenPadV+2)
-	m = dragMove(m, screenPadV+5)
+	m = press(m, stickyTopRow(m)+2)
+	m = dragMove(m, stickyTopRow(m)+5)
 	m = resize(m, 100, 30)
 
 	if m.selectedText() != "" {
@@ -326,8 +326,8 @@ func TestModel_SelectionSurvivesStreaming(t *testing.T) {
 
 	m := selectionTranscript(t)
 
-	m = press(m, screenPadV+2)
-	m = dragMove(m, screenPadV+4)
+	m = press(m, stickyTopRow(m)+2)
+	m = dragMove(m, stickyTopRow(m)+4)
 
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
 	m = deliver(t, m, golemclient.TextDelta{
@@ -349,10 +349,10 @@ func TestModel_ReleaseEndsDragExtension(t *testing.T) {
 
 	m := selectionTranscript(t)
 
-	m = press(m, screenPadV+2)
-	m = dragMove(m, screenPadV+4)
+	m = press(m, stickyTopRow(m)+2)
+	m = dragMove(m, stickyTopRow(m)+4)
 	m = releaseMouse(m)
-	m = dragMove(m, screenPadV+6)
+	m = dragMove(m, stickyTopRow(m)+6)
 
 	if m.selecting {
 		t.Error("release must end the drag")

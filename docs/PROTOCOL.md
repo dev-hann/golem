@@ -69,10 +69,12 @@ Clients create their session lazily (ADR-0018): no session is minted until the f
 ### `session_meta`
 
 ```json
-{"type":"session_meta","session":"01J...","cwd":"/home/user/project","created":"2026-09-27T10:00:00Z","turns":12,"busy":true}
+{"type":"session_meta","session":"01J...","cwd":"/home/user/project","created":"2026-09-27T10:00:00Z","turns":12,"title":"Fix auth middleware","busy":true}
 ```
 
 `busy` is live server state at load time: true when a turn is running in that session, omitted otherwise (create, idle load). Like `session_list`'s busy it is a snapshot, not a subscription — the ongoing `turn` events stream continues on the connection. Its purpose: a client that loads a busy session knows the replay ends mid-turn and must render the running state, not idle.
+
+`title` is the session's folded title (rename or generation) at create/load time, omitted while untitled — clients render a placeholder until a `session_title` event or their next `session_list` arrives.
 
 ### `history`
 

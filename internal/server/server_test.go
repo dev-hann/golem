@@ -647,6 +647,34 @@ func TestServer_LoadSessionReplaysHistory(t *testing.T) {
 	}
 }
 
+func TestServer_LoadSessionMetaCarriesTitle(t *testing.T) {
+	t.Parallel()
+	provider := &scriptedProvider{rounds: [][]llm.Event{}}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+
+	// A titled session (rename is the synchronous title path) reports
+	// its title in the load meta so a client can label the session at
+	// once instead of waiting for a list.
+	if err := h.client.Send(golemclient.RenameSession{
+		Type: golemclient.TypeRenameSession, Session: sess, Title: "Fix auth",
+	}); err != nil {
+		t.Fatalf("send rename: %v", err)
+	}
+	h.expectType(golemclient.TypeSessionTitle)
+
+	if err := h.client.Send(golemclient.LoadSession{
+		Type: golemclient.TypeLoadSession, Session: sess,
+	}); err != nil {
+		t.Fatalf("send load: %v", err)
+	}
+
+	meta := h.expectType(golemclient.TypeSessionMeta).(golemclient.SessionMeta)
+	if meta.Title != "Fix auth" {
+		t.Errorf("meta title = %q, want the stored title", meta.Title)
+	}
+}
+
 func TestServer_EventsPersistedBeforeEmission(t *testing.T) {
 	t.Parallel()
 	gate := make(chan struct{})

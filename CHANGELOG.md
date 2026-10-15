@@ -7,6 +7,20 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — TUI session header (2026-10-15)
+
+- The chat screen now shows a one-row session header above the
+  transcript: the session title and the working directory's tail, with
+  dim placeholders ("no session yet", "untitled session") until a title
+  exists. The row is always present on terminals ≥ 16 rows and dropped
+  on shorter ones, mirroring the status line's no-jump rule (ADR-0024).
+- `session_meta` carries an optional `title` (the folded title at
+  create/load), so a freshly loaded session is labeled immediately —
+  no round-trip through `session_list`. The header also updates on
+  `session_title` events for the current session and on optimistic
+  picker renames; switching sessions (`ctrl+x n`, picker open, delete)
+  resets it.
+
 ### Fixed — dead-looking turns: reasoning budget burn now fails loudly (2026-10-15)
 
 - Sessions against GLM (zai/zai-coding) could go completely silent: the
