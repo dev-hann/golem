@@ -36,6 +36,7 @@ func Ask(ctx context.Context, opts AskOptions) error {
 		tools.BashTool{Root: opts.Root},
 		tools.GrepTool{Root: opts.Root},
 		tools.GlobTool{Root: opts.Root},
+		tools.WebFetchTool{},
 	)
 	if err != nil {
 		return fmt.Errorf("cli: building tools: %w", err)

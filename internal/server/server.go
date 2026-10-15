@@ -64,6 +64,7 @@ func New(cfg Config) (*Server, error) {
 		tools.BashTool{Root: cfg.Root},
 		tools.GrepTool{Root: cfg.Root},
 		tools.GlobTool{Root: cfg.Root},
+		tools.WebFetchTool{},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("server: building tools: %w", err)
@@ -100,6 +101,11 @@ func (s *Server) Close() {
 	s.closeOnce.Do(func() {
 		close(s.closed)
 	})
+}
+
+// Registry exposes the tool registry (for tests and diagnostics).
+func (s *Server) Registry() *tools.Registry {
+	return s.registry
 }
 
 // handleConn reads NDJSON client events and dispatches them.

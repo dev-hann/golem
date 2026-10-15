@@ -7,6 +7,10 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — webfetch tool (2026-10-15)
+
+- New read-only `webfetch` tool (ADR-0020): GET one absolute http(s) URL with a 30s timeout and 256 KiB body cap; HTML pages collapse to visible text (script/style stripped) via `golang.org/x/net/html`; redirect targets are re-checked per hop so a hop to `file:` or any non-http scheme is refused; non-2xx responses error. Registered for server turns and `golem ask`.
+
 ### Added — AGENTS.md instructions appended to the system prompt (2026-10-15)
 
 - The agent now discovers `AGENTS.md` files and appends them to the system prompt of every turn (ADR-0019): `~/.config/golem/AGENTS.md` (global) first, `<session cwd>/AGENTS.md` (project) last — the nearer file reads as the more specific override. Each file is clipped at 32 KiB with a truncation marker; missing files are ignored, no configuration needed. Applies to server turns (discovered against the session's cwd) and `golem ask` (against the workspace root).
