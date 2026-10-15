@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -115,55 +114,6 @@ func TestStatus_ErrorEventReturnsToIdle(t *testing.T) {
 
 	if strings.Contains(line, "thinking") || strings.Contains(line, "responding") {
 		t.Errorf("error should reset the status to idle, got %q", line)
-	}
-}
-
-func TestStatus_InterruptedTurnStopsTicking(t *testing.T) {
-	t.Parallel()
-	m, _ := wired(t)
-	m = resize(m, 80, 24)
-	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-	m = deliver(t, m, golemclient.ErrorEvent{
-		Type: golemclient.TypeError, Code: "interrupted", Message: "interrupted",
-	})
-
-	next, _ := m.Update(statusTickMsg{})
-	if m2, ok := next.(Model); ok {
-		m = m2
-	}
-
-	if strings.Contains(m.statusLine(), "thinking") {
-		t.Errorf("interrupted turn should stop ticking, got %q", m.statusLine())
-	}
-}
-
-func TestStatus_StaleTickIgnored(t *testing.T) {
-	t.Parallel()
-	m, _ := wired(t)
-	m = resize(m, 80, 24)
-	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-
-	next, _ := m.Update(statusTickMsg{gen: 999})
-	m2, _ := next.(Model)
-
-	if !m2.turnActive {
-		t.Fatal("stale tick should not end the turn")
-	}
-}
-
-func TestStatus_ElapsedSecondsGrowWhileActive(t *testing.T) {
-	t.Parallel()
-	m, _ := wired(t)
-	m = resize(m, 80, 24)
-	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-
-	m.turnStart = m.turnStart.Add(-5 * time.Second)
-
-	next, _ := m.Update(statusTickMsg{gen: 0})
-	m2, _ := next.(Model)
-
-	if !strings.Contains(m2.statusLine(), "5s") {
-		t.Errorf("elapsed time should render after a tick, got %q", m2.statusLine())
 	}
 }
 

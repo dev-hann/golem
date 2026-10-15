@@ -7,6 +7,21 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — status line drops the elapsed-seconds counter (2026-10-15)
+
+- The active-turn status no longer shows a turn timer. The count reset to
+  0s on every session switch: the start time lives only in the switching
+  client (`time.Now()` at `turn_start`), while the wire protocol and the
+  session store carry no timestamps — a resumed turn cannot know when it
+  began, and the approximation (`time.Now()` on replay) rendered a fresh
+  timer as if the turn had just started. Rather than carry a misleading
+  number, the strip keeps what the protocol actually provides: state
+  (thinking / responding / in-flight tool with its argument), the model
+  at idle, and the last turn's usage. The per-second ticker
+  (`statusTickMsg`, `armStatus`), the `turnStart`/`statusGen` fields, and
+  their tests are removed with it. Restoring the timer would need a
+  started-at timestamp on `turn_start`/`session_meta` — an additive
+  protocol change, not taken here.
 ### Fixed — the session picker shows what you type (2026-10-15)
 
 - The picker's search field vanished in the row redesign (aligned
@@ -56,7 +71,7 @@ config schema may change without notice.
   turn lifecycle into status bookkeeping: the last `turn_start` restores
   the model name, the last `turn_end` the usage, and a busy session
   whose replay ends mid-turn resumes as an active turn (thinking /
-  responding / tool + elapsed). An idle load with a terminated replay
+  responding / tool). An idle load with a terminated replay
   stays idle.
 
 ### Changed — lazy session creation (2026-10-14)

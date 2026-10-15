@@ -73,8 +73,6 @@ type Model struct {
 	listRequest     bool
 	activeTool      string            // tool name of the in-flight ToolCallStart
 	activeArgs      string            // raw args of the in-flight tool call
-	turnStart       time.Time         // when the active turn began (elapsed display)
-	statusGen       int               // status ticker generation (stale-tick guard)
 	lastUsage       golemclient.Usage // usage of the most recent completed turn
 	streamedText    bool              // any TextDelta seen this turn (thinking vs responding)
 	metaBusy        bool              // the loaded session's live busy flag (session_meta)
@@ -174,11 +172,6 @@ type (
 // newer sequence.
 type leaderTimeoutMsg struct{ gen int }
 
-// statusTickMsg advances the status line's elapsed-seconds counter; gen
-// identifies the turn the tick belongs to so a stale tick (a turn ended
-// since it was armed) cannot resurrect the timer.
-type statusTickMsg struct{ gen int }
-
 // sessTickMsg advances the session picker's spinner frame; gen guards
 // against a stale tick from a previously opened picker.
 type sessTickMsg struct{ gen int }
@@ -194,16 +187,6 @@ func armSessTick(gen int) tea.Cmd {
 	})
 }
 
-// statusTick advances the status line's clock while its turn runs; a
-// stale generation tick is dropped.
-func (m Model) statusTick(msg statusTickMsg) (tea.Model, tea.Cmd) {
-	if m.turnActive && m.statusGen == msg.gen {
-		return m, armStatus(m.statusGen)
-	}
-
-	return m, nil
-}
-
 // sessTick advances the picker spinner: only an open picker animates —
 // a tick from a closed one (or a stale generation) is dropped.
 func (m Model) sessTick(msg sessTickMsg) (tea.Model, tea.Cmd) {
@@ -216,10 +199,6 @@ func (m Model) sessTick(msg sessTickMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// statusTickInterval is how often the status line's clock re-renders
-// while a turn is active.
-const statusTickInterval = time.Second
-
 // leaderTimeout bounds how long a ctrl+x sequence waits for its key.
 const leaderTimeout = 2 * time.Second
 
@@ -227,13 +206,6 @@ const leaderTimeout = 2 * time.Second
 func armLeader(gen int) tea.Cmd {
 	return tea.Tick(leaderTimeout, func(time.Time) tea.Msg {
 		return leaderTimeoutMsg{gen: gen}
-	})
-}
-
-// armStatus schedules the next elapsed-seconds tick for the active turn.
-func armStatus(gen int) tea.Cmd {
-	return tea.Tick(statusTickInterval, func(time.Time) tea.Msg {
-		return statusTickMsg{gen: gen}
 	})
 }
 
@@ -268,8 +240,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 		}
 
 		return m, nil
-	case statusTickMsg:
-		return m.statusTick(msg)
 	case sessTickMsg:
 		return m.sessTick(msg)
 	case tea.MouseMsg:
@@ -1243,9 +1213,6 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.modelName = e.Model
 		m.streamedText = false
 		m.activeTool, m.activeArgs = "", ""
-		m.turnStart = time.Now()
-		m.statusGen++
-		tick = armStatus(m.statusGen)
 	case golemclient.TextDelta:
 		m.appendToAssistant(e.Delta)
 		m.streamedText = true
@@ -1529,10 +1496,8 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 	m.turnActive = true
 	m.streamedText = live.streamedText
 	m.activeTool, m.activeArgs = live.tool, live.args
-	m.turnStart = time.Now() // the true start is unknowable from the replay
-	m.statusGen++
 
-	return armStatus(m.statusGen)
+	return nil
 }
 
 // refreshView pushes the rendered transcript into the viewport. While a
@@ -1634,13 +1599,13 @@ func (m Model) statusLine() string {
 
 	switch {
 	case m.turnActive && m.activeTool != "":
-		left = "◆ " + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs) + " " + m.elapsed()
+		left = "◆ " + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs)
 		token = kit.Tool
 	case m.turnActive && m.streamedText:
-		left = "● responding " + m.elapsed()
+		left = "● responding"
 		token = kit.Accent
 	case m.turnActive:
-		left = "● thinking " + m.elapsed()
+		left = "● thinking"
 		token = kit.Accent
 	case m.sessionID == "" && (len(m.pendingMsgs) > 0 || m.pendingModel != ""):
 		left = "● creating session"
@@ -1650,11 +1615,6 @@ func (m Model) statusLine() string {
 	}
 
 	return m.kit.StatusBar(m.vp.Width, left, token)
-}
-
-// elapsed renders the active turn's age in whole seconds.
-func (m Model) elapsed() string {
-	return fmt.Sprintf("%ds", max(int(time.Since(m.turnStart).Seconds()), 0))
 }
 
 // usageSummary renders the last turn's token counts, or "" before the
