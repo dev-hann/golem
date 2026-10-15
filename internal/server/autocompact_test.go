@@ -290,4 +290,39 @@ func TestAutoCompact_InterruptCancelsSummarySideCall(t *testing.T) {
 			t.Errorf("compact_failed session = %q, want %q", failed.Session, id)
 		}
 	}
+
+	// Drain the cancelled turn's terminal event before cleanup: the turn
+	// goroutine may still be appending its tail when the test body ends,
+	// and t.TempDir's RemoveAll then races the write on slow runners
+	// ("directory not empty", CI run 38742622506). Observing the terminal
+	// event means every store append of this turn already happened —
+	// persist-before-emit guarantees it.
+	h.drainTerminal()
+}
+
+// drainTerminal consumes events until the turn's terminal event
+// (turn_end or error) or a short patience elapses. It is the cleanup
+// handshake for tests that leave a cancelled turn's tail in flight:
+// once the terminal event is observed, the turn goroutine has finished
+// every store append (persist-before-emit), so temp-dir teardown cannot
+// race a write.
+func (h *harness) drainTerminal() {
+	h.t.Helper()
+
+	const patience = 5 * time.Second
+	deadline := time.Now().Add(patience)
+
+	for time.Now().Before(deadline) {
+		ev, got, err := h.client.ReceiveWithTimeout(500 * time.Millisecond)
+		if err != nil || !got {
+			continue
+		}
+
+		switch ev.(type) {
+		case golemclient.TurnEnd, golemclient.ErrorEvent:
+			return
+		default:
+			// interim events (deltas, compact_failed, title) keep flowing
+		}
+	}
 }
