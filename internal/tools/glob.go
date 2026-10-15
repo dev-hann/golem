@@ -32,7 +32,8 @@ func (t GlobTool) Name() string { return "glob" }
 
 // Description implements Tool.
 func (GlobTool) Description() string {
-	return "List files matching a glob pattern (*, ?, **). Paths are workspace-relative."
+	return "List files matching a glob pattern (*, ?, **). Paths are workspace-relative. " +
+		"Dependency/build directories and binary files are skipped; more results need a tighter pattern."
 }
 
 // InputSchema implements Tool.
@@ -70,6 +71,8 @@ func (t GlobTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 		return "", fmt.Errorf("glob: %w", err)
 	}
 
+	ign := loadIgnoreSet(root)
+
 	var results []string
 
 	walkErr := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -78,7 +81,11 @@ func (t GlobTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 		}
 
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			if path == root {
+				return nil
+			}
+
+			if walkSkipDir(d.Name(), relPath(root, path), ign) {
 				return filepath.SkipDir
 			}
 
@@ -89,8 +96,13 @@ func (t GlobTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 			return filepath.SkipAll
 		}
 
-		if rx.MatchString(relPath(root, path)) {
-			results = append(results, relPath(root, path))
+		rel := relPath(root, path)
+		if walkSkipFile(rel, ign, true) {
+			return nil
+		}
+
+		if rx.MatchString(rel) {
+			results = append(results, rel)
 		}
 
 		return nil
