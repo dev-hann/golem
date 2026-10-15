@@ -1940,10 +1940,10 @@ func (m Model) pickerLines() []pickerListLine {
 			lastGroup = label
 		}
 
-		row := m.sessionRow(s, now, m.sessRowWidth())
+		row := m.sessionRow(s, now, m.sessRowWidth(), i == m.pickIndex)
 
 		if m.sessDeleteArmed == s.ID {
-			row = m.sessDeleteRow(s, m.sessRowWidth())
+			row = m.sessDeleteRow(s, m.sessRowWidth(), i == m.pickIndex)
 		}
 
 		if i == m.pickIndex && m.sessRenaming {
@@ -2085,24 +2085,53 @@ func dateGroupLabel(now time.Time, rfc3339 string) (string, bool) {
 	}
 }
 
+// rowBar renders the bar column: the current-session marker, plain
+// when focused (reverse video inverts nested colors into blocks).
+func (m Model) rowBar(sessionID string, focused bool) string {
+	if sessionID != m.sessionID {
+		return strings.Repeat(" ", sessBarCols)
+	}
+
+	if focused {
+		return "▎ "
+	}
+
+	return m.kit.Marker(kit.User, "▎ ")
+}
+
+// rowStatus renders the status column: the running-turn spinner, plain
+// when focused.
+func (m Model) rowStatus(s golemclient.SessionSummary, focused bool) string {
+	if !m.sessionRunning(s) {
+		return strings.Repeat(" ", sessStatusCols)
+	}
+
+	glyph := kit.SpinnerFrames[(m.sessSpinFrame%len(kit.SpinnerFrames)+len(kit.SpinnerFrames))%len(kit.SpinnerFrames)]
+
+	if focused {
+		return glyph + " "
+	}
+
+	return m.kit.Spinner(m.sessSpinFrame) + " "
+}
+
 // sessDeleteHint is the armed row's confirm prompt.
 const sessDeleteHint = "ctrl+d again to confirm"
 
 // sessDeleteRow renders the armed row: same bar and status columns, the
 // title replaced by the confirm hint in the error token — one
 // destructive cue per opencode's press-again pattern, columns aligned.
-func (m Model) sessDeleteRow(s golemclient.SessionSummary, width int) string {
-	bar := strings.Repeat(" ", sessBarCols)
-	if s.ID == m.sessionID {
-		bar = m.kit.Marker(kit.User, "▎ ")
-	}
-
-	status := strings.Repeat(" ", sessStatusCols)
-	if m.sessionRunning(s) {
-		status = m.kit.Spinner(m.sessSpinFrame) + " "
-	}
+// focused rows render plain (see sessionRow: nested colors invert into
+// blocks under the reverse-video highlight).
+func (m Model) sessDeleteRow(s golemclient.SessionSummary, width int, focused bool) string {
+	bar := m.rowBar(s.ID, focused)
+	status := m.rowStatus(s, focused)
 
 	hintCols := max(width-sessBarCols-sessStatusCols, 1)
+
+	if focused {
+		return bar + status + ansi.Truncate(sessDeleteHint, hintCols, "…")
+	}
 
 	return bar + status + m.kit.Marker(kit.Error, ansi.Truncate(sessDeleteHint, hintCols, "…"))
 }
@@ -2146,7 +2175,13 @@ const sessGutterCols = 2 * kit.RowGutter
 // sessTickMsg) marks a live turn, and the dim age stays right. No text
 // markers: state reads from color and glyphs, not words. The raw
 // session id never shows.
-func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time, width int) string {
+//
+// focused rows render plain on purpose: the focus highlight is reverse
+// video (kit.Row), and any colored span nested inside it has its
+// foreground inverted into a background — the bar would become a bright
+// block, the spinner and age colored rectangles. Glyphs alone carry the
+// state while focused; color returns when the cursor moves off.
+func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time, width int, focused bool) string {
 	name := s.Title
 
 	if name == "" {
@@ -2157,15 +2192,8 @@ func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time, width int
 		}
 	}
 
-	bar := strings.Repeat(" ", sessBarCols)
-	if s.ID == m.sessionID {
-		bar = m.kit.Marker(kit.User, "▎ ")
-	}
-
-	status := strings.Repeat(" ", sessStatusCols)
-	if m.sessionRunning(s) {
-		status = m.kit.Spinner(m.sessSpinFrame) + " "
-	}
+	bar := m.rowBar(s.ID, focused)
+	status := m.rowStatus(s, focused)
 
 	age := ""
 	if rel, ok := relTime(now, s.LastActive); ok {
@@ -2176,6 +2204,10 @@ func (m Model) sessionRow(s golemclient.SessionSummary, now time.Time, width int
 	// never lose cells to a long title.
 	titleCols := max(width-sessBarCols-sessStatusCols-len(age)-sessAgeGap, 1)
 	name = ansi.Truncate(name, titleCols, "…")
+
+	if focused {
+		return bar + status + name + strings.Repeat(" ", sessAgeGap) + age
+	}
 
 	return bar + status + name + strings.Repeat(" ", sessAgeGap) + m.kit.DimLine(age)
 }
