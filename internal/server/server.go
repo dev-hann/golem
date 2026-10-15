@@ -345,8 +345,10 @@ const deleteTurnWait = 10 * time.Second
 // handleDeleteSession removes a session, opencode-style: cancel a running
 // turn first, wait for its goroutine to stop appending, then delete the
 // file and confirm with session_deleted. The wait-then-delete ordering
-// keeps a turn's Appends from resurrecting the file; a turn goroutine
-// that finds its session deleted stops before appending (ADR-0019).
+// keeps a turn's Appends from racing the remove; Delete's permanent flag
+// (ADR-0019) then refuses any late writer — a turn goroutine that
+// outlived the drain bound, or the title side call — so the file cannot
+// come back.
 func (s *Server) handleDeleteSession(writer *connWriter, ev golemclient.DeleteSession) {
 	if _, err := s.cfg.Store.Get(ev.Session); err != nil {
 		writer.send(errorOf(ev.Session, "", "session_not_found", err))
@@ -369,9 +371,6 @@ func (s *Server) handleDeleteSession(writer *connWriter, ev golemclient.DeleteSe
 		case <-timer.C:
 		}
 	}
-
-	s.cfg.Store.MarkDeleted(ev.Session) // blocks late appends (title side call)
-	defer s.cfg.Store.UnmarkDeleted(ev.Session)
 
 	if err := s.cfg.Store.Delete(ev.Session); err != nil {
 		writer.send(errorOf(ev.Session, "", "internal", err))

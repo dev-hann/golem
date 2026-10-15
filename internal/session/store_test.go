@@ -2,9 +2,11 @@ package session_test
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -416,5 +418,56 @@ func TestStore_DeleteUnknownIDFails(t *testing.T) {
 
 	if err := store.Delete("../escape"); err == nil {
 		t.Error("Delete of an invalid id should error")
+	}
+}
+
+// TestStore_AppendDuringDeleteNeverResurrects pins the resurrection race:
+// an Append racing a Delete must either win the file (pre-delete append,
+// Delete then removes it) or fail with ErrDeleted — it can never re-create
+// the file after Delete returned. The window without the fix: Append's
+// flag check passes, it drops the lock, Delete marks+removes, Append's
+// O_CREATE resurrects.
+func TestStore_AppendDuringDeleteNeverResurrects(t *testing.T) {
+	t.Parallel()
+	store := newStore(t, 4)
+
+	sess, err := store.Create("/proj")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	iterations := 200
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	go func() { // appender
+		defer wg.Done()
+		for range iterations {
+			_ = store.Append(sess.ID, map[string]any{"type": "text_delta"})
+		}
+	}()
+
+	go func() { // deleter
+		defer wg.Done()
+		for range iterations {
+			_ = store.Delete(sess.ID)
+		}
+	}()
+
+	wg.Wait()
+
+	path := filepath.Join(store.Dir(), sess.ID+".jsonl")
+	if _, err := os.Stat(path); err == nil {
+		t.Errorf("session file resurrected after deletes: %s exists", path)
+	} else if !os.IsNotExist(err) {
+		t.Errorf("stat %s: %v", path, err)
+	}
+
+	// Post-race appends must fail: the session is deleted and stays so.
+	if err := store.Append(sess.ID, map[string]any{"type": "text_delta"}); err == nil {
+		t.Error("Append after Delete must fail, not resurrect the file")
+	} else if !errors.Is(err, session.ErrDeleted) {
+		t.Errorf("Append after Delete = %v, want ErrDeleted", err)
 	}
 }
