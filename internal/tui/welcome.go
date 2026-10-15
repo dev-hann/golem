@@ -65,10 +65,10 @@ func (m Model) welcomeView() string {
 	}
 
 	for i, row := range rows {
-		rows[i] = centerRow(row, m.vp.Width)
+		rows[i] = centerRow(row, m.vp.Width())
 	}
 
-	height := max(m.vp.Height, viewportMinHeight)
+	height := max(m.vp.Height(), viewportMinHeight)
 
 	out := make([]string, 0, height)
 	for range max((height-len(rows))/2, 0) {

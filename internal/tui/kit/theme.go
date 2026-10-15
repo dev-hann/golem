@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-
-	"github.com/charmbracelet/lipgloss"
 )
 
 // Token is a semantic color slot. Components reference tokens only —
@@ -38,11 +36,19 @@ var Tokens = []Token{
 	Fg, Bg, Accent, Dim, Error, OK, Warn, User, Assistant, Tool, Border, Title, Selection,
 }
 
-// Theme is a pure-data palette: token → color (adaptive for light/dark
-// terminals). Serializable by construction for future config loading.
+// Theme is a pure-data palette: token → color (a hex string or ANSI
+// index, resolved to light/dark by the Kit's dark flag at build time).
+// Serializable by construction for future config loading.
 type Theme struct {
 	Name   string
-	Colors map[Token]lipgloss.AdaptiveColor
+	Colors map[Token]Pair
+}
+
+// Pair is a light/dark color pair: the exact shape a theme file feeds
+// in, with both sides as plain color strings (hex or ANSI index).
+type Pair struct {
+	Light string
+	Dark  string
 }
 
 // DefaultTheme is the built-in look: Tokyo Night (folke/tokyonight), the
@@ -50,7 +56,7 @@ type Theme struct {
 func DefaultTheme() *Theme {
 	return &Theme{
 		Name: "tokyo-night",
-		Colors: map[Token]lipgloss.AdaptiveColor{
+		Colors: map[Token]Pair{
 			Fg:        {Light: "#3760bf", Dark: "#c0caf5"},
 			Bg:        {Light: "#e1e2e7", Dark: "#1a1b26"},
 			Accent:    {Light: "#2e7de9", Dark: "#7aa2f7"},
@@ -119,7 +125,7 @@ func ThemeFromMap(name string, colors map[Token]string) (*Theme, error) {
 			return nil, fmt.Errorf("kit: theme %q: invalid color %q for token %q", name, value, token)
 		}
 
-		theme.Colors[token] = lipgloss.AdaptiveColor{Light: value, Dark: value}
+		theme.Colors[token] = Pair{Light: value, Dark: value}
 	}
 
 	return theme, nil

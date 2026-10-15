@@ -63,6 +63,28 @@ config schema may change without notice.
 ### Changed — session titles generate during the turn and arrive as they land (2026-10-16)
 
 - The title side call now fires when a turn of an untitled session *starts* (ADR-0032) instead of after `turn_end`: the first user message already names the task, so the title is generated while the agent works — minutes-long tool loops no longer delay it. On success the server pushes the persisted `session_title` event to the connection that started the turn, so the TUI header (and any client folding session records) updates within one side call instead of waiting for the next `session_list` (previously: the picker had to be reopened to see the title). The event may interleave anywhere among the turn's events; a per-session guard prevents double generation when turns overlap on an untitled session. Failure behavior is unchanged (logged, no record, retried next turn).
+### Changed — Bubble Tea v2 migration: shift+enter newline, OSC 7501 status (2026-10-16, ADR-0035)
+
+- The TUI runtime moved from bubbletea v1 to `charm.land/bubbletea/v2`
+  (+`bubbles/v2`, `lipgloss/v2`; GA since 2026-02). Alt screen, mouse
+  mode, and the window title are now declared on the view instead of
+  program options; mouse events split into click/wheel/motion/release.
+- `shift+enter` inserts a newline on terminals with the kitty keyboard
+  protocol — the alt+enter workaround (v1 could not tell shift+enter
+  from enter) remains the fallback elsewhere. The composer hint reads
+  `alt/shift+enter newline`.
+- The terminal tab dot reports agent state via OSC 7501 (Program Status
+  Protocol): working while a turn runs, blocked while a modal is open,
+  error when the connection dies, idle otherwise.
+- The theme follows the terminal's reported background color live
+  (`tea.BackgroundColorMsg` flips Tokyo Night Night/Day); lipgloss v2's
+  renderer removal means the kit resolves its palette once at build
+  (`kit.NewFor(theme, dark)`), and color downsampling moved from render
+  time to write time (`colorprofile` in tests).
+- Theme colors are now `kit.Pair{Light, Dark}` (plain strings) instead
+  of `lipgloss.AdaptiveColor` — same pure-data shape, no lipgloss type
+  in the serializable theme. `muesli/termenv` is no longer a direct
+  dependency.
 
 ### Changed — status line animates while a turn runs (2026-10-15)
 

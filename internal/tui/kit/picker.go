@@ -5,7 +5,7 @@ package kit
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // Picker is a list selector model rendered through the kit theme.
@@ -38,7 +38,7 @@ func (p *Picker) Init() tea.Cmd { return nil }
 
 // Update implements tea.Model.
 func (p *Picker) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, isKey := msg.(tea.KeyMsg); isKey {
+	if key, isKey := msg.(tea.KeyPressMsg); isKey {
 		switch key.String() { //nolint:exhaustive // key names, not enum values
 		case "up", "k":
 			p.move(-1)
@@ -82,7 +82,7 @@ func (p *Picker) row(text string, selected bool) string {
 }
 
 // View implements tea.Model.
-func (p *Picker) View() string {
+func (p *Picker) View() tea.View {
 	var body strings.Builder
 
 	title := p.Title
@@ -107,7 +107,10 @@ func (p *Picker) View() string {
 
 	body.WriteString(p.kit.DimLine(hint))
 
-	return body.String()
+	v := tea.NewView(body.String())
+	v.AltScreen = true
+
+	return v
 }
 
 // move shifts the cursor by delta, clamping.
@@ -133,8 +136,9 @@ func (p *Picker) Selection() (string, bool) {
 
 // PickFromList runs the picker full-screen; ok is false when the user
 // cancelled or no terminal is available (callers fall back to line input).
+// ErrInterrupted (ctrl+c without a TTY) counts as a cancel, not a failure.
 func (k *Kit) PickFromList(title string, items []string, cursor int) (item string, ok bool) {
-	program := tea.NewProgram(NewPicker(k, title, items, cursor), tea.WithAltScreen())
+	program := tea.NewProgram(NewPicker(k, title, items, cursor))
 
 	final, err := program.Run()
 	if err != nil {

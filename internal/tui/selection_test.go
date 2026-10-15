@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -31,25 +31,19 @@ func selectionTranscript(t *testing.T) Model {
 
 // press clicks the left button on screen row y.
 func press(m Model, y int) Model {
-	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 0, Y: y,
-	})
+	next, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 0, Y: y})
 	return next.(Model)
 }
 
 // dragMove moves the pointer to screen row y while the button is held.
 func dragMove(m Model, y int) Model {
-	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionMotion, X: 0, Y: y,
-	})
+	next, _ := m.Update(tea.MouseMotionMsg{Button: tea.MouseLeft, X: 0, Y: y})
 	return next.(Model)
 }
 
 // releaseMouse ends the drag (SGR release: same button; X10: none).
 func releaseMouse(m Model) Model {
-	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonNone, Action: tea.MouseActionRelease, X: 0, Y: 0,
-	})
+	next, _ := m.Update(tea.MouseReleaseMsg{})
 	return next.(Model)
 }
 
@@ -82,7 +76,7 @@ func TestModel_DragSelectsLines(t *testing.T) {
 	}
 
 	// The highlight renders on the selected screen rows only.
-	view := strings.Split(m.View(), "\n")
+	view := strings.Split(m.View().Content, "\n")
 	for y := stickyTopRow(m) + 2; y <= stickyTopRow(m)+5; y++ {
 		if !strings.Contains(view[y], "\x1b[7m") {
 			t.Errorf("view row %d must carry the reverse marker:\n%q", y, view[y])
@@ -102,7 +96,7 @@ func TestModel_DragClampsToContent(t *testing.T) {
 
 	// Dragging far past the last content line selects through l9 only.
 	m = press(m, stickyTopRow(m)+2)
-	m = dragMove(m, m.vp.Height+10)
+	m = dragMove(m, m.vp.Height()+10)
 	if m.selHead != 9 {
 		t.Errorf("clamped head=%d; want 9 (last content line)", m.selHead)
 	}
@@ -120,7 +114,7 @@ func TestModel_SelectionSkipsComposerStickyAndModals(t *testing.T) {
 	m := selectionTranscript(t)
 
 	// The composer area is below the viewport.
-	m = press(m, m.vp.Height+2)
+	m = press(m, m.vp.Height()+2)
 	if m.selecting || m.selectedText() != "" {
 		t.Errorf("press on the composer must not start a selection (selecting=%v)", m.selecting)
 	}
@@ -141,7 +135,7 @@ func TestModel_SelectionSkipsComposerStickyAndModals(t *testing.T) {
 		{kind: blockAssistant, text: strings.Repeat("answer line\n", 60)},
 	}
 	sticky.refreshView()
-	sticky.vp.YOffset = 30
+	sticky.vp.SetYOffset(30)
 	sticky.refreshView()
 
 	if sticky.stickyText() != "the question" {
@@ -175,7 +169,7 @@ func TestModel_CtrlC_CopiesSelectionThenLadder(t *testing.T) {
 	m = dragMove(m, stickyTopRow(m)+5)
 	m = releaseMouse(m)
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	m = next.(Model)
 
 	if cmd == nil {
@@ -194,18 +188,18 @@ func TestModel_CtrlC_CopiesSelectionThenLadder(t *testing.T) {
 	if m.selectedText() != "" {
 		t.Error("selection must clear after copying")
 	}
-	if strings.Contains(m.View(), "\x1b[7m") {
+	if strings.Contains(m.View().Content, "\x1b[7m") {
 		t.Error("highlight must clear after copying")
 	}
 
 	// The ladder resumes: an idle empty composer asks first, then quits.
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC}) // arm the confirm
+	m = key(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}) // arm the confirm
 
 	if m.quitting {
 		t.Fatal("the first post-copy ctrl+c must ask, not quit")
 	}
 
-	_, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, quitCmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if quitCmd == nil {
 		t.Error("ctrl+c after copy should fall through to the exit ladder")
 	}
@@ -222,7 +216,7 @@ func TestModel_CtrlC_CopyFailureShowsError(t *testing.T) {
 	m = dragMove(m, stickyTopRow(m)+5)
 	m = releaseMouse(m)
 
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	m = next.(Model)
 	if cmd == nil {
 		t.Fatal("copy cmd missing")
@@ -233,8 +227,8 @@ func TestModel_CtrlC_CopyFailureShowsError(t *testing.T) {
 	next, _ = m.Update(msg)
 	m = next.(Model)
 
-	if !strings.Contains(m.View(), "no clipboard") {
-		t.Errorf("copy failure should surface in the transcript:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "no clipboard") {
+		t.Errorf("copy failure should surface in the transcript:\n%s", m.View().Content)
 	}
 }
 
@@ -259,7 +253,7 @@ func TestModel_ZeroWidthPressKeepsLadder(t *testing.T) {
 	m = press(m, stickyTopRow(m)+1)
 	m = releaseMouse(m)
 
-	key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	key(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 
 	if _, ok := lastSent(t, fc).(golemclient.Interrupt); !ok {
 		t.Fatalf("ctrl+c with zero-width click should interrupt, sent=%v", fc.sent)
@@ -274,13 +268,13 @@ func TestModel_EscClearsSelection(t *testing.T) {
 	m = press(m, stickyTopRow(m)+2)
 	m = dragMove(m, stickyTopRow(m)+5)
 
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = next.(Model)
 
 	if m.selectedText() != "" {
 		t.Error("esc must clear the selection")
 	}
-	if strings.Contains(m.View(), "\x1b[7m") {
+	if strings.Contains(m.View().Content, "\x1b[7m") {
 		t.Error("esc must clear the highlight")
 	}
 }
@@ -317,7 +311,7 @@ func TestModel_ToolRowPressTogglesWithoutSelection(t *testing.T) {
 		t.Fatalf("toolSpans = %+v, want one entry", m.toolSpans)
 	}
 
-	m = press(m, stickyTopRow(m)+m.toolSpans[0].start-m.vp.YOffset)
+	m = press(m, stickyTopRow(m)+m.toolSpans[0].start-m.vp.YOffset())
 
 	if !m.blocks[0].expanded {
 		t.Error("press on the tool row must still toggle expansion")
@@ -345,7 +339,7 @@ func TestModel_SelectionSurvivesStreaming(t *testing.T) {
 	if !strings.Contains(got, "l2") || !strings.Contains(got, "l4") || strings.Contains(got, "l10") {
 		t.Errorf("streaming must not move the selection:\n%s", got)
 	}
-	if !strings.Contains(m.View(), "\x1b[7m") {
+	if !strings.Contains(m.View().Content, "\x1b[7m") {
 		t.Error("highlight must survive re-render during streaming")
 	}
 }

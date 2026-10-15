@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -74,12 +74,12 @@ func TestReplayHistoryKeepsBlocksBeforeCompactionBarrier(t *testing.T) {
 	// by scrolling up from the tail (the load leaves the view at bottom).
 	if m.vp.AtBottom() {
 		for range 50 {
-			m = key(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+			m = key(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 		}
 	}
 
-	if !strings.Contains(m.View(), "first question ever") {
-		t.Errorf("scrolling up must reach the session's beginning:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "first question ever") {
+		t.Errorf("scrolling up must reach the session's beginning:\n%s", m.View().Content)
 	}
 }
 

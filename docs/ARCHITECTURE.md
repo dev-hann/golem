@@ -142,7 +142,7 @@ Design target ≤ 150 MB RSS under normal use, enforced by `GOMEMLIMIT` (config 
 
 ## Allowed dependencies
 
-stdlib, plus: `anthropics/anthropic-sdk-go`, `openai/openai-go`, `ollama/ollama/api`, `BurntSushi/toml`, `charmbracelet/bubbletea` (+`lipgloss`, `bubbles`, `x/ansi` — the ANSI-aware overlay merge in `internal/tui/kit`), `oklog/ulid`, `golang.org/x/net/html` (HTML→text in `internal/tools/webfetch.go` — ADR-0021). Anything else requires an ADR.
+stdlib, plus: `anthropics/anthropic-sdk-go`, `openai/openai-go`, `ollama/ollama/api`, `BurntSushi/toml`, `charm.land/bubbletea/v2` (+`charm.land/bubbles/v2`, `charm.land/lipgloss/v2`, `x/ansi` — the ANSI-aware overlay merge in `internal/tui/kit`), `oklog/ulid`, `golang.org/x/net/html` (HTML→text in `internal/tools/webfetch.go` — ADR-0021). Anything else requires an ADR.
 
 ## Non-goals (for v1)
 

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -30,12 +30,12 @@ func TestRender_SessionPickerQueryLine(t *testing.T) {
 		m = key(t, m, rkey(r))
 	}
 
-	if got := m.View(); !strings.Contains(got, "› tes_") {
+	if got := m.View().Content; !strings.Contains(got, "› tes_") {
 		t.Errorf("search mode must render the query:\n%s", got)
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
-	if got := m.View(); !strings.Contains(got, "› Add session tests_") {
+	m = key(t, m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	if got := m.View().Content; !strings.Contains(got, "› Add session tests_") {
 		t.Errorf("rename mode must render the rename input on the selected row:\n%s", got)
 	}
 

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
@@ -57,7 +57,7 @@ func wired(t *testing.T) (Model, *fakeClient) {
 }
 
 // key drives one key press, running the resulting cmd (safe: send only).
-func key(t *testing.T, m Model, k tea.KeyMsg) Model {
+func key(t *testing.T, m Model, k tea.KeyPressMsg) Model {
 	t.Helper()
 	next, cmd := m.Update(k)
 	if cmd != nil {
@@ -91,7 +91,7 @@ func resize(m Model, w, h int) Model {
 // arm presses the leader key without running its tick cmd — executing it
 // would stall the test for the full timeout window.
 func arm(m Model) Model {
-	next, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlX})
+	next, _ := m.Update(tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl})
 	return next.(Model)
 }
 
@@ -109,8 +109,54 @@ func exitTick(t *testing.T, m Model, gen int) Model {
 }
 
 // rkey presses a single printable key.
-func rkey(s rune) tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{s}}
+func rkey(s rune) tea.KeyPressMsg {
+	return textKey(s)
+}
+
+// typeRunes presses each rune of s in order and returns the model.
+func typeRunes(m Model, s string) Model {
+	for _, r := range s {
+		next, _ := m.Update(textKey(r))
+		m = next.(Model)
+	}
+
+	return m
+}
+// flattenCmds expands a (possibly batched) cmd into its leaves so tests
+// can run each and pick out the message they await.
+func flattenCmds(cmd tea.Cmd) []tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+
+	switch c := cmd().(type) {
+	case tea.BatchMsg:
+		var out []tea.Cmd
+		for _, sub := range c {
+			out = append(out, flattenCmds(sub)...)
+		}
+
+		return out
+	default:
+		return []tea.Cmd{cmd}
+	}
+}
+
+// textKey builds a printable-key press carrying rune r.
+func textKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// altEnterKey builds the alt/option+enter press that inserts a newline.
+func altEnterKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt}
+}
+
+// shiftEnterKey builds the shift+enter press — distinguishable only on
+// terminals with the kitty keyboard protocol; the handler binds it
+// alongside alt+enter.
+func shiftEnterKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift}
 }
 
 func TestModel_AppliesTextDelta_UpdatesView(t *testing.T) {
@@ -120,7 +166,7 @@ func TestModel_AppliesTextDelta_UpdatesView(t *testing.T) {
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart, Turn: "t1"})
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Turn: "t1", Delta: "Hello "})
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Turn: "t1", Delta: "world"})
-	if got := m.View(); !strings.Contains(got, "Hello world") {
+	if got := m.View().Content; !strings.Contains(got, "Hello world") {
 		t.Errorf("view missing streamed text:\n%s", got)
 	}
 	if !m.turnActive {
@@ -143,7 +189,7 @@ func TestModel_ToolCallCollapsedByDefault(t *testing.T) {
 		Args: []byte(`{"path":"main.go"}`),
 	})
 
-	running := m.View()
+	running := m.View().Content
 	if !strings.Contains(running, "read main.go") {
 		t.Errorf("running summary must show the parsed argument:\n%s", running)
 	}
@@ -157,7 +203,7 @@ func TestModel_ToolCallCollapsedByDefault(t *testing.T) {
 		Result: "1: package main\n2: func main() {}",
 	})
 
-	done := m.View()
+	done := m.View().Content
 	if !strings.Contains(done, "✓") {
 		t.Errorf("summary missing success marker:\n%s", done)
 	}
@@ -176,7 +222,7 @@ func TestModel_ToolCallCollapsedByDefault(t *testing.T) {
 		Result: "exit 1: permission denied",
 	})
 
-	failed := m.View()
+	failed := m.View().Content
 	if !strings.Contains(failed, "✗") || !strings.Contains(failed, "rm -rf /") {
 		t.Errorf("failed summary must show the marker and command:\n%s", failed)
 	}
@@ -205,20 +251,20 @@ func TestModel_ToolBlock_ClickTogglesResult(t *testing.T) {
 	}
 
 	click := func(y int) Model {
-		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: y})
+		next, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: y})
 		return next.(Model)
 	}
 
-	m = click(stickyTopRow(m) + m.toolSpans[0].start - m.vp.YOffset)
+	m = click(stickyTopRow(m) + m.toolSpans[0].start - m.vp.YOffset())
 
-	if !strings.Contains(m.View(), "package main") {
-		t.Errorf("click on the tool row must expand the result:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "package main") {
+		t.Errorf("click on the tool row must expand the result:\n%s", m.View().Content)
 	}
 
-	m = click(stickyTopRow(m) + m.toolSpans[0].start - m.vp.YOffset)
+	m = click(stickyTopRow(m) + m.toolSpans[0].start - m.vp.YOffset())
 
-	if strings.Contains(m.View(), "package main") {
-		t.Errorf("second click must collapse the result:\n%s", m.View())
+	if strings.Contains(m.View().Content, "package main") {
+		t.Errorf("second click must collapse the result:\n%s", m.View().Content)
 	}
 }
 
@@ -240,8 +286,8 @@ func TestModel_ToolBlock_ClickOutsideSpansIgnored(t *testing.T) {
 
 	// Clicks above and below the tool row (and on the composer area) do
 	// nothing.
-	for _, y := range []int{stickyTopRow(m) + span.start - 1, stickyTopRow(m) + span.end, m.vp.Height + screenPadV + layoutChromeRows + 5} {
-		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: y})
+	for _, y := range []int{stickyTopRow(m) + span.start - 1, stickyTopRow(m) + span.end, m.vp.Height() + screenPadV + layoutChromeRows + 5} {
+		next, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: y})
 		m = next.(Model)
 
 		if m.blocks[0].expanded {
@@ -269,7 +315,7 @@ func TestModel_ToolBlock_ClickAccountsForStickyHeader(t *testing.T) {
 	// Scroll so the tool row is the first content line and the question
 	// scrolls off — the sticky bar pins above the viewport.
 	span := m.toolSpans[0]
-	m.vp.YOffset = span.start
+	m.vp.SetYOffset(span.start)
 	m.refreshView()
 
 	if m.stickyText() != "fix the bug" {
@@ -277,9 +323,7 @@ func TestModel_ToolBlock_ClickAccountsForStickyHeader(t *testing.T) {
 	}
 
 	// Screen row = sticky line (1) + content line - YOffset.
-	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: stickyTopRow(m),
-	})
+	next, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: stickyTopRow(m)})
 	m = next.(Model)
 
 	if !m.blocks[2].expanded {
@@ -297,7 +341,7 @@ func TestModel_FooterGone(t *testing.T) {
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
 
-	view := m.View()
+	view := m.View().Content
 	for _, stale := range []string{"thinking…", "done (in=", "zai-coding"} {
 		if strings.Contains(view, stale) {
 			t.Errorf("status footer should be gone, found %q:\n%s", stale, view)
@@ -309,11 +353,11 @@ func TestModel_InterruptSendsInterruptEvent_ThenQuitsWhenIdle(t *testing.T) {
 	t.Parallel()
 	m, fc := wired(t)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = key(t, m, tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if _, ok := lastSent(t, fc).(golemclient.Interrupt); !ok {
 		t.Fatalf("ctrl+c during turn should interrupt, sent=%v", fc.sent)
 	}
-	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Error("idle ctrl+c should quit")
 	}
@@ -327,11 +371,11 @@ func TestModel_SubmitSendsUserMessage(t *testing.T) {
 	var cmd tea.Cmd
 	for _, r := range "fix the bug" {
 		var next tea.Model
-		next, cmd = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		next, cmd = m.Update(textKey(r))
 		m = next.(Model)
 	}
 	_ = cmd
-	next2, cmd2 := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	next2, cmd2 := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if cmd2 != nil {
 		_ = cmd2()
 	}
@@ -364,8 +408,8 @@ func TestModel_SessionPickerListsAndSwitches(t *testing.T) {
 	if m.pickIndex != 0 {
 		t.Errorf("pickIndex = %d, want the cursor on the first row", m.pickIndex)
 	}
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	loaded, ok := lastSent(t, fc).(golemclient.LoadSession)
 	if !ok || loaded.Session != "new" {
 		t.Errorf("load = %#v, want session new", loaded)
@@ -383,7 +427,7 @@ func TestModel_SessionPickerEscapeCancels(t *testing.T) {
 		Type:     golemclient.TypeSessionList,
 		Sessions: []golemclient.SessionSummary{{ID: "s", Cwd: "/a"}},
 	})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.mode != modeChat {
 		t.Errorf("esc should cancel picker, mode = %v", m.mode)
 	}
@@ -404,7 +448,7 @@ func TestModel_SessionPickerShowsTitleAndRelativeTime(t *testing.T) {
 		}},
 	})
 
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 	if !strings.Contains(plain, "Fix auth middleware") || !strings.Contains(plain, "2h ago") {
 		t.Errorf("picker row should show the title and its relative age:\n%s", plain)
 	}
@@ -442,7 +486,7 @@ func TestModel_SessionPickerMarksCurrentSession(t *testing.T) {
 		},
 	})
 
-	view := m.View()
+	view := m.View().Content
 	if n := strings.Count(ansi.Strip(view), "▎"); n != 1 {
 		t.Errorf("current-session bar must mark exactly one row, got %d:\n%s", n, view)
 	}
@@ -479,7 +523,7 @@ func TestModel_SessionPickerShowsRunningStatus(t *testing.T) {
 	})
 
 	// Server-reported busy sessions carry the spinner glyph.
-	plain := ansi.Strip(m.View())
+	plain := ansi.Strip(m.View().Content)
 	if !strings.Contains(plain, "Elsewhere") || !spinnerIn(plain, "Elsewhere") {
 		t.Errorf("busy session row must carry a spinner glyph:\n%s", plain)
 	}
@@ -493,15 +537,15 @@ func TestModel_SessionPickerShowsRunningStatus(t *testing.T) {
 		Type: golemclient.TypeTurnStart, Session: "s1", Turn: "t1",
 		Provider: "zai", Model: "glm-5.3",
 	})
-	plain = ansi.Strip(m.View())
+	plain = ansi.Strip(m.View().Content)
 	if !spinnerIn(plain, "Mine") {
 		t.Errorf("locally active session row must carry a spinner:\n%s", plain)
 	}
 
 	// Turn end clears it.
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd, Session: "s1", Turn: "t1"})
-	if spinnerIn(ansi.Strip(m.View()), "Mine") {
-		t.Errorf("turn end must clear the spinner:\n%s", m.View())
+	if spinnerIn(ansi.Strip(m.View().Content), "Mine") {
+		t.Errorf("turn end must clear the spinner:\n%s", m.View().Content)
 	}
 }
 
@@ -549,8 +593,8 @@ func TestModel_SessionPickerLocalTurnOverridesStaleBusyFlag(t *testing.T) {
 		Sessions: []golemclient.SessionSummary{{ID: "s1", Title: "Mine", Cwd: "/a", Busy: true}},
 	})
 
-	if spinnerIn(ansi.Strip(m.View()), "Mine") {
-		t.Errorf("stale busy flag must not spin the idle local session:\n%s", m.View())
+	if spinnerIn(ansi.Strip(m.View().Content), "Mine") {
+		t.Errorf("stale busy flag must not spin the idle local session:\n%s", m.View().Content)
 	}
 }
 
@@ -577,7 +621,7 @@ func TestModel_SessionPickerCursorDoesNotShiftRows(t *testing.T) {
 	// survive a cursor move untouched.
 	rowCells := func(m Model) map[string][2]int {
 		cells := map[string][2]int{}
-		for _, line := range strings.Split(ansi.Strip(m.View()), "\n") {
+		for _, line := range strings.Split(ansi.Strip(m.View().Content), "\n") {
 			for _, title := range []string{"Alpha", "Beta", "Gamma"} {
 				if at := strings.Index(line, title); at >= 0 {
 					cells[title] = [2]int{len([]rune(line)), at}
@@ -589,8 +633,8 @@ func TestModel_SessionPickerCursorDoesNotShiftRows(t *testing.T) {
 	}
 
 	before := rowCells(m)
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	after := rowCells(m)
 
 	if len(before) != 3 || len(after) != 3 {
@@ -610,8 +654,8 @@ func TestModel_SessionPickerCursorDoesNotShiftRows(t *testing.T) {
 		}
 	}
 
-	if strings.Contains(ansi.Strip(m.View()), "▶") {
-		t.Errorf("picker rows must not carry a cursor arrow:\n%s", m.View())
+	if strings.Contains(ansi.Strip(m.View().Content), "▶") {
+		t.Errorf("picker rows must not carry a cursor arrow:\n%s", m.View().Content)
 	}
 }
 
@@ -633,8 +677,8 @@ func TestModel_SessionPickerSpinnerTicks(t *testing.T) {
 	})
 
 	// The row spins from frame 0 while the picker is open.
-	if !strings.Contains(ansi.Strip(m.View()), kit.SpinnerFrames[0]) {
-		t.Errorf("picker spinner must start at frame 0:\n%s", m.View())
+	if !strings.Contains(ansi.Strip(m.View().Content), kit.SpinnerFrames[0]) {
+		t.Errorf("picker spinner must start at frame 0:\n%s", m.View().Content)
 	}
 
 	next, _ := m.Update(spinTickMsg{gen: m.spinGen})
@@ -642,8 +686,8 @@ func TestModel_SessionPickerSpinnerTicks(t *testing.T) {
 	if m2.spinFrame != 1 {
 		t.Errorf("spinFrame after tick = %d, want 1", m2.spinFrame)
 	}
-	if !strings.Contains(ansi.Strip(m2.View()), kit.SpinnerFrames[1]) {
-		t.Errorf("picker spinner must advance to frame 1:\n%s", m2.View())
+	if !strings.Contains(ansi.Strip(m2.View().Content), kit.SpinnerFrames[1]) {
+		t.Errorf("picker spinner must advance to frame 1:\n%s", m2.View().Content)
 	}
 
 	// A stale-generation tick (picker reopened since) must not advance.
@@ -669,7 +713,7 @@ func TestModel_SessionPickerSpinnerStopsWhenClosed(t *testing.T) {
 			{ID: "s2", Title: "Elsewhere", Cwd: "/b", Turns: 2, Busy: true},
 		},
 	})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // opens the session, closes the picker
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // opens the session, closes the picker
 
 	next, _ := m.Update(spinTickMsg{gen: m.spinGen})
 	if got := next.(Model).spinFrame; got != 0 {
@@ -696,7 +740,7 @@ func TestModel_SessionPickerSearchFilters(t *testing.T) {
 		m = key(t, m, rkey(r))
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "Fix auth middleware") {
 		t.Errorf("filter must keep the matching row:\n%s", view)
 	}
@@ -707,7 +751,7 @@ func TestModel_SessionPickerSearchFilters(t *testing.T) {
 		}
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	loaded, ok := lastSent(t, fc).(golemclient.LoadSession)
 	if !ok || loaded.Session != "s1" {
@@ -728,7 +772,7 @@ func TestModel_SessionPickerRenameFlow(t *testing.T) {
 		},
 	})
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
+	m = key(t, m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	if !m.sessRenaming {
 		t.Fatalf("ctrl+r must start renaming")
 	}
@@ -737,12 +781,12 @@ func TestModel_SessionPickerRenameFlow(t *testing.T) {
 		t.Errorf("rename input = %q, want the current title seeded", got)
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlU}) // clear the seeded text
+	m = key(t, m, tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}) // clear the seeded text
 	for _, r := range "New name" {
 		m = key(t, m, rkey(r))
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	sent, ok := lastSent(t, fc).(golemclient.RenameSession)
 	if !ok || sent.Session != "s1" || sent.Title != "New name" {
@@ -769,8 +813,8 @@ func TestModel_SessionPickerRenameEscapeCancels(t *testing.T) {
 		Sessions: []golemclient.SessionSummary{{ID: "s1", Title: "Old", Cwd: "/a"}},
 	})
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = key(t, m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.sessRenaming || m.sessRenameText != "" {
 		t.Errorf("esc must cancel renaming: renaming=%v text=%q", m.sessRenaming, m.sessRenameText)
@@ -798,13 +842,13 @@ func TestModel_SessionPickerEscClearsQueryThenCloses(t *testing.T) {
 		t.Fatalf("query = %q, want x", m.sessQuery)
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.mode != modeSessions || m.sessQuery != "" {
 		t.Fatalf("first esc must clear the query, mode=%v query=%q", m.mode, m.sessQuery)
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if m.mode != modeChat {
 		t.Fatalf("second esc must close the picker, mode=%v", m.mode)
@@ -826,8 +870,8 @@ func TestModel_SessionTitleEventUpdatesListRow(t *testing.T) {
 		Type: golemclient.TypeSessionTitle, Session: "s1", Title: "Server title",
 	})
 
-	if !strings.Contains(m.View(), "Server title") {
-		t.Errorf("session_title event must refresh the open list:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "Server title") {
+		t.Errorf("session_title event must refresh the open list:\n%s", m.View().Content)
 	}
 }
 
@@ -848,7 +892,7 @@ func TestModel_HistoryReplayRendersTranscript(t *testing.T) {
 	m = deliver(t, m, golemclient.History{
 		Type: golemclient.TypeHistory, Session: "s1", Events: events,
 	})
-	view := m.View()
+	view := m.View().Content
 	for _, want := range []string{"read go.mod", "module golem", "read"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("replayed transcript missing %q:\n%s", want, view)
@@ -884,7 +928,7 @@ func TestModel_HistoryReplayOpensAtBottom(t *testing.T) {
 		t.Error("history replay should restore auto-follow (open at the bottom)")
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "tail-marker") {
 		t.Errorf("replayed transcript should open showing its tail:\n%s", view)
 	}
@@ -893,7 +937,7 @@ func TestModel_HistoryReplayOpensAtBottom(t *testing.T) {
 	// design), so assert the scroll position itself.
 	if !m.vp.AtBottom() {
 		t.Errorf("history replay should open at the bottom: YOffset=%d height=%d",
-			m.vp.YOffset, m.vp.Height)
+			m.vp.YOffset(), m.vp.Height())
 	}
 }
 
@@ -916,12 +960,12 @@ func TestModel_FollowKeepsLastLineVisibleUnderSticky(t *testing.T) {
 	if got := m.stickyText(); got != "question two" {
 		t.Fatalf("precondition: sticky must pin question two, got %q", got)
 	}
-	if !strings.Contains(m.View(), "tail-marker") {
-		t.Errorf("streaming tail must stay visible under the sticky bar:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "tail-marker") {
+		t.Errorf("streaming tail must stay visible under the sticky bar:\n%s", m.View().Content)
 	}
 	if !m.vp.AtBottom() {
 		t.Errorf("follow should keep the viewport at the bottom: YOffset=%d H=%d",
-			m.vp.YOffset, m.vp.Height)
+			m.vp.YOffset(), m.vp.Height())
 	}
 }
 
@@ -935,17 +979,17 @@ func TestModel_ResizeShrinkKeepsTailVisible(t *testing.T) {
 		Delta: strings.Repeat("filler\n", 60) + "last-line\n",
 	})
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
-	if !strings.Contains(m.View(), "last-line") {
+	if !strings.Contains(m.View().Content, "last-line") {
 		t.Fatal("precondition: tail visible before resize")
 	}
 
 	m = resize(m, 80, 12)
-	if !strings.Contains(m.View(), "last-line") {
-		t.Errorf("shrinking the terminal must keep the tail on screen:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "last-line") {
+		t.Errorf("shrinking the terminal must keep the tail on screen:\n%s", m.View().Content)
 	}
 	if !m.vp.AtBottom() {
 		t.Errorf("follow should re-pin after a shrink: YOffset=%d H=%d",
-			m.vp.YOffset, m.vp.Height)
+			m.vp.YOffset(), m.vp.Height())
 	}
 }
 
@@ -960,14 +1004,14 @@ func TestModel_ResizeShrinkPreservesScrollback(t *testing.T) {
 	})
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
 	for range 4 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	}
 	if m.follow {
 		t.Fatal("precondition: paging up suspends follow")
 	}
 
 	m = resize(m, 80, 12)
-	if strings.Contains(m.View(), "filler\nfiller") && m.vp.AtBottom() {
+	if strings.Contains(m.View().Content, "filler\nfiller") && m.vp.AtBottom() {
 		t.Error("resize must not jump a scrolled-back reader to the tail")
 	}
 	if m.follow {
@@ -985,7 +1029,7 @@ func TestModel_ComposerGrowthKeepsTailVisible(t *testing.T) {
 		Delta: strings.Repeat("filler\n", 30) + "last-line\n",
 	})
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
-	if !strings.Contains(m.View(), "last-line") {
+	if !strings.Contains(m.View().Content, "last-line") {
 		t.Fatal("precondition: tail visible before composer growth")
 	}
 
@@ -996,12 +1040,12 @@ func TestModel_ComposerGrowthKeepsTailVisible(t *testing.T) {
 		t.Fatalf("precondition: composer must grow, inputRows=%d", m.inputRows)
 	}
 
-	if !strings.Contains(m.View(), "last-line") {
-		t.Errorf("composer growth must keep the tail on screen:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "last-line") {
+		t.Errorf("composer growth must keep the tail on screen:\n%s", m.View().Content)
 	}
 	if !m.vp.AtBottom() {
 		t.Errorf("follow should re-pin after composer growth: YOffset=%d H=%d",
-			m.vp.YOffset, m.vp.Height)
+			m.vp.YOffset(), m.vp.Height())
 	}
 }
 
@@ -1024,7 +1068,7 @@ func TestViewport_HandlesLongOutputScrollback(t *testing.T) {
 	m = deliver(t, m, golemclient.TextDelta{
 		Type: golemclient.TypeTextDelta, Delta: "last-line-marker",
 	})
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "last-line-marker") {
 		t.Error("viewport should auto-scroll to the streaming tail")
 	}
@@ -1039,7 +1083,7 @@ func TestModel_StickyUserPinsWhenScrolledPast(t *testing.T) {
 	m = resize(m, 80, 24)
 	m.blocks = []block{{kind: blockUser, text: "fix the bug"}}
 	m.refreshView()
-	view := m.View()
+	view := plain(m.View().Content)
 	if !strings.Contains(view, "▎ fix the bug") {
 		t.Fatalf("user bar should be visible before scrolling:\n%s", view)
 	}
@@ -1053,7 +1097,7 @@ func TestModel_StickyUserPinsWhenScrolledPast(t *testing.T) {
 			Type: golemclient.TypeTextDelta, Delta: strings.Repeat("x", 60) + "\n",
 		})
 	}
-	view = m.View()
+	view = m.View().Content
 	if m.stickyText() != "fix the bug" {
 		t.Errorf("sticky should pin the last question above the viewport")
 	}
@@ -1074,8 +1118,8 @@ func TestModel_StickyUserClearsWithTranscript(t *testing.T) {
 	m.refreshView()
 	m.blocks = nil
 	m.refreshView()
-	if strings.Contains(m.View(), "▎") {
-		t.Errorf("sticky should disappear when the transcript clears:\n%s", m.View())
+	if strings.Contains(m.View().Content, "▎") {
+		t.Errorf("sticky should disappear when the transcript clears:\n%s", m.View().Content)
 	}
 }
 
@@ -1086,7 +1130,7 @@ func TestModel_HeaderAndSessionStatusGone(t *testing.T) {
 	m = deliver(t, m, golemclient.SessionMeta{
 		Type: golemclient.TypeSessionMeta, Session: "sess-abcd1234", Turns: 3,
 	})
-	view := m.View()
+	view := m.View().Content
 	if strings.Contains(view, "golem —") {
 		t.Errorf("header line should be removed:\n%s", view)
 	}
@@ -1109,10 +1153,10 @@ func TestModel_ManualScrollSuspendsAutoFollow(t *testing.T) {
 
 	// Scroll back mid-stream: the next delta must not snap to the bottom.
 	for range 20 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	}
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "mid\n"})
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "head-marker") {
 		t.Errorf("manual scrollback should survive streaming deltas:\n%s", view)
 	}
@@ -1122,12 +1166,12 @@ func TestModel_ManualScrollSuspendsAutoFollow(t *testing.T) {
 
 	// Paging back to the bottom resumes the follow.
 	for range 20 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	}
 
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "tail-marker"})
-	if !strings.Contains(m.View(), "tail-marker") {
-		t.Errorf("reaching the bottom should resume auto-follow:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "tail-marker") {
+		t.Errorf("reaching the bottom should resume auto-follow:\n%s", m.View().Content)
 	}
 }
 
@@ -1145,12 +1189,12 @@ func TestModel_MouseWheelScrollsTranscript(t *testing.T) {
 
 	// Wheel back: the next delta must not snap to the bottom.
 	for range 40 {
-		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+		next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 		m = next.(Model)
 	}
 
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "mid\n"})
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "head-marker") {
 		t.Errorf("wheel scrollback should survive streaming deltas:\n%s", view)
 	}
@@ -1160,13 +1204,13 @@ func TestModel_MouseWheelScrollsTranscript(t *testing.T) {
 
 	// Wheel to the bottom resumes the follow.
 	for range 40 {
-		next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+		next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 		m = next.(Model)
 	}
 
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "tail-marker"})
-	if !strings.Contains(m.View(), "tail-marker") {
-		t.Errorf("reaching the bottom should resume auto-follow:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "tail-marker") {
+		t.Errorf("reaching the bottom should resume auto-follow:\n%s", m.View().Content)
 	}
 }
 
@@ -1184,19 +1228,19 @@ func TestModel_StickyTracksScrollRegion(t *testing.T) {
 	m.refreshView()
 
 	// Reading the first answer's middle: the sticky names its question.
-	m.vp.YOffset = 100
+	m.vp.SetYOffset(100)
 	if got := m.stickyText(); got != "first question" {
 		t.Errorf("sticky in first-answer region = %q, want first question", got)
 	}
 
 	// Reading the second answer: the sticky switches questions.
-	m.vp.YOffset = 300
+	m.vp.SetYOffset(300)
 	if got := m.stickyText(); got != "second question" {
 		t.Errorf("sticky in second-answer region = %q, want second question", got)
 	}
 
 	// A question fully visible in the viewport needs no sticky.
-	m.vp.YOffset = 0
+	m.vp.SetYOffset(0)
 	if got := m.stickyText(); got != "" {
 		t.Errorf("sticky with the question visible = %q, want none", got)
 	}
@@ -1208,14 +1252,24 @@ func TestModel_ConnectFailureShowsError(t *testing.T) {
 	m.dial = func(string) (client, error) {
 		return nil, errors.New("no server at /dev/null")
 	}
-	cmd := m.Init()
-	msg := cmd()
-	connErr, ok := msg.(connErrMsg)
-	if !ok || !strings.Contains(connErr.err.Error(), "no server") {
-		t.Fatalf("Init cmd = %#v, want connect error", msg)
+
+	// Init batches the connect with the background-color request; run
+	// the batch and keep the first connErrMsg it yields.
+	var connErr connErrMsg
+
+	for _, cmd := range flattenCmds(m.Init()) {
+		if msg, ok := cmd().(connErrMsg); ok {
+			connErr = msg
+
+			break
+		}
+	}
+
+	if connErr.err == nil || !strings.Contains(connErr.err.Error(), "no server") {
+		t.Fatalf("Init cmds = %#v, want connect error", m.Init())
 	}
 	next, _ := m.Update(connErr)
-	view := next.(Model).View()
+	view := next.(Model).View().Content
 	if !strings.Contains(view, "no server") {
 		t.Errorf("view should show connect error:\n%s", view)
 	}
@@ -1276,18 +1330,18 @@ func TestToolBlock_ClickParityWithRenderedRows(t *testing.T) {
 	for _, yOff := range []int{0, 3, 8} {
 		for _, span := range build().toolSpans {
 			m := build()
-			m.vp.YOffset = yOff
+			m.vp.SetYOffset(yOff)
 			m.refreshView()
 
 			topRow := topRowOf(m)
-			screenY := topRow + span.start - m.vp.YOffset
+			screenY := topRow + span.start - m.vp.YOffset()
 
-			if screenY-topRow < 0 || screenY-topRow >= m.vp.Height {
+			if screenY-topRow < 0 || screenY-topRow >= m.vp.Height() {
 				continue // row scrolled out of the viewport
 			}
 
 			// The pre-click view: every tool row collapsed.
-			viewLines := strings.Split(m.View(), "\n")
+			viewLines := strings.Split(m.View().Content, "\n")
 			if screenY >= len(viewLines) {
 				t.Fatalf("yOffset=%d: screen row %d beyond view (%d lines)", yOff, screenY, len(viewLines))
 			}
@@ -1302,9 +1356,7 @@ func TestToolBlock_ClickParityWithRenderedRows(t *testing.T) {
 				before[i] = m.blocks[i].expanded
 			}
 
-			next, _ := m.Update(tea.MouseMsg{
-				Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 0, Y: screenY,
-			})
+			next, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 0, Y: screenY})
 			after := next.(Model)
 
 			toggled := -1
@@ -1339,7 +1391,7 @@ func TestLayout_HeightConstantWithAndWithoutStatus(t *testing.T) {
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 
-	idle := strings.Count(m.View(), "\n") + 1
+	idle := strings.Count(m.View().Content, "\n") + 1
 
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
 	m = deliver(t, m, golemclient.ToolCallStart{
@@ -1347,14 +1399,14 @@ func TestLayout_HeightConstantWithAndWithoutStatus(t *testing.T) {
 		Args: []byte(`{"command":"go test ./..."}`),
 	})
 
-	if active := strings.Count(m.View(), "\n") + 1; active != idle {
+	if active := strings.Count(m.View().Content, "\n") + 1; active != idle {
 		t.Errorf("layout height changed: idle=%d active=%d", idle, active)
 	}
 
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
 	m = deliver(t, m, golemclient.UserMessage{Type: golemclient.TypeUserMessage, Text: "long question over many lines"})
 
-	if scrolled := strings.Count(m.View(), "\n") + 1; scrolled != idle {
+	if scrolled := strings.Count(m.View().Content, "\n") + 1; scrolled != idle {
 		t.Errorf("layout height changed with sticky header: idle=%d sticky=%d", idle, scrolled)
 	}
 }
@@ -1376,7 +1428,7 @@ func TestModalViews_FitTerminalWidth(t *testing.T) {
 
 				m, _ := wired(t)
 				m = resize(m, 40, 20)
-				m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlP})
+				m = key(t, m, tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl})
 				m = key(t, m, rkey('n'))
 				m = key(t, m, rkey('e'))
 				m = key(t, m, rkey('w'))
@@ -1423,7 +1475,7 @@ func TestModalViews_FitTerminalWidth(t *testing.T) {
 						{ID: "s2", Title: long + "-second", LastActive: "2025-01-01T00:00:00Z"},
 					},
 				})
-				m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR})
+				m = key(t, m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 				for range 30 {
 					m = key(t, m, rkey('x'))
 				}
@@ -1440,9 +1492,9 @@ func TestModalViews_FitTerminalWidth(t *testing.T) {
 
 			m := tt.setup(t)
 
-			for i, line := range strings.Split(m.View(), "\n") {
+			for i, line := range strings.Split(m.View().Content, "\n") {
 				if w := ansi.StringWidth(line); w > tt.width {
-					t.Fatalf("row %d width %d exceeds %d:\n%s", i, w, tt.width, m.View())
+					t.Fatalf("row %d width %d exceeds %d:\n%s", i, w, tt.width, m.View().Content)
 				}
 			}
 		})
@@ -1470,8 +1522,8 @@ func TestModel_StickyPinsLastLineWithoutTrailingNewline(t *testing.T) {
 	if m.stickyText() != "question two" {
 		t.Fatalf("precondition: sticky must pin question two, got %q", m.stickyText())
 	}
-	if !strings.Contains(m.View(), "tail-marker") {
-		t.Errorf("the true last line must stay visible when sticky shrinks the viewport:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "tail-marker") {
+		t.Errorf("the true last line must stay visible when sticky shrinks the viewport:\n%s", m.View().Content)
 	}
 }
 
@@ -1485,13 +1537,13 @@ func TestModel_StickyTailSurvivesResizeShrink(t *testing.T) {
 		Delta: strings.Repeat("filler\n", 80) + "tail-marker",
 	})
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
-	if !strings.Contains(m.View(), "tail-marker") {
+	if !strings.Contains(m.View().Content, "tail-marker") {
 		t.Fatal("precondition: tail visible before shrink")
 	}
 
 	m = resize(m, 80, 14)
-	if !strings.Contains(m.View(), "tail-marker") {
-		t.Errorf("resize shrink must keep the true last line visible under sticky:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "tail-marker") {
+		t.Errorf("resize shrink must keep the true last line visible under sticky:\n%s", m.View().Content)
 	}
 }
 
@@ -1506,18 +1558,18 @@ func TestModel_ManualScrollToBottomShowsLastLine(t *testing.T) {
 	})
 	m = deliver(t, m, golemclient.TurnEnd{Type: golemclient.TypeTurnEnd})
 	for range 8 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgUp})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyPgUp})
 	}
 
 	for range 8 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyPgDown})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyPgDown})
 	}
 
 	if !m.follow {
 		t.Error("reaching the bottom should resume follow")
 	}
-	if !strings.Contains(m.View(), "tail-marker") {
-		t.Errorf("paging back to the bottom must show the true last line:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "tail-marker") {
+		t.Errorf("paging back to the bottom must show the true last line:\n%s", m.View().Content)
 	}
 }
 
@@ -1555,10 +1607,7 @@ func TestModel_ToolBlock_ClickLandsOnRenderedRowUnderStickyAtBottom(t *testing.T
 	}
 
 	// Click the tool row's screen position: sticky line + rows into the window.
-	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress,
-		X: 2, Y: top + span.start - offset,
-	})
+	next, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2, Y: top + span.start - offset})
 	m = next.(Model)
 
 	if !m.blocks[2].expanded {
@@ -1581,19 +1630,19 @@ func TestModel_SessionPickerDeleteFlow(t *testing.T) {
 	})
 
 	// First ctrl+d arms; nothing sent; the row shows the confirm hint.
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = key(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	if len(fc.sent) != 0 {
 		t.Fatalf("armed delete must not send yet: %+v", fc.sent)
 	}
 	if m.sessDeleteArmed != "s1" {
 		t.Errorf("sessDeleteArmed = %q, want s1", m.sessDeleteArmed)
 	}
-	if !strings.Contains(m.View(), "ctrl+d again") {
-		t.Errorf("armed row must show the confirm hint:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "ctrl+d again") {
+		t.Errorf("armed row must show the confirm hint:\n%s", m.View().Content)
 	}
 
 	// Second ctrl+d sends the delete and removes the row optimistically.
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = key(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
 	sent, ok := lastSent(t, fc).(golemclient.DeleteSession)
 	if !ok || sent.Session != "s1" {
 		t.Fatalf("sent = %#v, want delete s1", sent)
@@ -1604,8 +1653,8 @@ func TestModel_SessionPickerDeleteFlow(t *testing.T) {
 	if m.sessDeleteArmed != "" {
 		t.Errorf("sessDeleteArmed = %q, want disarmed after firing", m.sessDeleteArmed)
 	}
-	if strings.Contains(m.View(), "Fix auth middleware") {
-		t.Errorf("deleted row must leave the picker:\n%s", m.View())
+	if strings.Contains(m.View().Content, "Fix auth middleware") {
+		t.Errorf("deleted row must leave the picker:\n%s", m.View().Content)
 	}
 }
 
@@ -1623,14 +1672,14 @@ func TestModel_SessionPickerDeleteDisarmsOnMoveAndEscape(t *testing.T) {
 		},
 	})
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	m = key(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	if m.sessDeleteArmed != "" {
 		t.Errorf("moving the cursor must disarm: %q", m.sessDeleteArmed)
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	m = key(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.sessDeleteArmed != "" {
 		t.Errorf("esc must disarm: %q", m.sessDeleteArmed)
 	}
@@ -1654,10 +1703,10 @@ func TestModel_SessionPickerDeleteWrongRowDoesNotFire(t *testing.T) {
 		},
 	})
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // arm s1
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})  // disarms
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // arm s2 now
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // fire on s2
+	m = key(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}) // arm s1
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})           // disarms
+	m = key(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}) // arm s2 now
+	m = key(t, m, tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}) // fire on s2
 
 	sent, ok := lastSent(t, fc).(golemclient.DeleteSession)
 	if !ok || sent.Session != "s2" {
@@ -1733,8 +1782,8 @@ func TestModel_SessionPickerFooterMentionsDelete(t *testing.T) {
 		Sessions: []golemclient.SessionSummary{{ID: "s1", Title: "Fix auth middleware", Cwd: "/a"}},
 	})
 
-	if !strings.Contains(m.View(), "ctrl+d delete") {
-		t.Errorf("picker footer must mention ctrl+d delete:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "ctrl+d delete") {
+		t.Errorf("picker footer must mention ctrl+d delete:\n%s", m.View().Content)
 	}
 }
 
@@ -1756,15 +1805,15 @@ func TestModel_SessionPickerShowsLiveQuery(t *testing.T) {
 		m = key(t, m, rkey(r))
 	}
 
-	if got := m.View(); !strings.Contains(got, "› fix_") {
+	if got := m.View().Content; !strings.Contains(got, "› fix_") {
 		t.Errorf("picker must show the live query — nothing renders what the user typed:\n%s", got)
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyBackspace})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 
-	if got := m.View(); !strings.Contains(got, "› _") {
+	if got := m.View().Content; !strings.Contains(got, "› _") {
 		t.Errorf("backspaces must empty the visible query:\n%s", got)
 	}
 }
@@ -1802,10 +1851,10 @@ func TestModel_SessionPickerScrollsLongLists(t *testing.T) {
 	// 30 sessions + headers must not all render: the window is bounded
 	// and follows the cursor. Walk to the bottom.
 	for range 29 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 
-	view := m.View()
+	view := m.View().Content
 	if !strings.Contains(view, "sess30") {
 		t.Errorf("cursor at the bottom must be visible:\n%s", view)
 	}
@@ -1850,7 +1899,7 @@ func TestModel_SessionPickerGroupsByDate(t *testing.T) {
 		},
 	})
 
-	view := m.View()
+	view := m.View().Content
 
 	// Headers appear once each, in newest-first order, before their rows.
 	for _, label := range []string{"Today", "Yesterday"} {
@@ -1876,21 +1925,21 @@ func TestModel_SessionPickerGroupHeaderHidesWhenScrolled(t *testing.T) {
 	m = deliver(t, m, sessList(30, now))
 
 	for range 29 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
 	}
 
 	// The Today header sits above the window at the bottom.
-	if strings.Contains(m.View(), "Today") {
-		t.Errorf("a header scrolled out of the window must not render:\n%s", m.View())
+	if strings.Contains(m.View().Content, "Today") {
+		t.Errorf("a header scrolled out of the window must not render:\n%s", m.View().Content)
 	}
 
 	// Back to the top: the header returns.
 	for range 29 {
-		m = key(t, m, tea.KeyMsg{Type: tea.KeyUp})
+		m = key(t, m, tea.KeyPressMsg{Code: tea.KeyUp})
 	}
 
-	if !strings.Contains(m.View(), "Today") {
-		t.Errorf("scrolling to the top must bring the header back:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "Today") {
+		t.Errorf("scrolling to the top must bring the header back:\n%s", m.View().Content)
 	}
 }
 
@@ -1904,20 +1953,20 @@ func TestModel_SessionPickerWheelScrollsList(t *testing.T) {
 	m = deliver(t, m, sessList(30, now))
 
 	// The wheel scrolls the window without moving the cursor.
-	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	next, _ := m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelDown})
 	m = next.(Model)
 
-	if strings.Contains(m.View(), "sess01") {
-		t.Errorf("wheel down must scroll the first row out:\n%s", m.View())
+	if strings.Contains(m.View().Content, "sess01") {
+		t.Errorf("wheel down must scroll the first row out:\n%s", m.View().Content)
 	}
-	if !strings.Contains(m.View(), "sess04") {
-		t.Errorf("wheel down must reveal lower rows:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "sess04") {
+		t.Errorf("wheel down must reveal lower rows:\n%s", m.View().Content)
 	}
 
-	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	next, _ = m.Update(tea.MouseWheelMsg{Button: tea.MouseWheelUp})
 	m = next.(Model)
 
-	if !strings.Contains(m.View(), "sess01") {
-		t.Errorf("wheel up must scroll back to the first row:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "sess01") {
+		t.Errorf("wheel up must scroll back to the first row:\n%s", m.View().Content)
 	}
 }

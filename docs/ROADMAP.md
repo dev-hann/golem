@@ -1,6 +1,6 @@
 # golem Roadmap
 
-Last updated: 2026-10-12. Each phase lists deliverables, **acceptance criteria**, and the **test list** (TDD: tests are the specification — write them first). A phase is done when all acceptance criteria pass and `make all` is green.
+Last updated: 2026-10-16. Each phase lists deliverables, **acceptance criteria**, and the **test list** (TDD: tests are the specification — write them first). A phase is done when all acceptance criteria pass and `make all` is green.
 
 Convention used below: package paths are the unit of work; test names are indicative but the listed behaviors are the contract.
 
@@ -306,8 +306,58 @@ Status: `/new` and `/resume` (session picker) implemented. Added 2026-10-16: ses
 
 ---
 
+## Phase 8 — Bubble Tea v2 follow-ups (ADR-0035 leftovers)
+
+The v2 migration (ADR-0035, 2026-10-16) named two follow-ups it deliberately did not fold in. Both are self-contained `internal/tui` work with no protocol or storage impact; each ships as its own commit with tests first. Do 8.1 before 8.2 — the caret-position math in 8.2 is simpler against a self-sizing composer.
+
+### 8.1 Composer height from `textarea.DynamicHeight` — delete the `composerRows` probe
+
+Today `syncInputHeight` measures the composer by rendering the value into a throwaway probe textarea and counting its content rows (`composerRows` in `internal/tui/input.go`: doubling height loop, NUL end-of-buffer sentinel, wrap-parity trap). bubbles v2 grew first-class support: `DynamicHeight` + `MinHeight`/`MaxHeight` auto-size the component to its soft-wrapped content (`recalculateHeight`).
+
+The one thing `DynamicHeight` does **not** know is golem's layout rule: the composer is capped at a terminal share (`inputMaxShareNumerator`/`inputMaxShareDenominator`) so the transcript keeps its floor. That clamp stays in `syncInputHeight`, applied to whatever height the textarea reports — the probe replacement must keep the cap, not just trust `MaxHeight`. If v2's clamp semantics cannot express the layout cap, keep the probe and record why here.
+
+**Deliverable**
+
+- `internal/tui/input.go` loses `composerRows`/`probeTextRows` (or the file dissolves into `model.go`); `syncInputHeight` reads `m.input.Height()` after the textarea auto-sizes.
+
+**Acceptance criteria**
+
+1. Composer grows one row per visual line — hard newlines and soft wraps alike — and shrinks back; capped at the terminal share; the viewport keeps `viewportMinHeight`. No user-visible behavior change.
+2. The existing height tests below pass **unmodified** — they are the specification; if one fails, the implementation is wrong (or v2 disagrees with v1 wrap parity, in which case stop and record it here).
+3. No probe textarea is constructed per keystroke — the old path rendered the full value on every sync; the new path must not regress that.
+
+**Test list**
+
+- `TestInput_DynamicHeightMatchesProbe` (table: empty, single line, hard newlines, soft-wrapped, over the share cap — asserts the auto height equals the probe's answer, written while both exist)
+- `TestInput_HeightCapStillFeedsViewportFloor` (at the cap, the transcript keeps its minimum rows)
+- Unmodified regression net: `TestInput_HeightGrowsWithContentAndResets`, `TestInput_HeightGrowsWithSoftWrap`, `TestInput_HeightShrinksAsWrapDisappears`, `TestInput_WrappedCapHoldsAndRewrapOnResize`, `TestModel_ComposerGrowthKeepsTailVisible`
+
+### 8.2 Real terminal cursor in the composer (`tea.Cursor`)
+
+The composer still renders bubbles' in-text virtual cursor block. Bubble Tea v2 can drive the terminal's own cursor: `textarea.SetVirtualCursor(false)` makes `textarea.Cursor()` (nil while blurred) return a `*tea.Cursor` carrying screen coordinates relative to the component's top-left; the top-level View pins it (`v.Cursor = m.input.Cursor()`) offset by the composer's frame — `kit.Box` border, `screenPadH`/`screenPadV`, and the gap row above the composer. Blinking is the runtime's job via `tea.Cursor.Blink` — no blink-cmd bookkeeping on the model.
+
+**Deliverable**
+
+- `internal/tui/view.go` sets `View().Cursor` with frame-correct offsets in chat mode; `internal/tui/model.go` drops the virtual-cursor workaround comment at `input.Focus()`; `restyleInput` sets `styles.Cursor` (Color/Shape) from the kit.
+
+**Acceptance criteria**
+
+1. Chat mode with focus: `View().Cursor` is non-nil and its Position matches the rendered caret — before the first character, mid-line after arrow keys, and on the correct soft-wrapped row.
+2. Cursor hidden (nil) while any modal is open (`modeSessions`/`modeModels`/`modeCommand`), while blurred, and in the conn-error state.
+3. The position survives `padScreen` and the composer border: asserted against the rendered lines, not hand-computed constants.
+4. `make all` green; no blink state or timer on `Model`.
+
+**Test list**
+
+- `TestView_CursorAtComposerCaret_Table` (empty input; typed line; caret mid-line; caret on the soft-wrapped second row)
+- `TestView_CursorHiddenInModalsAndErrors`
+- `TestView_CursorFollowsComposerGrowth` (multi-row input: Y advances with the caret as the box grows, staying inside the box)
+
+---
+
 ## Landed outside the phase plan
 
+- 2026-10-16 — Bubble Tea v2 migration (ADR-0035): `internal/tui`, `internal/tui/kit`, `internal/cli` moved to `charm.land/bubbletea/v2` + `bubbles/v2` + `lipgloss/v2`. shift+enter inserts newlines (kitty protocol; alt+enter fallback), the tab dot reports agent state via OSC 7501, the theme follows the terminal background live, mouse events split into click/wheel/motion/release, and `muesli/termenv` left the dependency set. The two named follow-ups became Phase 8.
 - 2026-10-12 — `golem serve` shutdown fix: SIGINT/SIGTERM now stop the server (the listener closes and the accept loop unblocks; regression-tested via the injected signal hook).
 - 2026-10-13 — Bare `golem` launcher: probe the default socket, spawn a detached `golem serve` when it is down (removing stale socket files), then run the TUI. Ships ahead of phases 4/5; `golem stop` and config-driven socket paths land with phase 5.
 - 2026-10-14 — TUI agent status line: a one-row strip between the transcript and the composer, always rendered (idle shows the model and last-turn token usage; an active turn shows thinking → responding → the in-flight tool with its identifying argument). Agent state only — no key hints. Fully derived from existing protocol events (turn_start/text_delta/tool_call_start/tool_call_end/turn_end) — no wire changes. Ticker follows the leader-timeout gen pattern for stale-tick safety. (The elapsed-seconds counter was dropped on 2026-10-15 — it reset on every session switch because the true start time never survives the replay.)

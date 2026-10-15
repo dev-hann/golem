@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // command is one entry of the ctrl+p command palette; run executes the
@@ -78,22 +78,22 @@ func fuzzyContains(query, s string) bool {
 
 // updateCommand drives the ctrl+p palette: typing filters, arrows (or
 // the dialog keys ctrl+p/ctrl+n) move, enter runs, esc closes.
-func (m Model) updateCommand(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch key.Type { //nolint:exhaustive // foreign enum; default ignores
-	case tea.KeyEscape:
+func (m Model) updateCommand(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	switch key.String() { //nolint:exhaustive // key names, not enum values; default ignores
+	case "esc":
 		m.mode = modeChat
 		m.cmdQuery, m.cmdCursor = "", 0
 
 		return m, nil
-	case tea.KeyUp, tea.KeyCtrlP:
+	case "up", "ctrl+p":
 		m.cmdCursor = max(m.cmdCursor-1, 0)
 
 		return m, nil
-	case tea.KeyDown, tea.KeyCtrlN:
+	case "down", "ctrl+n":
 		m.cmdCursor = min(m.cmdCursor+1, len(m.filteredCommands())-1)
 
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		cmds := m.filteredCommands()
 		if len(cmds) == 0 {
 			return m, nil
@@ -104,21 +104,20 @@ func (m Model) updateCommand(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cmdQuery, m.cmdCursor = "", 0
 
 		return chosen.run(m)
-	case tea.KeyBackspace:
+	case "backspace":
 		if runes := []rune(m.cmdQuery); len(runes) > 0 {
 			m.cmdQuery = string(runes[:len(runes)-1])
 			m.cmdCursor = max(min(m.cmdCursor, len(m.filteredCommands())-1), 0)
 		}
 
 		return m, nil
-	case tea.KeyRunes:
-		if !key.Alt {
-			m.cmdQuery += string(key.Runes)
+	default:
+		// Printable input without modifiers extends the query.
+		if key.Text != "" && key.Mod == 0 {
+			m.cmdQuery += key.Text
 			m.cmdCursor = max(min(m.cmdCursor, len(m.filteredCommands())-1), 0)
 		}
 
-		return m, nil
-	default:
 		return m, nil
 	}
 }

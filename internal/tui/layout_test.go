@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -33,7 +33,7 @@ func TestLayout_HasScreenPadding(t *testing.T) {
 
 	m := paddedChat(t)
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	// Top padding row: blank.
 	if strings.TrimSpace(lines[0]) != "" {
@@ -58,7 +58,7 @@ func TestLayout_PadsHorizontalOnlyContentRows(t *testing.T) {
 
 	m := paddedChat(t)
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	// The transcript row sits one row below the header and carries the
 	// pad prefix.
@@ -76,14 +76,14 @@ func TestResize_AccountsForPadding(t *testing.T) {
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 
-	if want := max(80-2*screenPadH, viewportMinWidth); m.vp.Width != want {
-		t.Errorf("viewport width = %d, want %d (terminal minus side pads)", m.vp.Width, want)
+	if want := max(80-2*screenPadH, viewportMinWidth); m.vp.Width() != want {
+		t.Errorf("viewport width = %d, want %d (terminal minus side pads)", m.vp.Width(), want)
 	}
 
 	// The composer frame (border included) must fit between the side
 	// pads. The textarea's Width() reports an inner width — its prompt
 	// claims 2 cells — so measure the rendered box instead.
-	for _, line := range strings.Split(m.View(), "\n") {
+	for _, line := range strings.Split(m.View().Content, "\n") {
 		if w := ansi.StringWidth(ansi.Strip(line)); w > 80 {
 			t.Errorf("screen row %d cells wide, exceeds terminal 80: %q", w, line)
 		}
@@ -95,7 +95,7 @@ func TestLayout_FillsExactHeight(t *testing.T) {
 
 	m := paddedChat(t)
 
-	if got := strings.Count(m.View(), "\n") + 1; got != m.height {
+	if got := strings.Count(m.View().Content, "\n") + 1; got != m.height {
 		t.Errorf("screen height = %d rows, want exactly %d", got, m.height)
 	}
 }
@@ -105,7 +105,7 @@ func TestLayout_ComposerSitsBelowGap(t *testing.T) {
 
 	m := paddedChat(t)
 
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	// Find the composer's top border row (rounded border corners).
 	composerTop := -1
@@ -121,7 +121,7 @@ func TestLayout_ComposerSitsBelowGap(t *testing.T) {
 	}
 
 	if composerTop < 0 {
-		t.Fatalf("composer box not found in view:\n%s", m.View())
+		t.Fatalf("composer box not found in view:\n%s", m.View().Content)
 	}
 
 	// The row above the composer is the blank gap.
@@ -137,17 +137,17 @@ func TestLayout_SmallTerminalCollapsesPadding(t *testing.T) {
 	m, _ := wired(t)
 	m = resize(m, 24, 10)
 
-	if got := strings.Count(m.View(), "\n") + 1; got != m.height {
+	if got := strings.Count(m.View().Content, "\n") + 1; got != m.height {
 		t.Errorf("small terminal screen height = %d, want %d", got, m.height)
 	}
 
 	// Viewport keeps its floor even with pads squeezing it.
-	if m.vp.Width < viewportMinWidth {
-		t.Errorf("viewport width = %d, below floor %d", m.vp.Width, viewportMinWidth)
+	if m.vp.Width() < viewportMinWidth {
+		t.Errorf("viewport width = %d, below floor %d", m.vp.Width(), viewportMinWidth)
 	}
 
-	if m.vp.Height < viewportMinHeight {
-		t.Errorf("viewport height = %d, below floor %d", m.vp.Height, viewportMinHeight)
+	if m.vp.Height() < viewportMinHeight {
+		t.Errorf("viewport height = %d, below floor %d", m.vp.Height(), viewportMinHeight)
 	}
 }
 
@@ -176,9 +176,7 @@ func TestSelection_LeftPadColumnsIgnored(t *testing.T) {
 
 	// A press whose x lands on the left pad still selects the row under
 	// it — rows gate selection, x never does.
-	next, _ := m.Update(tea.MouseMsg{
-		Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: screenPadH, Y: stickyTopRow(m),
-	})
+	next, _ := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: screenPadH, Y: stickyTopRow(m)})
 	if !next.(Model).selecting {
 		t.Error("press on the first transcript row (x on the pad) must select")
 	}

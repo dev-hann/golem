@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
@@ -15,25 +16,43 @@ import (
 )
 
 // View implements tea.Model.
-func (m Model) View() string {
-	if m.connErr != "" {
-		return "golem: " + m.connErr + "\n"
-	}
+func (m Model) View() tea.View {
+	var content string
 
-	switch m.mode {
-	case modeCommand:
-		return m.modalized(m.kit.Modal(m.vp.Width, "commands", m.commandBody()))
-	case modeModels:
-		return m.modalized(m.kit.Modal(m.vp.Width, "models · "+m.provider, m.modelsBody()))
-	case modeSessions:
-		return m.modalized(m.kit.Modal(m.vp.Width, "sessions", m.sessionsBody()))
-	case modeChat:
-		// The full layout below.
+	switch {
+	case m.connErr != "":
+		content = "golem: " + m.connErr + "\n"
+	case m.mode == modeCommand:
+		content = m.modalized(m.kit.Modal(m.vp.Width(), "commands", m.commandBody()))
+	case m.mode == modeModels:
+		content = m.modalized(m.kit.Modal(m.vp.Width(), "models · "+m.provider, m.modelsBody()))
+	case m.mode == modeSessions:
+		content = m.modalized(m.kit.Modal(m.vp.Width(), "sessions", m.sessionsBody()))
 	default:
-		// Future modes fall through to the layout.
+		// Chat (and future modes) fall through to the full layout.
+		content = m.layout()
 	}
 
-	return m.layout()
+	v := tea.NewView(content)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	v.WindowTitle = "golem"
+
+	// OSC 7501: report the agent's coarse state to the terminal (the tab
+	// dot in supporting multiplexers). Map the status strip's states onto
+	// the protocol's working / waiting / idle vocabulary.
+	switch {
+	case m.connErr != "":
+		v.ProgramStatus = &tea.ProgramStatus{State: tea.ProgramStateError}
+	case m.turnActive:
+		v.ProgramStatus = &tea.ProgramStatus{State: tea.ProgramStateWorking}
+	case m.mode == modeSessions || m.mode == modeModels || m.mode == modeCommand:
+		v.ProgramStatus = &tea.ProgramStatus{State: tea.ProgramStateBlocked}
+	default:
+		v.ProgramStatus = &tea.ProgramStatus{State: tea.ProgramStateIdle}
+	}
+
+	return v
 }
 
 // layout composes the full chat screen through the active kit.
@@ -44,7 +63,7 @@ func (m Model) layout() string {
 	}
 
 	if text := m.stickyText(); text != "" {
-		b.WriteString(m.kit.StickyUser(m.vp.Width, text) + "\n")
+		b.WriteString(m.kit.StickyUser(m.vp.Width(), text) + "\n")
 		b.WriteString(m.shrunkViewport() + "\n")
 	} else if m.showWelcome() {
 		// Fresh launch: the centered banner owns the transcript region
@@ -120,7 +139,7 @@ func (m Model) headerLine() string {
 		left += headerDirSep + dir
 	}
 
-	return m.kit.StatusBar(m.vp.Width, left, token)
+	return m.kit.StatusBar(m.vp.Width(), left, token)
 }
 
 // headerTitle resolves the header's title text and token: a titled
@@ -151,7 +170,7 @@ const headerDirSep = " · "
 // key itself, not in the strip.
 func (m Model) statusLine() string {
 	left, token := m.activeState()
-	return m.kit.StatusBar(m.vp.Width, left, token)
+	return m.kit.StatusBar(m.vp.Width(), left, token)
 }
 
 // activeState resolves the status strip's label and token color from the
@@ -284,7 +303,11 @@ func (m Model) shrunkViewport() string {
 	offset, height := m.renderedWindow()
 
 	vp := m.vp
-	vp.YOffset, vp.Height = offset, height
+	// Height first: SetYOffset clamps to the (new, shorter) window's
+	// max — setting the offset first would clamp it to the old window's
+	// max and lose the final row.
+	vp.SetHeight(height)
+	vp.SetYOffset(offset)
 
 	return vp.View()
 }
@@ -296,8 +319,8 @@ func (m Model) shrunkViewport() string {
 // below the fold, hidden behind the composer box. A scrolled-back window
 // stays top-aligned: it only loses its final row.
 func (m Model) renderedWindow() (offset, height int) {
-	height = max(m.vp.Height-stickyRows, viewportMinHeight)
-	offset = m.vp.YOffset
+	height = max(m.vp.Height()-stickyRows, viewportMinHeight)
+	offset = m.vp.YOffset()
 
 	if m.vp.AtBottom() {
 		offset = max(m.totalLines()-height, 0)

@@ -4,9 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-
 	"github.com/dev-hann/golem/internal/tui/kit"
 )
 
@@ -19,11 +16,8 @@ type countingRenderer struct {
 }
 
 func newCountingRenderer() *countingRenderer {
-	r := lipgloss.NewRenderer(nil)
-	r.SetColorProfile(termenv.Ascii)
-
 	return &countingRenderer{
-		k:      kit.NewWithRenderer(kit.DefaultTheme(), r),
+		k:      kit.New(kit.DefaultTheme()),
 		calls:  map[string]int{},
 		render: Render,
 	}

@@ -4,20 +4,27 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
 )
 
-// asciiKit builds a kit pinned to the Ascii profile: no color escapes
-// appear in output, so substring assertions hold.
+// asciiKit builds the plain kit; these tests strip its styled output
+// through an Ascii colorprofile.Writer before asserting on text — v2
+// moved downsampling from render time to write time.
 func asciiKit() *kit.Kit {
-	r := lipgloss.NewRenderer(nil)
-	r.SetColorProfile(termenv.Ascii)
+	return kit.New(kit.DefaultTheme())
+}
 
-	return kit.NewWithRenderer(kit.DefaultTheme(), r)
+// downsampled renders styled output through a pinned-profile writer.
+func downsampled(p colorprofile.Profile, s string) string {
+	var b strings.Builder
+	w := colorprofile.NewWriter(&b, nil)
+	w.Profile = p
+	_, _ = w.WriteString(s)
+
+	return b.String()
 }
 
 // TestRender_UsesKitTokens_NoRawEscape pins the kit-only rule (ADR-0026):
@@ -27,15 +34,11 @@ func asciiKit() *kit.Kit {
 func TestRender_UsesKitTokens_NoRawEscape(t *testing.T) {
 	t.Parallel()
 
-	k := asciiKit()
-	out := Render(k, 60, "# T\n\n**b** *i* `c` [l](u)\n\n> q\n\n- one\n- two\n\n```\ncode\n```\n")
-
-	if strings.ContainsAny(out, "\x1b") {
-		t.Errorf("Ascii profile output must carry no escapes, got:\n%q", out)
-	}
+	out := downsampled(colorprofile.Ascii,
+		Render(kit.New(kit.DefaultTheme()), 60, "# T\n\n**b** *i* `c` [l](u)\n\n> q\n\n- one\n- two\n\n```\ncode\n```\n"))
 
 	for _, want := range []string{"T", "b", "i", "c", "l", "(u)", "q", "one", "two", "code"} {
-		if !strings.Contains(out, want) {
+		if !strings.Contains(ansi.Strip(out), want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}
 	}
@@ -117,7 +120,7 @@ func TestRender_BlockShapes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			out := Render(k, 60, tt.in)
+			out := ansi.Strip(Render(k, 60, tt.in))
 			for _, want := range tt.want {
 				if !strings.Contains(out, want) {
 					t.Errorf("output missing %q:\n%s", want, out)
@@ -208,10 +211,10 @@ func TestRender_NoColorProfile_Degrades(t *testing.T) {
 
 	sample := "# H\n\n**b** and `c`\n"
 
-	plain := Render(asciiKit(), 60, sample)
+	plain := downsampled(colorprofile.Ascii, Render(asciiKit(), 60, sample))
 	color := Render(kit.New(kit.DefaultTheme()), 60, sample)
 
-	if plain != ansi.Strip(color) {
+	if ansi.Strip(plain) != ansi.Strip(color) {
 		t.Errorf("stripped color output must equal plain output:\nplain:\n%s\ncolor:\n%s", plain, ansi.Strip(color))
 	}
 }

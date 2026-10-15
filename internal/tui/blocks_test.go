@@ -11,25 +11,29 @@ import (
 	"github.com/dev-hann/golem/internal/tui/markdown"
 )
 
-// testKit builds the default kit; the test profile is Ascii, so plain
-// substring assertions hold.
+// testKit builds the default kit. v2 styles always render full color,
+// so plain-text assertions strip escapes first (plain helper below).
 func testKit() *kit.Kit { return kit.New(kit.DefaultTheme()) }
+
+// plain strips styling so substring assertions hold regardless of the
+// terminal profile in effect.
+func plain(s string) string { return ansi.Strip(s) }
 
 // testMarkdown builds the streaming markdown renderer for block tests.
 func testMarkdown() *markdown.Renderer { return newMarkdownRenderer() }
 
 func TestBlockRender_UserAndAssistant(t *testing.T) {
 	t.Parallel()
-	if got := (block{kind: blockUser, text: "hello"}).render(testKit(), testMarkdown(), 80); got != "▎ hello" {
+	if got := plain((block{kind: blockUser, text: "hello"}).render(testKit(), testMarkdown(), 80)); got != "▎ hello" {
 		t.Errorf("user block should be a user-colored bar line, got %q", got)
 	}
-	if got := (block{kind: blockAssistant}).render(testKit(), testMarkdown(), 80); got != "…" {
+	if got := plain((block{kind: blockAssistant}).render(testKit(), testMarkdown(), 80)); got != "…" {
 		t.Errorf("empty assistant block should be a bare ellipsis, got %q", got)
 	}
-	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit(), testMarkdown(), 80); got != "hi" {
+	if got := plain((block{kind: blockAssistant, text: "hi"}).render(testKit(), testMarkdown(), 80)); got != "hi" {
 		t.Errorf("assistant block should be plain text without a bar, got %q", got)
 	}
-	if got := (block{kind: blockError, text: "boom"}).render(testKit(), testMarkdown(), 80); !strings.Contains(got, "error: boom") {
+	if got := plain((block{kind: blockError, text: "boom"}).render(testKit(), testMarkdown(), 80)); !strings.Contains(got, "error: boom") {
 		t.Errorf("error block = %q", got)
 	}
 }
@@ -37,15 +41,15 @@ func TestBlockRender_UserAndAssistant(t *testing.T) {
 func TestBlockRender_ToolStatuses(t *testing.T) {
 	t.Parallel()
 	running := block{kind: blockTool, tool: "bash", args: `{"command":"ls"}`}
-	if got := running.render(testKit(), testMarkdown(), 80); !strings.Contains(got, "… bash") {
+	if got := plain(running.render(testKit(), testMarkdown(), 80)); !strings.Contains(got, "… bash") {
 		t.Errorf("running tool = %q", got)
 	}
 	done := block{kind: blockTool, tool: "read", done: true, ok: true}
-	if got := done.render(testKit(), testMarkdown(), 80); !strings.Contains(got, "✓ read") {
+	if got := plain(done.render(testKit(), testMarkdown(), 80)); !strings.Contains(got, "✓ read") {
 		t.Errorf("ok tool = %q", got)
 	}
 	failed := block{kind: blockTool, tool: "edit", done: true}
-	if got := failed.render(testKit(), testMarkdown(), 80); !strings.Contains(got, "✗ edit") {
+	if got := plain(failed.render(testKit(), testMarkdown(), 80)); !strings.Contains(got, "✗ edit") {
 		t.Errorf("failed tool = %q", got)
 	}
 }
@@ -74,7 +78,7 @@ func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 		{kind: blockError, text: "bad"},
 	}, 80)
 	for _, want := range []string{"▎ q", "a", "✓ read", "error: bad"} {
-		if !strings.Contains(got, want) {
+		if !strings.Contains(plain(got), want) {
 			t.Errorf("renderBlocks missing %q in:\n%s", want, got)
 		}
 	}
@@ -100,7 +104,7 @@ func TestRenderBlocks_BlankLineBetweenBlocks(t *testing.T) {
 	}, 80)
 	// A blank line separates the user bar from the plain assistant text;
 	// tool lines attach to the block they follow without a blank line.
-	if !strings.Contains(got, "▎ q\n\na\n  ▸ ✓ read") {
+	if !strings.Contains(plain(got), "▎ q\n\na\n  ▸ ✓ read") {
 		t.Errorf("blocks should be separated by blank lines, tool lines attached:\n%s", got)
 	}
 }
@@ -150,7 +154,7 @@ func TestBlockRender_ToolPreviewGutterAligned(t *testing.T) {
 	t.Parallel()
 
 	blk := block{kind: blockTool, tool: "bash", done: true, ok: true, expanded: true, result: strings.Repeat("x", 60)}
-	lines := strings.Split(blk.render(testKit(), testMarkdown(), 20), "\n")
+	lines := strings.Split(plain(blk.render(testKit(), testMarkdown(), 20)), "\n")
 
 	if len(lines) < 3 {
 		t.Fatalf("wrapped preview must span several rows, got %d:\n%s", len(lines), strings.Join(lines, "\n"))

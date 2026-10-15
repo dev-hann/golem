@@ -1,9 +1,9 @@
 package tui
 
 import (
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
 	"github.com/dev-hann/golem/internal/tui/markdown"
@@ -93,14 +93,13 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
 	input.Placeholder = chatPlaceholder
 	input.ShowLineNumbers = false
-	input.FocusedStyle.Text = k.Style(kit.Fg)
-	input.FocusedStyle.Placeholder = k.Style(kit.Dim)
-	input.BlurredStyle = input.FocusedStyle
+	input.SetStyles(restyleInput(input, k).Styles())
 	input.SetHeight(minInputHeight)
 	input.SetWidth(startWidth - inputBorderCols)
-	input.Focus()
+	input.Focus() // the blink cmd is dropped: the composer renders a real cursor
 
-	vp := viewport.New(startWidth, startHeight-minInputHeight-inputBorderRows)
+	vp := viewport.New(viewport.WithWidth(startWidth), viewport.WithHeight(startHeight-minInputHeight-inputBorderRows))
+	vp.SoftWrap = true // the transcript wraps at the terminal edge (v1 behavior)
 
 	return Model{
 		dial:      realDial,
@@ -130,9 +129,10 @@ const (
 	startHeight              = 20
 )
 
-// Init implements tea.Model: connect and start listening.
+// Init implements tea.Model: connect, start listening, and ask the
+// terminal for its background color (the theme variant selector).
 func (m Model) Init() tea.Cmd {
-	return m.connect()
+	return tea.Batch(m.connect(), tea.RequestBackgroundColor)
 }
 
 // connect dials the server. Per ADR-0018 no session is created here —
@@ -171,6 +171,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 	case tea.WindowSizeMsg:
 		m.resize(msg.Width, msg.Height)
 		return m, nil
+	case tea.BackgroundColorMsg:
+		return m.applyBackground(msg)
 	case connectedMsg:
 		m.client = msg.conn
 		// A pre-connect submit armed the lazy create (ADR-0018).
@@ -205,8 +207,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 		m.refreshView()
 
 		return m, nil
-	case tea.KeyMsg:
+	case tea.KeyPressMsg:
 		return m.handleKey(msg)
+	case tea.KeyReleaseMsg:
+		return m, nil // presses drive the app; releases are ignored
 	default:
 		return m, nil
 	}
@@ -217,7 +221,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 func (m *Model) resize(width, height int) {
 	m.clearSelection()
 	m.width, m.height = width, height
-	m.vp.Width = max(width-2*screenPadH, viewportMinWidth)
+	m.vp.SetWidth(max(width-2*screenPadH, viewportMinWidth))
 	setViewportHeightKeepingFollow(&m.vp, max(
 		height-m.inputRows-inputBorderRows-statusRows-layoutChromeRows-headerRowsIfShown(height), viewportMinHeight,
 	))
@@ -263,9 +267,9 @@ func (m *Model) syncInputHeight() {
 func setViewportHeightKeepingFollow(vp *viewport.Model, height int) {
 	// AtBottom must be judged against the old height: after shrinking,
 	// the stale offset is past the new fold and no longer "at bottom".
-	atTail := vp.AtBottom() || vp.YOffset == 0
+	atTail := vp.AtBottom() || vp.YOffset() == 0
 
-	vp.Height = height
+	vp.SetHeight(height)
 
 	if atTail {
 		vp.GotoBottom()
@@ -310,4 +314,33 @@ const headerMinHeight = 16
 // ConnErr reports the connection error that ended the session, if any.
 func (m Model) ConnErr() string {
 	return m.connErr
+}
+
+// applyBackground flips the theme variant when the terminal reports the
+// opposite background color: Tokyo Night Day on light terminals, Night
+// on dark ones. Everything derived from the kit (composer styles, the
+// rendered transcript) rebuilds in place.
+func (m Model) applyBackground(msg tea.BackgroundColorMsg) (tea.Model, tea.Cmd) {
+	if m.kit.Dark() == msg.IsDark() {
+		return m, nil
+	}
+
+	m.kit = kit.NewFor(m.kit.Theme(), msg.IsDark())
+	m.input = restyleInput(m.input, m.kit)
+	m.refreshView()
+
+	return m, nil
+}
+
+// restyleInput re-applies the kit tokens to the composer after a theme
+// switch (the light/dark variant flip): v2 textareas carry styles in a
+// Styles value rather than exported fields.
+func restyleInput(input textarea.Model, k *kit.Kit) textarea.Model {
+	styles := input.Styles()
+	styles.Focused.Text = k.Style(kit.Fg)
+	styles.Focused.Placeholder = k.Style(kit.Dim)
+	styles.Blurred = styles.Focused
+	input.SetStyles(styles)
+
+	return input
 }

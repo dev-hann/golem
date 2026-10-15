@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
@@ -37,7 +37,7 @@ func welcomeRow(lines []string) int {
 func welcomeRowsFit(t *testing.T, m Model) {
 	t.Helper()
 
-	view := m.View()
+	view := m.View().Content
 
 	if got := strings.Count(view, "\n") + 1; got != m.height {
 		t.Errorf("screen height = %d rows, want exactly %d", got, m.height)
@@ -59,8 +59,8 @@ func TestWelcome_ShownOnFreshLaunch(t *testing.T) {
 		t.Fatal("showWelcome() = false on a fresh no-session launch, want true")
 	}
 
-	if row := welcomeRow(strings.Split(m.View(), "\n")); row < 0 {
-		t.Errorf("view missing the golem banner:\n%s", m.View())
+	if row := welcomeRow(strings.Split(m.View().Content, "\n")); row < 0 {
+		t.Errorf("view missing the golem banner:\n%s", m.View().Content)
 	}
 }
 
@@ -82,7 +82,7 @@ func TestWelcome_ContainsProjectNameAndInfo(t *testing.T) {
 	t.Parallel()
 
 	m := welcomeModel(t)
-	view := ansi.Strip(m.View())
+	view := ansi.Strip(m.View().Content)
 
 	for _, want := range []string{
 		"golem",
@@ -102,19 +102,19 @@ func TestWelcome_HiddenAfterFirstMessage(t *testing.T) {
 	m := welcomeModel(t)
 
 	// Typing alone keeps the welcome; submitting removes it.
-	if m2 := key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")}); !m2.showWelcome() {
+	m2 := typeRunes(m, "hi")
+	if !m2.showWelcome() {
 		t.Error("typing must not hide the welcome screen before submit")
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hello")})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if m.showWelcome() {
 		t.Error("welcome still shown after the first submitted message")
 	}
 
-	if row := welcomeRow(strings.Split(m.View(), "\n")); row >= 0 {
-		t.Errorf("banner still rendered after first submit:\n%s", m.View())
+	if row := welcomeRow(strings.Split(m.View().Content, "\n")); row >= 0 {
+		t.Errorf("banner still rendered after first submit:\n%s", m.View().Content)
 	}
 }
 
@@ -131,8 +131,8 @@ func TestWelcome_HiddenWhenSessionLoaded(t *testing.T) {
 		t.Error("welcome still shown after session_meta named a session")
 	}
 
-	if row := welcomeRow(strings.Split(m.View(), "\n")); row >= 0 {
-		t.Errorf("banner still rendered after a session loaded:\n%s", m.View())
+	if row := welcomeRow(strings.Split(m.View().Content, "\n")); row >= 0 {
+		t.Errorf("banner still rendered after a session loaded:\n%s", m.View().Content)
 	}
 }
 
@@ -143,8 +143,8 @@ func TestWelcome_HiddenWithPendingPreConnect(t *testing.T) {
 	m.dial = func(string) (client, error) { return newFakeClient(), nil }
 	m = resize(m, 80, 24)
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("hi")})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = typeRunes(m, "hi")
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if m.showWelcome() {
 		t.Error("welcome shown while a pre-connect submit pends")
@@ -163,16 +163,16 @@ func TestWelcome_Centered(t *testing.T) {
 	t.Parallel()
 
 	m := welcomeModel(t)
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	row := welcomeRow(lines)
 	if row < 0 {
-		t.Fatalf("no banner row found:\n%s", m.View())
+		t.Fatalf("no banner row found:\n%s", m.View().Content)
 	}
 
 	// The banner's top row must sit exactly at the centered inset: the
 	// screen pad, then the viewport-center inset, then the art row.
-	center := max((m.vp.Width-welcomeArtWidth)/2, 0)
+	center := max((m.vp.Width()-welcomeArtWidth)/2, 0)
 	want := strings.Repeat(" ", screenPadH+center) + welcomeArt[0]
 
 	if got := ansi.Strip(lines[row]); got != want {
@@ -184,11 +184,11 @@ func TestWelcome_VerticallyCentered(t *testing.T) {
 	t.Parallel()
 
 	m := welcomeModel(t)
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	row := welcomeRow(lines)
 	if row < 0 {
-		t.Fatalf("no banner row found:\n%s", m.View())
+		t.Fatalf("no banner row found:\n%s", m.View().Content)
 	}
 
 	// The transcript region starts below the header (when shown) and the

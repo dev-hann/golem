@@ -5,20 +5,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
-
 	"github.com/dev-hann/golem/internal/tui/kit"
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
-// forcedColorKit pins a TrueColor profile so style emission is
-// deterministic (kit_test.go's pattern).
+// forcedColorKit builds the dark-variant kit: style emission carries
+// the theme's full-fidelity colors (v2 renders them all; downsampling
+// is a write-time concern).
 func forcedColorKit() *kit.Kit {
-	r := lipgloss.NewRenderer(nil)
-	r.SetColorProfile(termenv.TrueColor)
-
-	return kit.NewWithRenderer(kit.DefaultTheme(), r)
+	return kit.New(kit.DefaultTheme())
 }
 
 // TestModel_FocusedPickerRowRendersPlain pins the focus/style clash: a
