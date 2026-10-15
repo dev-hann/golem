@@ -95,6 +95,22 @@ func TestRender_BlockShapes(t *testing.T) {
 			in:   "a\n\n---\n\nb\n",
 			want: []string{"a", "────────", "b"},
 		},
+		{
+			name: "table renders a grid with separator row",
+			in:   "| name | value |\n| --- | --- |\n| width | 80 |\n",
+			want: []string{
+				"| name  | value |",
+				"| ───── | ───── |",
+				"| width | 80    |",
+			},
+			ban: []string{"| --- |"},
+		},
+		{
+			name: "table cells parse inline markers",
+			in:   "| field |\n| --- |\n| **bold** |\n",
+			want: []string{"| field |", "| bold  |"},
+			ban:  []string{"**"},
+		},
 	}
 
 	for _, tt := range tests {

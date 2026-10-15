@@ -131,6 +131,57 @@ func TestStream_UnclosedEmphasis_LiteralOutput(t *testing.T) {
 	}
 }
 
+// TestStream_TableStreaming pins the table streaming rules: rows
+// arriving mid-table re-render only the live tail (cache untouched), a
+// never-arriving delimiter keeps pipes literal, and the finished table
+// matches a from-scratch render.
+func TestStream_TableStreaming(t *testing.T) {
+	t.Parallel()
+
+	cr := newCountingRenderer()
+	r := NewRenderer(cr.count)
+
+	var text string
+
+	for _, delta := range []string{
+		"intro\n\n",
+		"| a | b |\n| - | - |\n| 1 ",
+		"| 2 |\n",
+	} {
+		text += delta
+		r.Render(cr.k, 60, text)
+	}
+
+	// The intro prefix caches once.
+	if got := cr.calls["intro\n\n"]; got != 1 {
+		t.Errorf("intro prefix rendered %d times, want 1: %+v", got, cr.calls)
+	}
+
+	// Final text is settled: everything is prefix, and the render
+	// equals a full from-scratch render.
+	want := Render(cr.k, 60, text)
+	if got := r.Render(cr.k, 60, text); got != want {
+		t.Errorf("settled render diverged:\ngot:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// TestStream_PipesWithoutDelimiterStayLiteral pins the streaming-safe
+// fallback: pipes without a delimiter row render literally, and never
+// flicker into a table and back.
+func TestStream_PipesWithoutDelimiterStayLiteral(t *testing.T) {
+	t.Parallel()
+
+	cr := newCountingRenderer()
+	r := NewRenderer(cr.count)
+
+	for _, step := range []string{"| a", "| b", "| c"} {
+		out := r.Render(cr.k, 60, step)
+		if !strings.Contains(out, "|") {
+			t.Errorf("pipes must stay literal, got:\n%s", out)
+		}
+	}
+}
+
 // TestStream_WidthChangeBustsCache pins the cache key: the same text at
 // a new width re-renders (stale wraps must not survive a resize).
 func TestStream_WidthChangeBustsCache(t *testing.T) {

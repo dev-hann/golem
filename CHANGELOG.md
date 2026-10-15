@@ -7,6 +7,18 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — markdown tables in the TUI (2026-10-15, ADR-0027)
+
+- Assistant messages now render GFM-style tables as aligned pipe
+  grids: a header row (bold) + a border-colored `─` separator + body
+  rows padded to each column's width, with `:---`/`---:`/`:---:`
+  alignment honored and inline markers parsed inside cells. Tables
+  stream row by row; a pipe line without a delimiter row stays plain
+  text (no half-streamed flicker). Cells never wrap — wide cells widen
+  the table, the same posture as code blocks. Also fixed a parser bug
+  found on the way: the line immediately after a closed fence, quote,
+  or list was silently dropped.
+
 ### Added — assistant markdown rendering in the TUI (2026-10-15)
 
 - Assistant messages now render markdown in the TUI (ADR-0026):

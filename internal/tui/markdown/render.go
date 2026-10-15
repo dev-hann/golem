@@ -46,6 +46,8 @@ func renderBlock(k *kit.Kit, width int, blk Block) string {
 		return renderQuote(k, width, blk)
 	case BlockRule:
 		return k.Divider(min(width, dividerCap))
+	case BlockTable:
+		return renderTable(k, blk)
 	default:
 		return k.WrapPlain(width, blk.Text)
 	}
@@ -161,4 +163,112 @@ func renderQuote(k *kit.Kit, width int, blk Block) string {
 	}
 
 	return strings.Join(rows, "\n")
+}
+
+// Table geometry: the separator row's dash rune and minimum cell width.
+const (
+	tableSep    = "─"
+	tableMinCol = 1
+)
+
+// renderTable renders a table as a pipe grid (ADR-0027): the header
+// row bold, a border-colored separator of ─ runs, body rows padded to
+// each column's measured width. Alignment shifts padding left/right;
+// cells never wrap (a widened row would misalign the grid).
+func renderTable(k *kit.Kit, blk Block) string {
+	if len(blk.Cells) == 0 {
+		return ""
+	}
+
+	widths := columnWidths(k, blk)
+
+	var rows []string
+
+	for r, row := range blk.Cells {
+		rows = append(rows, tableRow(k, blk.Align, widths, row, r == 0))
+
+		if r == 0 {
+			rows = append(rows, tableSeparator(k, widths))
+		}
+	}
+
+	return strings.Join(rows, "\n")
+}
+
+// columnWidths measures each column's styled width — markers drop
+// before rendering, so the grid must size against the styled text: the
+// max over rows, floored at one cell.
+func columnWidths(k *kit.Kit, blk Block) []int {
+	widths := make([]int, len(blk.Align))
+
+	for _, row := range blk.Cells {
+		for c := range widths {
+			if w := ansi.StringWidth(styledText(k, row[c])); w > widths[c] {
+				widths[c] = w
+			}
+		}
+	}
+
+	for c := range widths {
+		widths[c] = max(widths[c], tableMinCol)
+	}
+
+	return widths
+}
+
+// styledText styles one cell's inline markers without wrapping.
+func styledText(k *kit.Kit, text string) string {
+	return styleSpans(k, Inline(text))
+}
+
+// tableSeparator renders the ─ row under the header, border-colored.
+func tableSeparator(k *kit.Kit, widths []int) string {
+	parts := make([]string, len(widths))
+
+	for c := range widths {
+		parts[c] = strings.Repeat(tableSep, widths[c])
+	}
+
+	return k.Style(kit.Border).Render("| " + strings.Join(parts, " | ") + " |")
+}
+
+// tableRow renders one grid row: cells padded to their column width
+// per alignment, joined by pipes, the header row bold.
+func tableRow(k *kit.Kit, aligns []Align, widths []int, cells []string, header bool) string {
+	parts := make([]string, len(widths))
+
+	for c := range widths {
+		cell := styledText(k, cells[c])
+		pad := widths[c] - ansi.StringWidth(cell)
+
+		parts[c] = padCell(cell, pad, aligns[c])
+	}
+
+	row := "| " + strings.Join(parts, " | ") + " |"
+
+	if header {
+		return k.Style(kit.Fg).Bold(true).Render(row)
+	}
+
+	return row
+}
+
+// padCell pads a cell to its column width by alignment: left/right
+// alignment shifts the padding to the opposite side, default and
+// center split it.
+func padCell(cell string, pad int, align Align) string {
+	switch align {
+	case AlignLeft:
+		return cell + strings.Repeat(" ", pad)
+	case AlignRight:
+		return strings.Repeat(" ", pad) + cell
+	case AlignCenter:
+		left := pad / 2
+
+		return strings.Repeat(" ", left) + cell + strings.Repeat(" ", pad-left)
+	case AlignDefault:
+		return cell + strings.Repeat(" ", pad)
+	default:
+		return cell
+	}
 }

@@ -143,7 +143,7 @@ Goal: daily-driver terminal client.
 
 ## Phase 3.5 — Assistant markdown rendering (ADR-0026)
 
-Status: implemented — all test-list items green, `make all` passes, package coverage 93.9%.
+Status: implemented — all test-list items green, `make all` passes, package coverage 93.9%. Tables added by ADR-0027 (see the table test list below).
 
 Goal: assistant messages render markdown in the TUI — streaming-safe, cache-bounded, kit-token-only. Protocol and storage stay raw text.
 
@@ -175,6 +175,21 @@ Goal: assistant messages render markdown in the TUI — streaming-safe, cache-bo
 **internal/tui (integration)**
 - `TestRenderBlocks_SpansRecomputedWithMarkdownHeight`
 - `TestHistoryReplay_RendersMarkdown`
+
+### Extension: markdown tables (ADR-0027)
+
+Status: implemented — parser, renderer, and streaming rules extended; `make all` green.
+
+**internal/tui/markdown**
+- `TestParse_Table`
+- `TestParse_TrailingTableLive`
+- `TestRender_BlockShapes` (table grid + inline-marker cells)
+- `TestStream_TableStreaming`
+- `TestStream_PipesWithoutDelimiterStayLiteral`
+- `TestParse_LineAfterBlock_NotDropped` (lossless-parse bug found on the way)
+
+**internal/tui (integration)**
+- `TestRenderBlocks_TableMarkdown`
 
 ---
 

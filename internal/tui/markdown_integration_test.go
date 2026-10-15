@@ -42,6 +42,30 @@ func TestRenderBlocks_MarkdownAssistant(t *testing.T) {
 	}
 }
 
+// TestRenderBlocks_TableMarkdown pins the ADR-0027 integration: an
+// assistant table renders as a grid while user text keeps its pipes.
+func TestRenderBlocks_TableMarkdown(t *testing.T) {
+	t.Parallel()
+
+	md := newMarkdownRenderer()
+	got, _, _ := renderBlocks(testKit(), md, []block{
+		{kind: blockUser, text: "| not | a | table |"},
+		{kind: blockAssistant, text: "| h | k |\n| - | - |\n| a | 1 |"},
+	}, 60)
+
+	if !strings.Contains(got, "| not | a | table |") {
+		t.Errorf("user pipes must stay verbatim:\n%s", got)
+	}
+
+	if !strings.Contains(got, "| h | k |") {
+		t.Errorf("assistant table must render a grid:\n%s", got)
+	}
+
+	if strings.Contains(got, "| - ") {
+		t.Errorf("delimiter row must be consumed:\n%s", got)
+	}
+}
+
 // TestRenderBlocks_SpansRecomputedWithMarkdownHeight pins the geometry
 // risk: markdown changes an assistant block's rendered height, and user
 // spans after it must still map to their rendered rows.

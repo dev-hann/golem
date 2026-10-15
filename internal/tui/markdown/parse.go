@@ -1,8 +1,9 @@
 // Package markdown renders assistant text as terminal markdown. It is
 // a view concern only: the wire protocol and JSONL storage stay raw
 // text (ADR-0026). The grammar is a block-level subset — paragraph,
-// heading, fenced code, list, quote, rule — plus bold/italic/code/link
-// inline markers, everything else falling back to raw text.
+// heading, fenced code, list, quote, rule, table — plus
+// bold/italic/code/link inline markers, everything else falling back to
+// raw text.
 package markdown
 
 import "strings"
@@ -18,6 +19,18 @@ const (
 	BlockList
 	BlockQuote
 	BlockRule
+	BlockTable
+)
+
+// Align is a table column's alignment.
+type Align int
+
+// The GFM delimiter-row alignments.
+const (
+	AlignDefault Align = iota
+	AlignLeft
+	AlignRight
+	AlignCenter
 )
 
 // Block is one parsed markdown block. Text holds the block's body with
@@ -34,6 +47,12 @@ type Block struct {
 	Ordered bool
 	// Items lists the entries of a list block.
 	Items []string
+	// Cells holds a table's rows: row 0 is the header, row 1+ the
+	// body. Every row has exactly len(Align) cells.
+	Cells [][]string
+	// Align lists a table's per-column alignment from its delimiter
+	// row.
+	Align []Align
 	// settled marks the final block of text that ended in a newline:
 	// the paragraph cannot grow, so it is cacheable. Open code fences
 	// are never settled.
@@ -117,6 +136,8 @@ func (s *blockScanner) consume(i int) int {
 		return s.consumeHeading(line, i)
 	case listItem(line) != nil:
 		return s.consumeList(i)
+	case isPipeRow(line) && i+1 < len(s.lines) && isDelimiterRow(s.lines[i+1]):
+		return s.consumeTable(i)
 	default:
 		s.para = append(s.para, line)
 
@@ -164,6 +185,128 @@ func (s *blockScanner) consumeList(i int) int {
 	s.blocks = append(s.blocks, Block{Kind: BlockList, Ordered: ordered, Items: items})
 
 	return next
+}
+
+// consumeTable consumes one table block from lines[i] (the header row;
+// the delimiter row at i+1 is validated by the caller). Consecutive
+// pipe rows after the delimiter are body rows; the first non-pipe line
+// ends the table.
+func (s *blockScanner) consumeTable(i int) int {
+	s.flushPara()
+
+	align := delimiterAlign(s.lines[i+1])
+	cols := len(align)
+
+	rows := [][]string{splitCells(s.lines[i], cols)}
+
+	for r := i + 2; r < len(s.lines); r++ {
+		if !isPipeRow(s.lines[r]) {
+			break
+		}
+
+		rows = append(rows, splitCells(s.lines[r], cols))
+	}
+
+	s.blocks = append(s.blocks, Block{Kind: BlockTable, Cells: rows, Align: align})
+
+	return i + 1 + len(rows)
+}
+
+// isPipeRow reports whether line is a table row: a non-empty pipe line.
+func isPipeRow(line string) bool {
+	return line != "" && strings.HasPrefix(line, "|")
+}
+
+// splitCells cuts one pipe row into exactly cols trimmed cells: leading
+// and trailing pipes drop, extras truncate, missing cells pad empty.
+func splitCells(line string, cols int) []string {
+	row := strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|")
+	raw := strings.Split(row, "|")
+
+	cells := make([]string, cols)
+
+	for c := range cells {
+		if c < len(raw) {
+			cells[c] = strings.TrimSpace(raw[c])
+		}
+	}
+
+	return cells
+}
+
+// isDelimiterRow reports whether line is a GFM delimiter row
+// ("| --- | :---: | ---: |"): at least one column, every cell only
+// dashes with optional colons.
+func isDelimiterRow(line string) bool {
+	if !isPipeRow(line) {
+		return false
+	}
+
+	cells := rawCells(line)
+	if len(cells) == 0 {
+		return false
+	}
+
+	for _, cell := range cells {
+		if !isDelimiterCell(cell) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// rawCells cuts one pipe row into its actual cells — no padding, no
+// truncation — trimmed.
+func rawCells(line string) []string {
+	row := strings.TrimSuffix(strings.TrimPrefix(line, "|"), "|")
+
+	cells := strings.Split(row, "|")
+
+	for i := range cells {
+		cells[i] = strings.TrimSpace(cells[i])
+	}
+
+	return cells
+}
+
+// isDelimiterCell reports whether cell is dashes with optional leading
+// and/or trailing colons ("---", ":---", "---:", ":---:").
+func isDelimiterCell(cell string) bool {
+	cell = strings.TrimPrefix(cell, ":")
+	cell = strings.TrimSuffix(cell, ":")
+
+	return cell != "" && strings.Trim(cell, "-") == ""
+}
+
+// delimiterAlign parses the per-column alignments from a delimiter row.
+func delimiterAlign(line string) []Align {
+	cells := rawCells(line)
+
+	align := make([]Align, 0, len(cells))
+
+	for _, cell := range cells {
+		align = append(align, cellAlign(cell))
+	}
+
+	return align
+}
+
+// cellAlign maps one delimiter cell to its alignment.
+func cellAlign(cell string) Align {
+	left := strings.HasPrefix(cell, ":")
+	right := strings.HasSuffix(cell, ":")
+
+	switch {
+	case left && right:
+		return AlignCenter
+	case left:
+		return AlignLeft
+	case right:
+		return AlignRight
+	default:
+		return AlignDefault
+	}
 }
 
 // flushPara closes the pending paragraph, if any.

@@ -150,6 +150,137 @@ func TestParse_LineAfterBlock_NotDropped(t *testing.T) {
 	}
 }
 
+// TestParse_Table pins the table grammar (ADR-0027): a pipe header
+// followed by a delimiter row opens a table; body rows are consecutive
+// pipe lines. Without a delimiter row the pipes stay a paragraph (the
+// streaming-safe fallback), and cell counts normalize to the header.
+func TestParse_Table(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want []Block
+	}{
+		{
+			name: "gfm table with alignment",
+			in:   "| a | b | c |\n| --- | :--- | ---: |\n| 1 | 2 | 3 |",
+			want: []Block{{
+				Kind:  BlockTable,
+				Cells: [][]string{{"a", "b", "c"}, {"1", "2", "3"}},
+				Align: []Align{AlignDefault, AlignLeft, AlignRight},
+			}},
+		},
+		{
+			name: "center alignment",
+			in:   "| a |\n| :---: |\n| 1 |",
+			want: []Block{{
+				Kind:  BlockTable,
+				Cells: [][]string{{"a"}, {"1"}},
+				Align: []Align{AlignCenter},
+			}},
+		},
+		{
+			name: "pipe line without delimiter stays a paragraph",
+			in:   "| not a table",
+			want: []Block{{Kind: BlockParagraph, Text: "| not a table"}},
+		},
+		{
+			name: "header and delimiter alone form an empty table",
+			in:   "| a |\n| - |",
+			want: []Block{{
+				Kind:  BlockTable,
+				Cells: [][]string{{"a"}},
+				Align: []Align{AlignDefault},
+			}},
+		},
+		{
+			name: "cell counts normalize to the header",
+			in:   "| a | b |\n| - | - |\n| 1 | 2 | extra |",
+			want: []Block{{
+				Kind:  BlockTable,
+				Cells: [][]string{{"a", "b"}, {"1", "2"}},
+				Align: []Align{AlignDefault, AlignDefault},
+			}},
+		},
+		{
+			name: "short rows pad with empty cells",
+			in:   "| a | b |\n| - | - |\n| only |",
+			want: []Block{{
+				Kind:  BlockTable,
+				Cells: [][]string{{"a", "b"}, {"only", ""}},
+				Align: []Align{AlignDefault, AlignDefault},
+			}},
+		},
+		{
+			name: "cells trim surrounding spaces",
+			in:   "|  a  |  b  |\n| - | - |\n|  1  |  2  |",
+			want: []Block{{
+				Kind:  BlockTable,
+				Cells: [][]string{{"a", "b"}, {"1", "2"}},
+				Align: []Align{AlignDefault, AlignDefault},
+			}},
+		},
+		{
+			name: "row consumption stops at a non-pipe line",
+			in:   "| a |\n| - |\n| 1 |\nafter",
+			want: []Block{
+				{Kind: BlockTable, Cells: [][]string{{"a"}, {"1"}}, Align: []Align{AlignDefault}},
+				{Kind: BlockParagraph, Text: "after"},
+			},
+		},
+		{
+			name: "delimiter mismatch falls back to paragraph",
+			in:   "| a |\n| x |\n| 1 |",
+			want: []Block{{Kind: BlockParagraph, Text: "| a |\n| x |\n| 1 |"}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := Parse(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("Parse(%q) = %d blocks %+v, want %d", tt.in, len(got), got, len(tt.want))
+			}
+
+			for i := range got {
+				got[i].settled = false
+			}
+
+			for i := range tt.want {
+				if !reflect.DeepEqual(got[i], tt.want[i]) {
+					t.Errorf("block %d = %+v, want %+v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestParse_TrailingTableLive pins the streaming rule for tables: a
+// table whose last row has not seen its newline stays live (the row may
+// still grow); a trailing newline settles the whole table.
+func TestParse_TrailingTableLive(t *testing.T) {
+	t.Parallel()
+
+	live := Parse("intro\n\n| a | b |\n| - | - |\n| partial")
+	if len(live) != 2 || live[1].Kind != BlockTable {
+		t.Fatalf("blocks = %+v, want paragraph + live table", live)
+	}
+
+	done, tail := Split(live)
+	if len(done) != 1 || len(tail) != 1 || tail[0].Kind != BlockTable {
+		t.Errorf("Split = %d completed, %+v live, want the partial table live", len(done), tail)
+	}
+
+	settled := Parse("intro\n\n| a | b |\n| - | - |\n| 1 |\n")
+	done, tail = Split(settled)
+	if len(done) != 2 || len(tail) != 0 {
+		t.Errorf("Split = %d completed, %+v live, want everything completed", len(done), tail)
+	}
+}
+
 // TestParse_OpenFence_IsCodeBlock pins the streaming rule: from an
 // unclosed fence to the end of input, everything is code — never a
 // half-styled paragraph.

@@ -84,7 +84,8 @@ var (
 	// invisible thinking.
 	ErrEmptyReasoningRound = errors.New(
 		"empty reasoning round: model hit the max-token limit before writing anything" +
-			" (raise max_tokens or disable thinking)")
+			" (raise max_tokens or disable thinking)",
+	)
 )
 
 // Event is a normalized provider stream event.
