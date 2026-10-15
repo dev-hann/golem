@@ -133,7 +133,11 @@ func TestInput_HeightGrowsWithSoftWrap(t *testing.T) {
 	}{
 		{"short line stays one row", 40, "hello", 1},
 		{"long single line wraps by columns", 40, strings.Repeat("a", 100), 4}, // usable 32
-		{"hangul wraps fewer syllables per row", 24, strings.Repeat("가", 40), 6},
+		// Corrected 2026-10-16 (Phase 8.1): was 6, pinned to the pre-8.1
+		// probe — which fed the textarea's content width (18) to SetWidth
+		// and double-subtracted the prompt, re-wrapping at 16. The rendered
+		// composer carries 9 syllables per row (content width 18): 5 rows.
+		{"hangul wraps fewer syllables per row", 24, strings.Repeat("가", 40), 5},
 		{"word boundary moves whole words", 12, "aaaaaaaaaa bbbbbbbbbb", 2},
 		{"explicit newline plus wrap", 12, "aaaa\n" + strings.Repeat("b", 30), 3},
 		{"trailing space at the boundary anchors a row", 22, strings.Repeat("a", 17) + " ", 2},

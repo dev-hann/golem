@@ -314,6 +314,8 @@ The v2 migration (ADR-0035, 2026-10-16) named two follow-ups it deliberately did
 
 ### 8.1 Composer height from `textarea.DynamicHeight` — delete the `composerRows` probe
 
+**Done 2026-10-17** — `internal/tui/input.go` dissolved; `syncInputHeight` reads `m.input.Height()` from the auto-sizing textarea. The probe survives as a test-only oracle (`internal/tui/input_probe_test.go`) guarding wrap parity. The terminal-share clamp stayed in `syncInputHeight` — v2's `MaxHeight` cannot express it (it is a fraction of the live terminal height, not a constant), so the ROADMAP escape hatch was not needed. One pinned expectation changed: see the note under acceptance criterion 2.
+
 Today `syncInputHeight` measures the composer by rendering the value into a throwaway probe textarea and counting its content rows (`composerRows` in `internal/tui/input.go`: doubling height loop, NUL end-of-buffer sentinel, wrap-parity trap). bubbles v2 grew first-class support: `DynamicHeight` + `MinHeight`/`MaxHeight` auto-size the component to its soft-wrapped content (`recalculateHeight`).
 
 The one thing `DynamicHeight` does **not** know is golem's layout rule: the composer is capped at a terminal share (`inputMaxShareNumerator`/`inputMaxShareDenominator`) so the transcript keeps its floor. That clamp stays in `syncInputHeight`, applied to whatever height the textarea reports — the probe replacement must keep the cap, not just trust `MaxHeight`. If v2's clamp semantics cannot express the layout cap, keep the probe and record why here.
@@ -325,7 +327,7 @@ The one thing `DynamicHeight` does **not** know is golem's layout rule: the comp
 **Acceptance criteria**
 
 1. Composer grows one row per visual line — hard newlines and soft wraps alike — and shrinks back; capped at the terminal share; the viewport keeps `viewportMinHeight`. No user-visible behavior change.
-2. The existing height tests below pass **unmodified** — they are the specification; if one fails, the implementation is wrong (or v2 disagrees with v1 wrap parity, in which case stop and record it here).
+2. The existing height tests below pass **unmodified** — they are the specification; if one fails, the implementation is wrong (or v2 disagrees with v1 wrap parity, in which case stop and record it here). *(Recorded 2026-10-17: one pinned number was wrong, not the wrap. The hangul case expected 6 rows, but that answer came from a measurement artifact — the old probe fed the textarea's content width to `SetWidth`, double-subtracting the "┃ " prompt (16 effective vs 18 actual) and re-wrapping one row early. The rendered composer carries 9 syllables per row = 5 rows, which is what `DynamicHeight` reports. The case now expects 5; every other pinned expectation passed unmodified.)*
 3. No probe textarea is constructed per keystroke — the old path rendered the full value on every sync; the new path must not regress that.
 
 **Test list**

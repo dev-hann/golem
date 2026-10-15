@@ -95,6 +95,12 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 	input := textarea.New()
 	input.Placeholder = chatPlaceholder
 	input.ShowLineNumbers = false
+	// The composer self-sizes to its soft-wrapped content (Phase 8.1);
+	// golem's terminal-share cap is applied on top in syncInputHeight.
+	// MaxHeight keeps the bubbles default: it is also the probe oracle's
+	// ceiling, so the two agree past 99 content rows.
+	input.DynamicHeight = true
+	input.MinHeight = minInputHeight
 	input.SetStyles(restyleInput(input, k).Styles())
 	input.SetHeight(minInputHeight)
 	input.SetWidth(startWidth - inputBorderCols)
@@ -231,12 +237,12 @@ func (m *Model) resize(width, height int) {
 	m.syncInputHeight()
 }
 
-// syncInputHeight grows the input box with its content — one row per
-// visual line the textarea actually renders (see composerRows), min
-// minInputHeight, capped at the terminal share — and returns the freed or
-// claimed rows to the transcript viewport.
+// syncInputHeight grows the input box with its content — the textarea
+// auto-sizes to its soft-wrapped rows (DynamicHeight, Phase 8.1) — clamps
+// that to the terminal share (v2 does not know golem's layout rule), and
+// returns the freed or claimed rows to the transcript viewport.
 func (m *Model) syncInputHeight() {
-	rows := composerRows(m.input.Value(), m.input.Width())
+	rows := m.input.Height()
 
 	height := m.height
 	if height == 0 {
@@ -246,7 +252,9 @@ func (m *Model) syncInputHeight() {
 	rowCap := max(height*inputMaxShareNumerator/inputMaxShareDenominator, minInputHeight)
 	rows = min(max(rows, minInputHeight), rowCap)
 
-	if rows == m.inputRows {
+	// The textarea may self-size past the cap while inputRows already sits
+	// at it — re-pin its height so the rendered box matches the layout.
+	if rows == m.inputRows && m.input.Height() == rows {
 		return
 	}
 
