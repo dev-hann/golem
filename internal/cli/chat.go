@@ -92,6 +92,14 @@ func Chat(ctx context.Context, opts ChatOptions) error {
 			return nil
 		}
 
+		if line == "/compact" {
+			if err := chatCompact(ctx, client, events, sessionID, stderr); err != nil {
+				return err
+			}
+
+			continue
+		}
+
 		if sessionID == "" {
 			if err := client.Send(golemclient.CreateSession{Type: golemclient.TypeCreateSession}); err != nil {
 				return fmt.Errorf("cli: creating session: %w", err)
@@ -119,6 +127,66 @@ func Chat(ctx context.Context, opts ChatOptions) error {
 	}
 
 	return nil
+}
+
+// chatCompact handles the /compact slash command: refuses with no
+// session yet, otherwise sends compact_session and drains the outcome.
+func chatCompact(
+	ctx context.Context,
+	client *golemclient.Client,
+	events <-chan any,
+	sessionID string,
+	stderr *syncWriter,
+) error {
+	if sessionID == "" {
+		stderr.printf("no session to compact yet — send a message first\n")
+
+		return nil
+	}
+
+	if err := client.Send(golemclient.CompactSession{
+		Type: golemclient.TypeCompactSession, Session: sessionID,
+	}); err != nil {
+		return fmt.Errorf("cli: sending compact: %w", err)
+	}
+
+	return drainCompaction(ctx, events, stderr)
+}
+
+// drainCompaction renders events until the compaction resolves
+// (session_compacted, compact_failed, or error).
+func drainCompaction(
+	ctx context.Context,
+	events <-chan any,
+	stderr *syncWriter,
+) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case ev, ok := <-events:
+			if !ok {
+				return fmt.Errorf("cli: connection closed")
+			}
+
+			switch e := ev.(type) {
+			case golemclient.SessionCompacted:
+				stderr.printf("context compacted (%d chars of summary)\n", len(e.Summary))
+
+				return nil
+			case golemclient.CompactFailed:
+				stderr.printf("compact failed: %s\n", e.Reason)
+
+				return nil
+			case golemclient.ErrorEvent:
+				stderr.printf("error[%s]: %s\n", e.Code, e.Message)
+
+				return nil
+			default:
+				// interim events are not rendered
+			}
+		}
+	}
 }
 
 // chatEventBuffer sizes the internal event channel.

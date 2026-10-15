@@ -90,6 +90,8 @@ type harness struct {
 	storeDir string
 	store    *session.Store
 	root     string
+	// lastSession tracks the session runTurn sends to.
+	lastSession string
 }
 
 // shortTempDir returns a temp dir whose full path stays under the macOS

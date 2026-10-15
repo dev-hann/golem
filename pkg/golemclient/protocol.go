@@ -11,28 +11,31 @@ import (
 
 // Event type names (client → server).
 const (
-	TypeUserMessage   = "user_message"
-	TypeInterrupt     = "interrupt"
-	TypeCreateSession = "create_session"
-	TypeListSessions  = "list_sessions"
-	TypeLoadSession   = "load_session"
-	TypeRenameSession = "rename_session"
-	TypeVersionQuery  = "version_query"
+	TypeUserMessage    = "user_message"
+	TypeInterrupt      = "interrupt"
+	TypeCreateSession  = "create_session"
+	TypeListSessions   = "list_sessions"
+	TypeLoadSession    = "load_session"
+	TypeRenameSession  = "rename_session"
+	TypeVersionQuery   = "version_query"
+	TypeCompactSession = "compact_session"
 )
 
 // Event type names (server → client).
 const (
-	TypeSessionMeta   = "session_meta"
-	TypeHistory       = "history"
-	TypeSessionList   = "session_list"
-	TypeTurnStart     = "turn_start"
-	TypeTextDelta     = "text_delta"
-	TypeToolCallStart = "tool_call_start"
-	TypeToolCallEnd   = "tool_call_end"
-	TypeError         = "error"
-	TypeTurnEnd       = "turn_end"
-	TypeSessionTitle  = "session_title"
-	TypeServerHello   = "server_hello"
+	TypeSessionMeta      = "session_meta"
+	TypeHistory          = "history"
+	TypeSessionList      = "session_list"
+	TypeTurnStart        = "turn_start"
+	TypeTextDelta        = "text_delta"
+	TypeToolCallStart    = "tool_call_start"
+	TypeToolCallEnd      = "tool_call_end"
+	TypeError            = "error"
+	TypeTurnEnd          = "turn_end"
+	TypeSessionTitle     = "session_title"
+	TypeServerHello      = "server_hello"
+	TypeSessionCompacted = "session_compacted"
+	TypeCompactFailed    = "compact_failed"
 )
 
 // Envelope is the minimal shape every message shares. Unknown types must be
@@ -190,6 +193,34 @@ type RenameSession struct {
 	Title   string `json:"title"`
 }
 
+// CompactSession asks the server to summarize the session's folded
+// history and persist the result as a compaction barrier: everything
+// before the barrier drops from the model's context on later turns
+// (ADR-0021). Rejected while a turn runs or the session holds no
+// conversation.
+type CompactSession struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+}
+
+// SessionCompacted confirms a completed compaction: summary is the
+// synthesized context the next turns start from. Persisted as a session
+// record (append-only — the file is never rewritten) and replayed to
+// loading clients inside the history batch.
+type SessionCompacted struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Summary string `json:"summary"`
+}
+
+// CompactFailed reports a compaction attempt whose summary side call
+// failed; the session's history is untouched.
+type CompactFailed struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Reason  string `json:"reason"`
+}
+
 // VersionQuery asks the server to identify its build (ServerHello).
 type VersionQuery struct {
 	Type string `json:"type"`
@@ -236,6 +267,10 @@ var decoders = map[string]decoder{
 	TypeServerHello:   typed[ServerHello],
 	TypeRenameSession: typed[RenameSession],
 	TypeVersionQuery:  typed[VersionQuery],
+
+	TypeCompactSession:   typed[CompactSession],
+	TypeSessionCompacted: typed[SessionCompacted],
+	TypeCompactFailed:    typed[CompactFailed],
 }
 
 // Decode classifies one raw NDJSON line into a typed event. It returns the

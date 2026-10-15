@@ -151,6 +151,8 @@ func (s *Server) dispatch(_ net.Conn, writer *connWriter, event any) bool {
 		s.handleSetModel(writer, ev)
 	case golemclient.RenameSession:
 		s.handleRenameSession(writer, ev)
+	case golemclient.CompactSession:
+		s.handleCompact(writer, ev)
 	case golemclient.VersionQuery:
 		writer.send(golemclient.ServerHello{
 			Type: golemclient.TypeServerHello, Version: s.cfg.Version,
