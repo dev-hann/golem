@@ -26,6 +26,23 @@ config schema may change without notice.
   Parallel walking was evaluated and deferred — the win is latency, not
   context, and no latency complaint exists yet.
 
+### Added — session fork (2026-10-16, ADR-0034)
+
+- `fork_session {session, turn?}` copies a session's stored lines through
+  a turn boundary into a new child session — the parent file is never
+  touched. Omitting `turn` forks through the last completed turn. The
+  child file is written once: its own `session_meta`, a `session_forked`
+  lineage record (skipped by old folders as an unknown type), the copied
+  lines with the `session` field rewritten to the child id, and the fork
+  title (`"X (fork #N)"` — 1 + the max sibling suffix, opencode's rule).
+  The server confirms with `session_forked {session, parent, title}` to
+  the requester only. Refusals: busy session, no completed turn, unknown
+  turn id (`invalid_request`), unknown session (`session_not_found`).
+- TUI: `ctrl+p` → "fork session" (`ctrl+x f`) forks the current session
+  through its last completed turn; the confirmation switches the client
+  to the child (transcript reloads from its history). Turn-picking UI is
+  the v2 extension (the protocol's `turn` field is already there).
+
 ### Changed — system prompt baseline + per-turn environment block (2026-10-16, ADR-0031)
 
 - The built-in system prompt grows from 5 to ~16 lines, adding the safety
