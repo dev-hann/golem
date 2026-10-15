@@ -71,6 +71,12 @@ Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The future 
 | `mem_limit_mb` | int | `256` | Sets `GOMEMLIMIT` |
 | `session_cache` | int | `8` | Most-recently-active sessions held in memory |
 
+### `[session]`
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `auto_compact_bytes` | int | `131072` (128 KiB) | Folded-history byte threshold that triggers an automatic compaction before a turn starts (ADR-0025). `0` disables automatic compaction — manual `/compact` keeps working either way |
+
 ### `[tools]`
 
 | Key | Type | Default | Description |
@@ -103,6 +109,9 @@ api_key = "ref:ZAI_API_KEY"
 
 [server]
 mem_limit_mb = 256
+
+[session]
+auto_compact_bytes = 131072
 
 [plugins.mcp.github]
 command = ["./github-mcp", "-stdio"]

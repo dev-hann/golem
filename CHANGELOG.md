@@ -7,6 +7,24 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — automatic context compaction (2026-10-15)
+
+- Long sessions now compact themselves: before each turn starts, a
+  folded history at or above a byte threshold goes through the same
+  summary + barrier path as manual `/compact` (ADR-0025). The threshold
+  defaults to 128 KiB and is configurable as `[session]
+  auto_compact_bytes` (0 disables; manual `/compact` keeps working).
+  A failed automatic compaction emits `compact_failed` and the turn
+  proceeds on the un-compacted history — compaction is an optimization,
+  never a gate.
+- `Session.ContextBytes()` measures the folded history the model will
+  replay (text, tool-call args, tool results).
+- Rationale: the "Continue" session grew past a million input tokens
+  until every turn died by reasoning budget burn (ADR-0023) — the exact
+  failure ADR-0022's deferral predicted. See ADR-0025 for the trigger
+  design (before user_message append, so the fresh question always
+  survives the barrier).
+
 ### Added — TUI session header (2026-10-15)
 
 - The chat screen now shows a one-row session header above the

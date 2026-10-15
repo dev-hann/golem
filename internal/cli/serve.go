@@ -25,9 +25,12 @@ type ServeOptions struct {
 	Sessions   string
 	Store      *session.Store
 	// Version labels the build for client freshness checks.
-	Version   string
-	OnReady   func(addr string)
-	SignalCtx func(ctx context.Context, stop context.CancelFunc)
+	Version string
+	// AutoCompactBytes overrides the server's automatic compaction
+	// threshold (ADR-0025); <= 0 uses the default.
+	AutoCompactBytes int
+	OnReady          func(addr string)
+	SignalCtx        func(ctx context.Context, stop context.CancelFunc)
 }
 
 // Serve runs the agent server until ctx is cancelled (default: SIGINT).
@@ -43,13 +46,19 @@ func Serve(ctx context.Context, opts ServeOptions) error {
 		}
 	}
 
+	autoCompact := opts.AutoCompactBytes
+	if autoCompact <= 0 {
+		autoCompact = server.DefaultAutoCompactBytes
+	}
+
 	srv, err := server.New(server.Config{
-		Provider:   opts.Provider,
-		ProviderID: opts.ProviderID,
-		Model:      opts.Model,
-		Root:       opts.Root,
-		Store:      store,
-		Version:    opts.Version,
+		Provider:         opts.Provider,
+		ProviderID:       opts.ProviderID,
+		Model:            opts.Model,
+		Root:             opts.Root,
+		Store:            store,
+		Version:          opts.Version,
+		AutoCompactBytes: autoCompact,
 	})
 	if err != nil {
 		return fmt.Errorf("cli: server: %w", err)

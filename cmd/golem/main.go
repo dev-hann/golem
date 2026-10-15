@@ -17,6 +17,7 @@ import (
 
 	"github.com/dev-hann/golem/internal/cli"
 	"github.com/dev-hann/golem/internal/config"
+	"github.com/dev-hann/golem/internal/server"
 )
 
 // deps injects the app launcher and setup wizard so the TUI path is
@@ -184,14 +185,26 @@ func runServe(ctx context.Context) int {
 		Log:        os.Stderr,
 	})
 
+	cfg, err := config.Load(config.DefaultPath())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "golem: %v\n", err)
+		return 1
+	}
+
+	autoCompact := server.DefaultAutoCompactBytes
+	if cfg.Session.AutoCompactBytes >= 0 {
+		autoCompact = cfg.Session.AutoCompactBytes
+	}
+
 	if err := cli.Serve(ctx, cli.ServeOptions{
-		Provider:   choice.Provider,
-		ProviderID: choice.ID,
-		Model:      choice.Model,
-		Root:       root,
-		Socket:     cli.DefaultSocketPath(),
-		Sessions:   cli.DefaultSessionsDir(),
-		Version:    resolveVersion(),
+		Provider:         choice.Provider,
+		ProviderID:       choice.ID,
+		Model:            choice.Model,
+		Root:             root,
+		Socket:           cli.DefaultSocketPath(),
+		Sessions:         cli.DefaultSessionsDir(),
+		Version:          resolveVersion(),
+		AutoCompactBytes: autoCompact,
 		OnReady: func(addr string) {
 			fmt.Fprintf(os.Stderr, "golem serving on %s\n", addr) //nolint:errcheck // terminal output
 		},

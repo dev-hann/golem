@@ -235,4 +235,4 @@ Goal: daily-driver terminal client.
 
 ## Explicitly deferred (needs new ADR before starting)
 
-Automatic context compaction (manual `/compact` landed 2026-10-15, ADR-0022 — the automatic threshold policy still needs tuning data), sub-agents, LSP integration, remote/web auth, Windows named pipes.
+Sub-agents, LSP integration, remote/web auth, Windows named pipes.

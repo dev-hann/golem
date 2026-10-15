@@ -142,6 +142,6 @@ stdlib, plus: `anthropics/anthropic-sdk-go`, `openai/openai-go`, `ollama/ollama/
 
 ## Non-goals (for v1)
 
-- LSP integration, sub-agents — revisit after roadmap phase 5 (see [ROADMAP.md](ROADMAP.md)). Manual context compaction landed (ADR-0022); automatic compaction remains deferred.
+- LSP integration, sub-agents — revisit after roadmap phase 5 (see [ROADMAP.md](ROADMAP.md)). Context compaction is complete: manual `/compact` (ADR-0022) plus the automatic pre-turn threshold trigger (ADR-0025).
 - Windows named pipes (unix sockets + TCP only initially).
 - Multi-user / remote auth on the server. Local, single-user by design.

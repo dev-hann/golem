@@ -34,6 +34,16 @@ type Config struct {
 	Default string
 	// Providers holds the per-id [provider.<id>] tables.
 	Providers map[string]ProviderSettings
+	// Session holds the [session] table.
+	Session SessionSettings
+}
+
+// SessionSettings is the [session] table.
+type SessionSettings struct {
+	// AutoCompactBytes is the folded-history byte threshold triggering an
+	// automatic compaction before a turn starts (ADR-0025). 0 disables
+	// automatic compaction. Absent falls back to the default.
+	AutoCompactBytes int
 }
 
 // DefaultPath is the global config file location, honoring XDG_CONFIG_HOME.
@@ -69,13 +79,14 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: reading %s: %w", path, err)
 	}
 
-	defaultID, providers, err := parseProviders(string(raw), path)
+	defaultID, providers, doc, err := parseProviders(string(raw), path)
 	if err != nil {
 		return nil, err
 	}
 
 	cfg.Path = path
 	cfg.Providers = providers
+	cfg.Session = parseSession(doc)
 
 	if defaultID != "" {
 		cfg.Default = defaultID
@@ -89,17 +100,18 @@ func Load(path string) (*Config, error) {
 }
 
 // parseProviders decodes the file body into the provider.default value and
-// the per-id [provider.<id>] settings.
-func parseProviders(body, path string) (defaultID string, providers map[string]ProviderSettings, err error) {
-	var doc map[string]any
-
+// the per-id [provider.<id>] settings. The parsed document is returned for
+// follow-on table extraction (the [session] table).
+func parseProviders(
+	body, path string,
+) (defaultID string, providers map[string]ProviderSettings, doc map[string]any, err error) {
 	if err = toml.Unmarshal([]byte(body), &doc); err != nil {
-		return "", nil, fmt.Errorf("config: parsing %s: %w", path, err)
+		return "", nil, nil, fmt.Errorf("config: parsing %s: %w", path, err)
 	}
 
 	providerTable, ok := doc["provider"].(map[string]any)
 	if !ok {
-		return "", map[string]ProviderSettings{}, nil
+		return "", map[string]ProviderSettings{}, doc, nil
 	}
 
 	defaultID, _ = providerTable["default"].(string)
@@ -118,7 +130,25 @@ func parseProviders(body, path string) (defaultID string, providers map[string]P
 		}
 	}
 
-	return defaultID, providers, nil
+	return defaultID, providers, doc, nil
+}
+
+// parseSession extracts the [session] table's settings. Absent or
+// negative values yield 0 (auto compaction off — the caller decides the
+// default), matching docs/CONFIG.md.
+func parseSession(doc map[string]any) SessionSettings {
+	var settings SessionSettings
+
+	table, ok := doc["session"].(map[string]any)
+	if !ok {
+		return settings
+	}
+
+	if value, ok := table["auto_compact_bytes"].(int64); ok && value >= 0 {
+		settings.AutoCompactBytes = int(value)
+	}
+
+	return settings
 }
 
 // stringValue coerces a TOML value to a string ("" when absent or not a
