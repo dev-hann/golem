@@ -49,6 +49,38 @@ type block struct {
 // cannot flood the viewport.
 const maxResultPreview = 2000
 
+// toolSummaryMaxRows caps the collapsed tool summary's wrapped rows. Long
+// commands (bash) and paths stay three gray rows; expanding (a click, the
+// chevron) restores the full wrap.
+const toolSummaryMaxRows = 3
+
+// capRows hard-limits already-wrapped text to rowCap rows: the first
+// rowCap-1 rows pass through, the last row is cut to width cells with a
+// trailing ellipsis (kept only when the row is genuinely cut — a fit
+// needs no marker). width < 1 degenerates to keeping the first rowCap
+// rows.
+func capRows(wrapped string, rowCap, width int) string {
+	rows := strings.Split(wrapped, "\n")
+	if len(rows) <= rowCap {
+		return wrapped
+	}
+
+	head := rows[:rowCap-1]
+	last := rows[rowCap-1]
+
+	switch {
+	case width < 1:
+		// No room to cut: keep the first rowCap rows verbatim.
+		return strings.Join(rows[:rowCap], "\n")
+	case ansi.StringWidth(last) >= width:
+		last = ansi.Truncate(last, width-1, "") + "…"
+	default:
+		last += "…"
+	}
+
+	return strings.Join(append(head, last), "\n")
+}
+
 // Tool line geometry: the summary's two-space indent and the expanded
 // preview's gutter, kept aligned under the first row while wrapping.
 const (
@@ -84,7 +116,9 @@ func (b block) render(k *kit.Kit, md *markdown.Renderer, width int) string {
 
 // renderTool renders a tool block: the summary line (chevron, status,
 // tool, parsed argument) always, plus the result preview while expanded.
-// Results hide behind a click — the transcript stays scannable.
+// Results hide behind a click — the transcript stays scannable. A
+// collapsed summary longer than toolSummaryMaxRows rows is row-capped;
+// the expanded block (summary and preview together) wraps fully.
 func (b block) renderTool(k *kit.Kit, width int) string {
 	status := "…"
 
@@ -101,13 +135,18 @@ func (b block) renderTool(k *kit.Kit, width int) string {
 		chevron = "▾"
 	}
 
-	summary := fmt.Sprintf("%s %s %s %s", chevron, status, b.tool, argSummary(b.tool, b.args))
+	summary := indentWrap(k, width, toolSummaryIndent,
+		fmt.Sprintf("%s %s %s %s", chevron, status, b.tool, argSummary(b.tool, b.args)))
 
-	if !b.done || !b.expanded {
-		return k.ToolLine(indentWrap(k, width, toolSummaryIndent, summary))
+	if !b.expanded {
+		summary = capRows(summary, toolSummaryMaxRows, width)
 	}
 
-	return k.ToolLine(indentWrap(k, width, toolSummaryIndent, summary)) + "\n" +
+	if !b.done || !b.expanded {
+		return k.ToolLine(summary)
+	}
+
+	return k.ToolLine(summary) + "\n" +
 		k.ToolLine(indentWrap(k, width, toolPreviewIndent, preview(b.result, maxResultPreview)))
 }
 

@@ -7,6 +7,18 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — TUI tool-call summaries cap at 3 rows (2026-10-15)
+
+- A collapsed tool-call block in the TUI transcript now wraps to at most
+  3 rows: the first 2 wrap as before, the 3rd is cut at the viewport
+  width with a trailing `…`. Previously a long bash command or path
+  wrapped to many gray rows and buried the conversation. Expanding the
+  block (click or press the summary row — the ▸/▾ chevron) restores the
+  full wrap plus the result preview; the cap applies only to the
+  collapsed summary. Replay renders identical output (no protocol or
+  storage change). Docs: ARCHITECTURE's TUI row and ROADMAP Phase 3
+  acceptance criteria updated in the same change.
+
 ### Changed — walk hygiene and read windows for built-in tools (2026-10-17, ADR-0033)
 
 - grep/glob walks no longer scan dependency trees, build output, caches, or

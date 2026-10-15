@@ -124,7 +124,7 @@ Goal: daily-driver terminal client.
 ### Acceptance criteria
 
 1. Streaming text renders incrementally without flicker at ≥ 200 deltas/turn.
-2. Tool calls render collapsed with expand (one-line summary: tool + args + ok/err).
+2. Tool calls render collapsed with expand (short summary: tool + args + ok/err; a collapsed summary wraps to at most `toolSummaryMaxRows` = 3 rows — the last row ends in `…` — and expanding restores the full wrap, 2026-10-15).
 3. `ctrl+c` during a turn interrupts; prompt returns.
 4. TUI restart reconnects to a live server and restores the open session via history replay.
 
@@ -134,6 +134,7 @@ Goal: daily-driver terminal client.
 - `TestModel_ApprovalPromptYesRunsCommand` *(removed — ADR-0016)*
 - `TestModel_ApprovalPromptDenySendsDeny` *(removed — ADR-0016)*
 - `TestModel_ToolCallCollapsedByDefault`
+- `TestCapRows` / `TestBlockRender_ToolSummaryRowCap` *(2026-10-15 row cap)*
 - `TestModel_InterruptSendsInterruptEvent`
 - `TestModel_SessionPickerListsAndSwitches`
 - `TestModel_HistoryReplayRendersTranscript`

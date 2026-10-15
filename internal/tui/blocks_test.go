@@ -167,6 +167,105 @@ func TestBlockRender_ToolPreviewGutterAligned(t *testing.T) {
 	}
 }
 
+func TestCapRows(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		in    string
+		max   int
+		width int
+		want  string
+	}{
+		{name: "under cap untouched", in: "a\nb", max: 3, width: 40, want: "a\nb"},
+		{name: "at cap untouched", in: "a\nb\nc", max: 3, width: 40, want: "a\nb\nc"},
+		{name: "over cap cuts with ellipsis", in: "aaaa\nbbbb\ncccccccccc\ndddd", max: 3, width: 10, want: "aaaa\nbbbb\nccccccccc…"},
+		{name: "short last row gains ellipsis", in: "aaaa\nbbbb\ncc\ndddd", max: 3, width: 10, want: "aaaa\nbbbb\ncc…"},
+		{name: "one-cell width renders the ellipsis alone", in: "aaaa\nbbbb\ncc\ndddd", max: 3, width: 1, want: "aaaa\nbbbb\n…"},
+		{name: "degenerate width keeps the row", in: "aaaa\nbbbb\ncc\ndddd", max: 3, width: 0, want: "aaaa\nbbbb\ncc"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := capRows(tt.in, tt.max, tt.width); got != tt.want {
+				t.Errorf("capRows(%q, %d, %d) = %q, want %q", tt.in, tt.max, tt.width, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBlockRender_ToolSummaryRowCap(t *testing.T) {
+	t.Parallel()
+
+	longCmd := strings.Repeat("cargo test --all-features ", 12)
+
+	tests := []struct {
+		name      string
+		block     block
+		maxRows   int
+		uncapped  bool
+		wantParts []string
+	}{
+		{
+			name:      "running summary capped",
+			block:     block{kind: blockTool, tool: "bash", args: `{"command":"` + longCmd + `"}`},
+			maxRows:   toolSummaryMaxRows,
+			wantParts: []string{"bash", "cargo test"},
+		},
+		{
+			name: "done summary capped",
+			block: block{
+				kind: blockTool, tool: "bash", done: true, ok: true,
+				args: `{"command":"` + longCmd + `"}`,
+			},
+			maxRows:   toolSummaryMaxRows,
+			wantParts: []string{"bash", "cargo test"},
+		},
+		{
+			name: "expanded summary uncapped",
+			block: block{
+				kind: blockTool, tool: "bash", done: true, ok: true, expanded: true,
+				args: `{"command":"` + longCmd + `"}`, result: "ok",
+			},
+			uncapped:  true,
+			wantParts: []string{"  │ ok"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			rendered := plain(tt.block.render(testKit(), testMarkdown(), 40))
+			rows := strings.Split(rendered, "\n")
+
+			if tt.uncapped {
+				if len(rows) <= tt.maxRows {
+					t.Fatalf("expanded summary must render every row (%d), got %d:\n%s", len(rows), tt.maxRows, rendered)
+				}
+			} else {
+				if len(rows) > tt.maxRows {
+					t.Errorf("collapsed summary must cap at %d rows, got %d:\n%s", tt.maxRows, len(rows), rendered)
+				}
+
+				// ToolLine pads every row to the block's width; the
+				// ellipsis assertion must look past the padding.
+				if last := strings.TrimRight(rows[len(rows)-1], " "); !strings.HasSuffix(last, "…") {
+					t.Errorf("capped summary's last row must end with an ellipsis, got %q:\n%s", last, rendered)
+				}
+			}
+
+			for _, want := range tt.wantParts {
+				if !strings.Contains(rendered, want) {
+					t.Errorf("summary missing %q:\n%s", want, rendered)
+				}
+			}
+		})
+	}
+}
+
 func TestPreview_CutRespectsRuneBoundary(t *testing.T) {
 	t.Parallel()
 
