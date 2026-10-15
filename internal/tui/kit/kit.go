@@ -156,14 +156,15 @@ func (k *Kit) Prompt(text string) string {
 func (k *Kit) Box(content string, leftBorder Token) string {
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(k.color(Border)).
-		BorderLeftForeground(k.color(leftBorder)).
+		BorderForeground(k.Color(Border)).
+		BorderLeftForeground(k.Color(leftBorder)).
 		Render(content)
 }
 
-// color resolves a token's pair against the Kit's dark flag — for the
-// style fields lipgloss v2 takes as plain color.Color values.
-func (k *Kit) color(token Token) color.Color {
+// Color resolves a token's pair against the Kit's dark flag as a plain
+// color.Color — for the style fields lipgloss v2 takes as raw colors
+// (the composer's terminal-cursor color, Phase 8.2).
+func (k *Kit) Color(token Token) color.Color {
 	pair := k.theme.Colors[token]
 	return lipgloss.LightDark(k.dark)(lipgloss.Color(pair.Light), lipgloss.Color(pair.Dark))
 }
@@ -279,8 +280,8 @@ func (k *Kit) Modal(width int, title, body string) string {
 
 	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(k.color(Border)).
-		Background(k.color(Bg)).
+		BorderForeground(k.Color(Border)).
+		Background(k.Color(Bg)).
 		Padding(0, modalPaddingH).
 		// v2's Width is an exact total (content wraps to fit); the panel
 		// must stay content-sized, so no Width — only the terminal cap.

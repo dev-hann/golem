@@ -1,6 +1,6 @@
 // Rendering: the layout stack (header, transcript viewport, status
-// strip, composer), the sticky question line, and the status-line state
-// labels.
+// strip, composer), the sticky question line, the status-line state
+// labels, and the real terminal cursor pin (Phase 8.2).
 
 package tui
 
@@ -37,6 +37,17 @@ func (m Model) View() tea.View {
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = "golem"
+
+	// The real terminal cursor (Phase 8.2): bubbles reports caret
+	// coordinates relative to the composer's top-left (nil while blurred
+	// or while the virtual cursor mode is on); pin it onto the screen
+	// with the composer's frame offsets. Modals and the conn-error state
+	// keep the cursor hidden.
+	if c := m.input.Cursor(); c != nil && m.mode == modeChat && m.connErr == "" {
+		c.X += screenPadH + inputBorderCols/2
+		c.Y += screenPadV + m.composerScreenRow() + inputBorderRows/2
+		v.Cursor = c
+	}
 
 	// OSC 7501: report the agent's coarse state to the terminal (the tab
 	// dot in supporting multiplexers). Map the status strip's states onto
@@ -84,6 +95,33 @@ func (m Model) layout() string {
 	b.WriteString(m.kit.Box(m.input.View(), edge))
 
 	return padScreen(b.String())
+}
+
+// composerScreenRow computes the screen row (0-based, before the
+// screenPadV margin) where the composer box's top border renders — the
+// anchor the real terminal cursor's Y is measured from. It walks the
+// same layout branches layout() renders, so the two cannot drift: the
+// header when shown, the transcript region (sticky pin, welcome banner,
+// or viewport), the status strip, and the gap row.
+func (m Model) composerScreenRow() int {
+	rows := 0
+
+	if m.headerShown() {
+		rows += headerRows
+	}
+
+	if m.stickyText() != "" {
+		_, height := m.renderedWindow()
+		rows += stickyRows + height
+	} else {
+		// The welcome banner and the viewport both own exactly
+		// vp.Height() rows (the layout's exact-height invariant).
+		rows += m.vp.Height()
+	}
+
+	rows += statusRows + composerGapRows
+
+	return rows
 }
 
 // padScreen frames the composed screen with its padding: every row gets
