@@ -173,6 +173,12 @@ func New(
 // proceed and the user must be told why instead of seeing a dead turn.
 var ErrEmptyResponse = errors.New("empty response: the model produced no text or tool calls this round")
 
+// ErrInterrupted marks a turn ended by context cancellation (an
+// interrupt, delete_session, or server shutdown) rather than a provider
+// failure. The server maps it to the wire's `interrupted` error code so
+// clients can render a deliberate stop instead of a failure (ADR-0036).
+var ErrInterrupted = errors.New("turn interrupted")
+
 // Run executes one turn: it appends userText to history, streams provider
 // events, dispatches tool calls, feeds results back, and repeats until the
 // model stops calling tools. The returned channel closes when the turn is
@@ -225,7 +231,17 @@ func (a *Agent) runTurn(ctx context.Context, messages []llm.Message, out chan<- 
 		outTok += usage.output
 
 		if fatal != nil {
+			// Cancellation is the caller's stop, not a provider failure:
+			// collapse the provider's wrapped chain (adapters tag even
+			// context.Canceled as transient — the retry wrapper needs the
+			// marker, the user needs one clean word) onto ErrInterrupted
+			// so the server can classify it without string matching.
+			if ctx.Err() != nil {
+				fatal = fmt.Errorf("%w: %w", ErrInterrupted, ctx.Err())
+			}
+
 			emit(Event{Type: EventError, Err: fatal})
+
 			return
 		}
 
@@ -249,6 +265,10 @@ func (a *Agent) runTurn(ctx context.Context, messages []llm.Message, out chan<- 
 
 		results, ok := a.executeCalls(ctx, calls, emit)
 		if !ok {
+			// Cancellation between tool calls returned false without an
+			// error event; emit the stop so the turn ends observably.
+			emit(Event{Type: EventError, Err: fmt.Errorf("%w: %w", ErrInterrupted, ctx.Err())})
+
 			return
 		}
 

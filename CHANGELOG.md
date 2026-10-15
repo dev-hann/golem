@@ -7,6 +7,26 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — interrupted turns render as a deliberate stop, not an error (2026-10-18, ADR-0036)
+
+- Pressing esc/ctrl+c during a running turn used to surface the
+  cancellation as a red provider failure — `error: openai stream:
+  context canceled: transient provider failure` — because the
+  cancellation propagated through the provider adapter, agent loop,
+  and server unchanged. Interruptions are now classified at every
+  layer: the agent loop collapses any cancellation onto
+  `agent.ErrInterrupted`, the server emits the new `interrupted` wire
+  code (`golemclient.CodeInterrupted`), and the TUI renders it as a dim
+  `⏹ stopped — the turn was cancelled (esc / ctrl+c); the session is
+  ready for your next message` notice — live and on history replay.
+  Every other error (provider failures, empty rounds) keeps the red
+  `error:` line. An interrupt that kills an in-flight auto-compaction
+  summary no longer emits a trailing `compact_failed` notice — the stop
+  is the last word. Old sessions' stored interruptions still carry
+  `provider_error` and render as errors; only new interruptions carry
+  the code. PROTOCOL.md's error table and interrupt section document
+  the change.
+
 ### Changed — the composer drives the terminal's real cursor (2026-10-17, Phase 8.2)
 
 - The TUI composer no longer renders bubbles' in-text virtual cursor

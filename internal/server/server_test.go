@@ -417,7 +417,13 @@ func TestServer_InterruptEndsTurnGracefully(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("send interrupt: %v", err)
 	}
-	h.expectType(golemclient.TypeError)
+	// ADR-0036: the stop must read as deliberate on the wire — an
+	// `interrupted` error event, never a provider failure chain.
+	errEv := h.expectType(golemclient.TypeError).(golemclient.ErrorEvent)
+	if errEv.Code != golemclient.CodeInterrupted {
+		t.Errorf("interrupted turn code = %q (%s), want %q",
+			errEv.Code, errEv.Message, golemclient.CodeInterrupted)
+	}
 	close(release)
 	// Session must accept a new turn afterwards.
 	provider.streamFn = nil

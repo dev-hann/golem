@@ -237,7 +237,7 @@ func (m *Model) applyTurnEvent(ev any) {
 		m.activeTool, m.activeArgs = "", ""
 		m.retryState = nil
 	case golemclient.ErrorEvent:
-		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
+		m.blocks = append(m.blocks, errorBlock(e))
 		m.endTurn()
 	case golemclient.TurnEnd:
 		m.lastUsage = e.Usage
@@ -348,6 +348,23 @@ func blockDimCompacted(e golemclient.SessionCompacted) block {
 		kind: blockDim,
 		text: "∴ context compacted — earlier history summarized:\n" + e.Summary,
 	}
+}
+
+// interruptNotice is the dim transcript notice for a deliberately
+// stopped turn (ADR-0036) — a deliberate stop, not a failure.
+const interruptNotice = "⏹ stopped — the turn was cancelled (esc / ctrl+c); the session is ready for your next message"
+
+// errorBlock renders an error event as a transcript block. An
+// `interrupted` code (ADR-0036) is the user's own stop: it renders as a
+// dim notice instead of a red error — "error: turn interrupted: context
+// canceled" reads as a crash the user caused on purpose. Every other
+// code keeps the error treatment.
+func errorBlock(e golemclient.ErrorEvent) block {
+	if e.Code == golemclient.CodeInterrupted {
+		return block{kind: blockDim, text: interruptNotice}
+	}
+
+	return block{kind: blockError, text: e.Message}
 }
 
 // finishToolBlock marks the matching tool block done with its outcome.
@@ -467,7 +484,7 @@ func (m *Model) foldReplayEvent(ev any, live replayTurn) replayTurn {
 
 		return live
 	case golemclient.ErrorEvent:
-		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
+		m.blocks = append(m.blocks, errorBlock(e))
 		return replayTurn{} // errors end the turn
 	case golemclient.TurnEnd:
 		m.lastUsage = e.Usage

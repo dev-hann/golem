@@ -33,7 +33,7 @@ Send a user prompt. Starts a new turn in the given session.
 
 ### `interrupt`
 
-Cancel the current turn. Server stops the agent loop at the next await point; partial events already emitted stand.
+Cancel the current turn. Server stops the agent loop at the next await point; partial events already emitted stand. The turn terminates with an `error` event carrying code `interrupted` (ADR-0036) — a deliberate stop, so clients render a cancellation notice rather than a provider failure.
 
 ```json
 {"type":"interrupt","session":"01J...","turn":"01J..."}
@@ -180,6 +180,7 @@ Examples:
 
 | Code | Meaning | Client action |
 |---|---|---|
+| `interrupted` | The turn was cancelled (client `interrupt`, `delete_session`, or server shutdown) — a deliberate stop, not a provider failure (ADR-0036) | Render as a cancellation notice, not an error; turn ended |
 | `provider_error` | LLM API call failed (rate limit, auth, 5xx), or the round ended truncated with no visible output (reasoning budget burn — `llm.ErrEmptyReasoningRound`), or produced nothing at all (`agent.ErrEmptyResponse`) | Show message; turn ended |
 | `provider_overloaded` | Provider explicitly overloaded | Offer retry |
 | `context_length` | Conversation exceeds model window | Offer `/compact` (manual compaction, ADR-0022); automatic compaction (ADR-0025) usually prevents reaching this |

@@ -44,6 +44,16 @@ const (
 	TypeSessionForked    = "session_forked"
 )
 
+// Error codes carried by ErrorEvent.Code (see docs/PROTOCOL.md's error
+// table). Client libraries should match on these, never on message text.
+const (
+	// CodeInterrupted marks a turn ended by an interrupt (esc/ctrl+c),
+	// delete_session's cancel, or server shutdown — a deliberate stop,
+	// not a provider failure (ADR-0036). Clients render it as a notice,
+	// not an error.
+	CodeInterrupted = "interrupted"
+)
+
 // Envelope is the minimal shape every message shares. Unknown types must be
 // ignored by both ends.
 type Envelope struct {

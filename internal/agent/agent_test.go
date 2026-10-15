@@ -205,6 +205,47 @@ func TestLoop_Cancel_StopsAtAwaitPoint(t *testing.T) {
 	}
 }
 
+// TestLoop_Cancel_EmitsErrInterrupted pins the interruption contract
+// (ADR-0036): a turn ended by context cancellation surfaces
+// agent.ErrInterrupted, not the provider's wrapped chain — the
+// server classifies the sentinel into an `interrupted` error event so
+// clients can render a deliberate stop instead of a failure.
+func TestLoop_Cancel_EmitsErrInterrupted(t *testing.T) {
+	t.Parallel()
+
+	provider := &scriptedProvider{}
+	provider.streamFn = func(ctx context.Context, _ int) <-chan llm.Event {
+		out := make(chan llm.Event, 1)
+		go func() {
+			defer close(out)
+			<-ctx.Done()
+			out <- llm.Event{Type: llm.EventError, Err: ctx.Err()}
+		}()
+		return out
+	}
+	a, _ := newTestAgent(t, provider)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	eventsCh := a.Run(ctx, nil, "stall")
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	var errEv *agent.Event
+	for ev := range eventsCh {
+		if ev.Type == agent.EventError {
+			evCopy := ev
+			errEv = &evCopy
+		}
+	}
+
+	if errEv == nil {
+		t.Fatal("cancelled turn emitted no error event")
+	}
+	if !errors.Is(errEv.Err, agent.ErrInterrupted) {
+		t.Errorf("error = %v, want agent.ErrInterrupted", errEv.Err)
+	}
+}
+
 func TestLoop_ConfusedModel_StopsOnlyOnCancellation(t *testing.T) {
 	t.Parallel()
 	// With the round cap gone (ADR-0017) a model that never stops calling

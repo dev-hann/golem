@@ -114,6 +114,14 @@ func (s *Server) autoCompact(ctx context.Context, writer *connWriter, sessionID 
 
 	record, err := s.compactSession(ctx, sessionID, sess)
 	if err != nil {
+		// An interrupt cancelled the summary side call: the compaction
+		// never happened, and a "skipped" notice after the user's stop
+		// would be noise — the turn's own `interrupted` event (ADR-0036)
+		// is the last word.
+		if ctx.Err() != nil {
+			return
+		}
+
 		writer.send(golemclient.CompactFailed{
 			Type: golemclient.TypeCompactFailed, Session: sessionID,
 			Reason: "auto compaction skipped: " + err.Error(),

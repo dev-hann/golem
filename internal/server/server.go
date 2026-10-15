@@ -658,7 +658,7 @@ func (s *Server) wireEvent(sessionID, turnID, model string, event agent.Event) a
 			CallID: event.CallID, OK: event.OK, Result: event.Result,
 		}
 	case agent.EventError:
-		return errorOf(sessionID, turnID, "provider_error", event.Err)
+		return errorOf(sessionID, turnID, classifyTurnError(event.Err), event.Err)
 	case agent.EventTurnEnd:
 		return golemclient.TurnEnd{
 			Type: golemclient.TypeTurnEnd, Session: sessionID, Turn: turnID,
@@ -678,6 +678,21 @@ func isTerminalWire(wire any) bool {
 	default:
 		return false
 	}
+}
+
+// classifyTurnError maps an agent-loop failure onto a protocol error
+// code (ADR-0036). Cancellation is the user's stop, not a provider
+// failure: the agent collapses it onto agent.ErrInterrupted and the
+// wire says `interrupted`, so clients render a deliberate stop instead
+// of a provider failure chain ("openai stream: context canceled").
+// Every other loop/provider failure stays `provider_error` — the code
+// PROTOCOL.md documents for API failures and empty rounds.
+func classifyTurnError(err error) string {
+	if errors.Is(err, agent.ErrInterrupted) {
+		return golemclient.CodeInterrupted
+	}
+
+	return "provider_error"
 }
 
 // connWriter serializes event writes on one connection.

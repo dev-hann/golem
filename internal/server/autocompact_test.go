@@ -282,22 +282,38 @@ func TestAutoCompact_InterruptCancelsSummarySideCall(t *testing.T) {
 		t.Fatal("summary side call context never handed over")
 	}
 
-	// The killed side call surfaces as compact_failed (ADR-0025: a failed
-	// compaction never blocks the turn), and the cancelled turn's tail
-	// error follows without the connection stalling.
-	if failed, ok := h.expectTypeTolerant(golemclient.TypeCompactFailed).(golemclient.CompactFailed); ok {
-		if failed.Session != id {
-			t.Errorf("compact_failed session = %q, want %q", failed.Session, id)
+	// ADR-0036: the interrupt-cancels-compaction path stays quiet — the
+	// user's stop is the last word, so no compact_failed may follow the
+	// turn's `interrupted` terminal event. drainTerminal observes the
+	// terminal event; anything before it must not be a cancellation
+	// notice. (The cancelled turn's own tail is the terminal event.)
+	h.drainTerminal()
+
+	// The turn context is cancelled; a compact_failed emitted after this
+	// point would have failed the assertions above. Nothing arrived.
+	if failed := h.nextIfCompactFailed(); failed != nil {
+		t.Errorf("interrupted auto-compaction must not emit compact_failed, got %+v", *failed)
+	}
+}
+
+// nextIfCompactFailed drains briefly for a compact_failed that should
+// never arrive; nil when none did.
+func (h *harness) nextIfCompactFailed() *golemclient.CompactFailed {
+	h.t.Helper()
+
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		ev, got, err := h.client.ReceiveWithTimeout(400 * time.Millisecond)
+		if err != nil || !got {
+			continue
+		}
+
+		if failed, ok := ev.(golemclient.CompactFailed); ok {
+			return &failed
 		}
 	}
 
-	// Drain the cancelled turn's terminal event before cleanup: the turn
-	// goroutine may still be appending its tail when the test body ends,
-	// and t.TempDir's RemoveAll then races the write on slow runners
-	// ("directory not empty", CI run 38742622506). Observing the terminal
-	// event means every store append of this turn already happened —
-	// persist-before-emit guarantees it.
-	h.drainTerminal()
+	return nil
 }
 
 // drainTerminal consumes events until the turn's terminal event
