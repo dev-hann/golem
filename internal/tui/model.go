@@ -55,6 +55,7 @@ type Model struct {
 	sessRenaming    bool
 	sessRenameText  string
 	sessDeleteArmed string // picker row armed for ctrl+d delete (session id)
+	sessScroll      int    // picker list's first visible line (group headers included)
 	vp              viewport.Model
 	input           textarea.Model
 	width           int
@@ -694,14 +695,27 @@ func (m *Model) mouseClick(msg tea.MouseMsg) bool {
 	return false
 }
 
-// handleMouse routes mouse input: the wheel scrolls the transcript, a
-// left press toggles the tool row under it or begins a text selection,
-// drags extend the selection, and the release finishes it.
+// handleMouse routes mouse input: the wheel scrolls whatever modal is
+// open (the session picker's list) or the transcript, a left press
+// toggles the tool row under it or begins a text selection, drags
+// extend the selection, and the release finishes it.
 func (m *Model) handleMouse(msg tea.MouseMsg) {
 	switch {
 	case msg.Button == tea.MouseButtonWheelUp:
+		if m.mode == modeSessions {
+			m.scrollPicker(-wheelLines)
+
+			return
+		}
+
 		m.scrollBy(-wheelLines)
 	case msg.Button == tea.MouseButtonWheelDown:
+		if m.mode == modeSessions {
+			m.scrollPicker(wheelLines)
+
+			return
+		}
+
 		m.scrollBy(wheelLines)
 	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
 		if !m.mouseClick(msg) {
@@ -843,6 +857,8 @@ func (m Model) WithModels(models []string) Model {
 // title and directory), ctrl+r renames the highlighted row inline,
 // ctrl+d deletes it (press twice to confirm — opencode's pattern), and
 // the dialog keys move/confirm. esc clears the query first, then closes.
+// Every cursor or filter change funnels through one trailing
+// scrollToCursor so the window tracks the cursor.
 func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sessRenaming {
 		return m.renameKey(key)
@@ -878,21 +894,16 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyUp, tea.KeyCtrlP:
 		m.sessDeleteArmed = ""
 		m.pickIndex = max(m.pickIndex-1, 0)
-
-		return m, nil
 	case tea.KeyDown, tea.KeyCtrlN:
 		m.sessDeleteArmed = ""
 		m.pickIndex = min(m.pickIndex+1, len(filtered)-1)
-
-		return m, nil
 	case tea.KeyBackspace:
 		m.sessDeleteArmed = ""
+
 		if runes := []rune(m.sessQuery); len(runes) > 0 {
 			m.sessQuery = string(runes[:len(runes)-1])
 			m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
 		}
-
-		return m, nil
 	case tea.KeyEnter:
 		if len(filtered) == 0 {
 			return m, nil
@@ -912,15 +923,17 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sessQuery += string(key.Runes)
 			m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
 		}
-
-		return m, nil
 	default:
 		return m, nil
 	}
+
+	m.scrollToCursor()
+
+	return m, nil
 }
 
 // removeSession drops a session from the picker list, clamping the
-// cursor back into range.
+// cursor and scroll back into range.
 func (m *Model) removeSession(id string) {
 	out := m.sessions[:0:0]
 	for _, s := range m.sessions {
@@ -931,6 +944,7 @@ func (m *Model) removeSession(id string) {
 
 	m.sessions = out
 	m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
+	m.scrollToCursor()
 }
 
 // deleteKey handles the picker's ctrl+d: the first press arms the
@@ -1300,6 +1314,7 @@ func (m *Model) applySessionList(e golemclient.SessionList) tea.Cmd {
 	m.sessRenaming = false
 	m.sessRenameText = ""
 	m.sessDeleteArmed = ""
+	m.sessScroll = 0
 	m.pickIndex = m.cursorOnSession()
 
 	if m.listRequest {
@@ -1871,31 +1886,23 @@ func (m Model) modelsBody() string {
 	return b.String()
 }
 
-// sessionsBody renders the session picker: matching rows, the live query
-// (or the rename input), and the key hints. Rows carry a · current marker
-// for the session this client is in and · running for sessions with a
-// live turn.
+// sessionsBody renders the session picker: a scrollable window over
+// date-grouped rows (opencode's shape — Today/Yesterday/… headers),
+// the live query, and the key hints. Rows carry a · current marker for
+// the session this client is in and · running for sessions with a live
+// turn. The window is capped so the modal never outgrows the screen;
+// the cursor (or the mouse wheel) drives the scroll.
 func (m Model) sessionsBody() string {
 	var b strings.Builder
 
-	filtered := m.filteredSessions()
+	lines := m.pickerLines()
 
-	if len(filtered) == 0 {
+	if len(lines) == 0 {
 		b.WriteString(m.kit.DimLine("no matches") + "\n")
 	}
 
-	for i, s := range filtered {
-		row := m.sessionRow(s, time.Now(), m.sessRowWidth())
-
-		if m.sessDeleteArmed == s.ID {
-			row = m.sessDeleteRow(s, m.sessRowWidth())
-		}
-
-		if i == m.pickIndex && m.sessRenaming {
-			row = m.kit.Prompt("› " + m.sessRenameText + "_")
-		}
-
-		fmt.Fprintf(&b, "%s\n", m.kit.Row(row, i == m.pickIndex)) //nolint:errcheck // strings.Builder
+	for _, ln := range lines {
+		fmt.Fprintf(&b, "%s\n", ln.render) //nolint:errcheck // strings.Builder
 	}
 
 	// The search field: without it nothing shows what the user typed —
@@ -1905,6 +1912,177 @@ func (m Model) sessionsBody() string {
 	b.WriteString(m.kit.DimLine("type to filter · ctrl+r rename · ctrl+d delete · enter open · esc cancel"))
 
 	return b.String()
+}
+
+// pickerLine is one rendered line of the picker list: either a date
+// group header or a session row.
+type pickerListLine struct {
+	render    string
+	sessionID string // "" for headers
+	rowIndex  int    // index into filteredSessions; -1 for headers
+}
+
+// pickerLines builds the flat line list (headers + rows) and windows it
+// to the visible budget around the stored scroll. Pure: the scroll
+// itself moves only in update paths (scrollToCursor, the wheel).
+func (m Model) pickerLines() []pickerListLine {
+	filtered := m.filteredSessions()
+	now := time.Now()
+
+	var lines []pickerListLine
+
+	lastGroup := ""
+	for i, s := range filtered {
+		if label, ok := dateGroupLabel(now, s.LastActive); ok && label != lastGroup {
+			lines = append(lines, pickerListLine{
+				render: m.kit.DimLine(label), sessionID: "", rowIndex: -1,
+			})
+			lastGroup = label
+		}
+
+		row := m.sessionRow(s, now, m.sessRowWidth())
+
+		if m.sessDeleteArmed == s.ID {
+			row = m.sessDeleteRow(s, m.sessRowWidth())
+		}
+
+		if i == m.pickIndex && m.sessRenaming {
+			row = m.kit.Prompt("› " + m.sessRenameText + "_")
+		}
+
+		lines = append(lines, pickerListLine{
+			render: m.kit.Row(row, i == m.pickIndex), sessionID: s.ID, rowIndex: i,
+		})
+	}
+
+	start := min(max(m.sessScroll, 0), max(len(lines)-m.pickerVisible(), 0))
+	end := min(start+m.pickerVisible(), len(lines))
+
+	return lines[start:end]
+}
+
+// scrollPicker moves the picker's window freely (the wheel does not
+// move the cursor) and clamps to the line range.
+func (m *Model) scrollPicker(delta int) {
+	total := m.pickerLineCount()
+	m.sessScroll = min(max(m.sessScroll+delta, 0), max(total-m.pickerVisible(), 0))
+}
+
+// pickerLineCount is the flat line count the picker would render:
+// session rows plus one header per date-group boundary.
+func (m Model) pickerLineCount() int {
+	filtered := m.filteredSessions()
+	if len(filtered) == 0 {
+		return 0
+	}
+
+	now := time.Now()
+	lines := 0
+	lastGroup := ""
+
+	for _, s := range filtered {
+		if label, ok := dateGroupLabel(now, s.LastActive); ok && label != lastGroup {
+			lines++
+			lastGroup = label
+		}
+
+		lines++
+	}
+
+	return lines
+}
+
+// scrollToCursor recenters the picker window so the cursor's line
+// (header lines included) is visible — called wherever pickIndex moves
+// or the list shrinks (delete, filter). Mirrors pickerLines' grouping
+// exactly: a header line precedes a row whenever its group label
+// differs from the previous row's (including the first row, whose
+// implicit predecessor is no group at all).
+func (m *Model) scrollToCursor() {
+	filtered := m.filteredSessions()
+	if len(filtered) == 0 {
+		m.sessScroll = 0
+
+		return
+	}
+
+	now := time.Now()
+
+	lines := 0
+	cursorLine := 0
+	groupTop := 0 // the cursor's group header line (or its own row)
+	lastGroup := ""
+	headered := false
+
+	for i, s := range filtered {
+		headered = false
+
+		if label, ok := dateGroupLabel(now, s.LastActive); ok && label != lastGroup {
+			lines++
+			lastGroup = label
+			headered = true
+		}
+
+		if i == m.pickIndex {
+			cursorLine = lines
+
+			// The group's header sits one line above its first row
+			// whenever one was emitted for this group; scrolling up
+			// lands there so a group enters view with its label.
+			if headered {
+				groupTop = lines - 1
+			} else {
+				groupTop = lines
+			}
+		}
+
+		lines++
+	}
+
+	switch {
+	case cursorLine < m.sessScroll:
+		m.sessScroll = groupTop
+	case cursorLine >= m.sessScroll+m.pickerVisible():
+		m.sessScroll = cursorLine - m.pickerVisible() + 1
+	}
+
+	m.sessScroll = min(max(m.sessScroll, 0), max(lines-m.pickerVisible(), 0))
+}
+
+// pickerVisible is the line budget for the picker window, clamped to
+// the terminal: the modal (title + query + hints + frame) needs room,
+// and a short terminal shrinks the window before the modal overflows.
+func (m Model) pickerVisible() int {
+	// Modal chrome: title row, blank row, query row, hints row, plus
+	// the border/padding frame rows.
+	const modalFixedRows = 8
+
+	return max(min(pickerVisibleRows, m.height-modalFixedRows), 1)
+}
+
+// dateGroupLabel buckets a session's last-active time into a section
+// label: Today, Yesterday, then the age (3d ago…) or the calendar date
+// for anything older than a week — relTime's buckets, section-sized.
+// Sessions missing a parsable timestamp join no group (ok=false) and
+// render headerless, keeping the newest-first flow intact.
+func dateGroupLabel(now time.Time, rfc3339 string) (string, bool) {
+	ts, err := time.Parse(time.RFC3339, rfc3339)
+	if err != nil {
+		return "", false
+	}
+
+	diff := now.Sub(ts)
+
+	switch {
+	case diff < 24*time.Hour && now.Day() == ts.Day():
+		return "Today", true
+	case diff < 48*time.Hour:
+		return "Yesterday", true
+	case diff < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(diff.Hours()/24)), true
+	default:
+		return ts.Format("Jan 2"), true
+	}
 }
 
 // sessDeleteHint is the armed row's confirm prompt.
@@ -1937,6 +2115,12 @@ const (
 	sessStatusCols = 2 // glyph + space
 	sessAgeGap     = 2 // spaces between title and age
 )
+
+// pickerVisibleRows caps how many list lines (rows + group headers) the
+// picker renders — opencode's dialog maxHeight. Beyond it the list
+// scrolls inside a fixed window; the modal never outgrows the screen
+// and the query line plus key hints stay pinned at the bottom.
+const pickerVisibleRows = 15
 
 // sessRowWidth is the cell budget one picker row may span: the modal
 // body's inner width (viewport minus the frame) minus the shared

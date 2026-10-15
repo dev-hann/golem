@@ -7,6 +7,20 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — session picker: date groups and a scroll window (2026-10-15)
+
+- The picker groups sessions by last-active date — `Today`,
+  `Yesterday`, then `3d ago`…, then the calendar date past a week
+  (opencode's shape, golem's relTime buckets). Headers ride the list
+  flow: one per group boundary, never interleaved.
+- Long lists no longer overflow the screen. The picker renders a
+  15-line window (opencode's dialog maxHeight; clamped on short
+  terminals) that follows the cursor, so the query line and key hints
+  stay pinned no matter how many sessions exist. The mouse wheel
+  scrolls the list freely while a modal is open (the transcript used
+  to scroll behind it); any cursor move re-clamps the window, and a
+  group entering view from above arrives with its header attached.
+
 ### Added — status line detail states: reasoning, synthesizing, retrying (2026-10-15)
 
 - The agent status line now distinguishes five in-turn states instead of

@@ -65,7 +65,7 @@ The keymap mirrors [opencode's defaults](https://opencode.ai/docs/keybinds/) whe
 |---|---|
 | `ctrl+p` | command palette — type to filter (`ns` fuzzy-matches "new session"), `↑`/`↓` or `ctrl+p`/`ctrl+n` select, `enter` run, `esc` close |
 | `ctrl+x` … `n` | new session (transcript resets, same connection; no-op before the first message creates one) |
-| `ctrl+x` … `l` | session picker — type to filter, `ctrl+r` rename, `ctrl+d` delete (press twice to confirm), `↑`/`↓` select, `enter` open, `esc` clear filter/close |
+| `ctrl+x` … `l` | session picker — grouped by date (`Today`, `Yesterday`, …), type to filter, `ctrl+r` rename, `ctrl+d` delete (press twice to confirm), `↑`/`↓` select, `enter` open, mouse wheel scrolls, `esc` clear filter/close |
 | `ctrl+x` … `m` | model picker — switches the session's model from the next turn (`set_model`) |
 | `ctrl+x` … `q` / `ctrl+d` | quit |
 | `enter` | send message |

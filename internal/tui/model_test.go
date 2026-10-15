@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -1758,5 +1759,158 @@ func TestModel_SessionPickerShowsLiveQuery(t *testing.T) {
 
 	if got := m.View(); !strings.Contains(got, "› _") {
 		t.Errorf("backspaces must empty the visible query:\n%s", got)
+	}
+}
+
+// dayNoon returns local noon on the calendar day offset from now —
+// fixed offsets like -20h flip between "yesterday" and "2 days ago"
+// depending on when the test runs; noon anchors are DST-safe.
+func dayNoon(now time.Time, daysAgo int) time.Time {
+	noon := time.Date(now.Year(), now.Month(), now.Day(), 12, 0, 0, 0, time.Local)
+	return noon.AddDate(0, 0, -daysAgo)
+}
+
+// sessList builds a SessionList with count sessions titled s01..sNN,
+// newest first, all last active today.
+func sessList(count int, now time.Time) golemclient.SessionList {
+	sessions := make([]golemclient.SessionSummary, 0, count)
+	for i := range count {
+		sessions = append(sessions, golemclient.SessionSummary{
+			ID: fmt.Sprintf("s%02d", i+1), Title: fmt.Sprintf("sess%02d", i+1),
+			Cwd: "/w", LastActive: now.Add(-time.Duration(i+1) * time.Minute).Format(time.RFC3339),
+		})
+	}
+	return golemclient.SessionList{Type: golemclient.TypeSessionList, Sessions: sessions}
+}
+
+func TestModel_SessionPickerScrollsLongLists(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, sessList(30, now))
+
+	// 30 sessions + headers must not all render: the window is bounded
+	// and follows the cursor. Walk to the bottom.
+	for range 29 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	view := m.View()
+	if !strings.Contains(view, "sess30") {
+		t.Errorf("cursor at the bottom must be visible:\n%s", view)
+	}
+	if strings.Contains(view, "sess01") {
+		t.Errorf("the first row must scroll out of view:\n%s", view)
+	}
+
+	// Count rendered session rows: at most the window cap.
+	shown := 0
+	for i := range 30 {
+		if strings.Contains(view, fmt.Sprintf("sess%02d", i+1)) {
+			shown++
+		}
+	}
+	if shown > pickerVisibleRows {
+		t.Errorf("rendered %d rows, want <= %d", shown, pickerVisibleRows)
+	}
+}
+
+func TestModel_SessionPickerGroupsByDate(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{
+				ID: "a", Title: "today session", Cwd: "/w",
+				LastActive: dayNoon(now, 0).Format(time.RFC3339),
+			},
+			{
+				ID: "b", Title: "yesterday session", Cwd: "/w",
+				LastActive: dayNoon(now, 1).Format(time.RFC3339),
+			},
+			{
+				ID: "c", Title: "older session", Cwd: "/w",
+				LastActive: dayNoon(now, 3).Format(time.RFC3339),
+			},
+		},
+	})
+
+	view := m.View()
+
+	// Headers appear once each, in newest-first order, before their rows.
+	for _, label := range []string{"Today", "Yesterday"} {
+		if n := strings.Count(view, label); n != 1 {
+			t.Errorf("header %q appears %d times, want 1:\n%s", label, n, view)
+		}
+	}
+	if idx := strings.Index(view, "today session"); idx == -1 || strings.LastIndex(view, "Today") > idx {
+		t.Errorf("the Today header must precede its rows:\n%s", view)
+	}
+	if idx := strings.Index(view, "yesterday session"); idx == -1 || !strings.Contains(view[:idx], "Yesterday") {
+		t.Errorf("the Yesterday header must precede its rows:\n%s", view)
+	}
+}
+
+func TestModel_SessionPickerGroupHeaderHidesWhenScrolled(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, sessList(30, now))
+
+	for range 29 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	}
+
+	// The Today header sits above the window at the bottom.
+	if strings.Contains(m.View(), "Today") {
+		t.Errorf("a header scrolled out of the window must not render:\n%s", m.View())
+	}
+
+	// Back to the top: the header returns.
+	for range 29 {
+		m = key(t, m, tea.KeyMsg{Type: tea.KeyUp})
+	}
+
+	if !strings.Contains(m.View(), "Today") {
+		t.Errorf("scrolling to the top must bring the header back:\n%s", m.View())
+	}
+}
+
+func TestModel_SessionPickerWheelScrollsList(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now()
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, sessList(30, now))
+
+	// The wheel scrolls the window without moving the cursor.
+	next, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
+	m = next.(Model)
+
+	if strings.Contains(m.View(), "sess01") {
+		t.Errorf("wheel down must scroll the first row out:\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "sess04") {
+		t.Errorf("wheel down must reveal lower rows:\n%s", m.View())
+	}
+
+	next, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
+	m = next.(Model)
+
+	if !strings.Contains(m.View(), "sess01") {
+		t.Errorf("wheel up must scroll back to the first row:\n%s", m.View())
 	}
 }
