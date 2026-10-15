@@ -26,6 +26,8 @@ type EventType string
 const (
 	EventTurnStart     EventType = "turn_start"
 	EventTextDelta     EventType = "text_delta"
+	EventThinkingDelta EventType = "thinking_delta"
+	EventRetry         EventType = "retry"
 	EventToolCallStart EventType = "tool_call_start"
 	EventToolCallEnd   EventType = "tool_call_end"
 	EventError         EventType = "error"
@@ -43,7 +45,12 @@ type Event struct {
 	Result       string
 	InputTokens  int64
 	OutputTokens int64
-	Err          error
+	// Attempt/Retries/DelayMs carry the retry wrapper's announcement of an
+	// upcoming provider retry (EventRetry).
+	Attempt int
+	Retries int
+	DelayMs int
+	Err     error
 }
 
 // Agent drives provider/tool rounds for a conversation.
@@ -234,6 +241,15 @@ func (a *Agent) streamRound(
 		case llm.EventTextDelta:
 			text += event.Delta
 			emit(Event{Type: EventTextDelta, Delta: event.Delta})
+		case llm.EventThinkingDelta:
+			// Reasoning content never joins the conversation; the event
+			// exists so clients can show a reasoning state.
+			emit(Event{Type: EventThinkingDelta})
+		case llm.EventRetry:
+			emit(Event{
+				Type: EventRetry, Attempt: event.Attempt,
+				Retries: event.Retries, DelayMs: event.DelayMs,
+			})
 		case llm.EventToolCalls:
 			calls = append(calls, event.ToolCalls...)
 		case llm.EventUsage:

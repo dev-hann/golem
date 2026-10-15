@@ -7,6 +7,52 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — status line detail states: reasoning, synthesizing, retrying (2026-10-15)
+
+- The agent status line now distinguishes five in-turn states instead of
+  three. Two additive wire events drive the new ones; everything is
+  forward-compatible (unknown types are skipped per PROTOCOL.md).
+  - `thinking` — first token pending, as before (`turn_start`).
+  - `◐ reasoning` — the model streams extended thinking
+    (`thinking_delta`, new; anthropic adapter forwards its
+    `thinking_delta` SSE kind as the event — content-free by design:
+    reasoning text is never streamed, stored, or replayed).
+  - `responding` — assistant text streaming (`text_delta`), as before.
+    Reasoning followed by text shows responding — the answer began.
+  - `◆ tool — arg` — tool running (`tool_call_start`), as before.
+  - `◆ ✓/✗ tool · working` — synthesizing: the last tool finished
+    (outcome mark) and the results are back at the model
+    (`tool_call_end` until the next delta or start). Previously this
+    window rendered a lying `responding`.
+  - `↻ retrying n/N · wait` — the provider call failed transiently and
+    the server announced an upcoming retry (`retry`, new:
+    `attempt`/`retries`/`delay_ms`). The pre-content retry ladder can
+    stall for ~61s; until now that whole window rendered a frozen
+    `thinking`. A live retry outranks every other state while it runs;
+    the next content event clears it.
+- A busy session resumed mid-turn restores the detailed state from the
+  replay: a trailing `tool_call_end` resumes as synthesizing, a trailing
+  `thinking_delta` as reasoning (the fold skips both event types, so
+  conversation state is unaffected).
+- `internal/llm`: `Event` grows `Attempt`/`Retries`/`DelayMs` and a
+  content-free `thinking_delta` type; `Retrying` emits `EventRetry`
+  before each backoff sleep.
+
+### Changed — status line drops the elapsed-seconds counter (2026-10-15)
+
+- The active-turn status no longer shows a turn timer. The count reset to
+  0s on every session switch: the start time lives only in the switching
+  client (`time.Now()` at `turn_start`), while the wire protocol and the
+  session store carry no timestamps — a resumed turn cannot know when it
+  began, and the approximation (`time.Now()` on replay) rendered a fresh
+  timer as if the turn had just started. Rather than carry a misleading
+  number, the strip keeps what the protocol actually provides: state
+  (thinking / responding / in-flight tool with its argument), the model
+  at idle, and the last turn's usage. The per-second ticker
+  (`statusTickMsg`, `armStatus`), the `turnStart`/`statusGen` fields, and
+  their tests are removed with it. Restoring the timer would need a
+  started-at timestamp on `turn_start`/`session_meta` — an additive
+  protocol change, not taken here.
 ### Fixed — the session picker shows what you type (2026-10-15)
 
 - The picker's search field vanished in the row redesign (aligned
@@ -56,7 +102,7 @@ config schema may change without notice.
   turn lifecycle into status bookkeeping: the last `turn_start` restores
   the model name, the last `turn_end` the usage, and a busy session
   whose replay ends mid-turn resumes as an active turn (thinking /
-  responding / tool + elapsed). An idle load with a terminated replay
+  responding / tool). An idle load with a terminated replay
   stays idle.
 
 ### Changed — lazy session creation (2026-10-14)

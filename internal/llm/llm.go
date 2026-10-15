@@ -62,10 +62,12 @@ type EventType string
 
 // Provider stream event types.
 const (
-	EventTextDelta EventType = "text_delta"
-	EventToolCalls EventType = "tool_calls"
-	EventUsage     EventType = "usage"
-	EventError     EventType = "error"
+	EventTextDelta     EventType = "text_delta"
+	EventThinkingDelta EventType = "thinking_delta"
+	EventRetry         EventType = "retry"
+	EventToolCalls     EventType = "tool_calls"
+	EventUsage         EventType = "usage"
+	EventError         EventType = "error"
 )
 
 // Sentinel errors adapters wrap so callers can classify failures without
@@ -80,8 +82,16 @@ var (
 
 // Event is a normalized provider stream event.
 type Event struct {
-	Type         EventType
-	Delta        string
+	Type EventType
+	// Delta carries one text (EventTextDelta) or extended-thinking
+	// (EventThinkingDelta) chunk.
+	Delta string
+	// Attempt/Retries/DelayMs describe an upcoming provider retry
+	// (EventRetry): which retry runs, the policy's cap, and the backoff
+	// the wrapper is about to sleep.
+	Attempt      int
+	Retries      int
+	DelayMs      int
 	ToolCalls    []ToolCall
 	InputTokens  int64
 	OutputTokens int64

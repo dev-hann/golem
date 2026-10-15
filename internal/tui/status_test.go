@@ -4,18 +4,18 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
-// deliverStatus feeds one event and returns the model's status line text
-// (whitespace-collapsed) for substring assertions.
-func statusAfter(t *testing.T, m Model, ev any) string {
+// deliverStatus feeds one event into m and returns the model's status
+// line text (whitespace-collapsed) for substring assertions.
+func statusAfter(t *testing.T, m *Model, ev any) string {
 	t.Helper()
-	m = deliver(t, m, ev)
+	*m = deliver(t, *m, ev)
+
 	return strings.Join(strings.Fields(m.statusLine()), " ")
 }
 
@@ -37,7 +37,7 @@ func TestStatus_RespondingWhileStreaming(t *testing.T) {
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-	line := statusAfter(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
+	line := statusAfter(t, &m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
 
 	if !strings.Contains(line, "responding") {
 		t.Errorf("status during text stream should mention responding, got %q", line)
@@ -50,7 +50,7 @@ func TestStatus_ToolShowsNameAndArg(t *testing.T) {
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
-	line := statusAfter(t, m, golemclient.ToolCallStart{
+	line := statusAfter(t, &m, golemclient.ToolCallStart{
 		Type: golemclient.TypeToolCallStart, CallID: "c1", Tool: "bash",
 		Args: []byte(`{"command":"go test ./..."}`),
 	})
@@ -72,15 +72,26 @@ func TestStatus_ToolClearsOnCallEnd(t *testing.T) {
 		Args: []byte(`{"command":"go build"}`),
 	})
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "done"})
-	line := statusAfter(t, m, golemclient.ToolCallEnd{
+	line := statusAfter(t, &m, golemclient.ToolCallEnd{
 		Type: golemclient.TypeToolCallEnd, CallID: "c1", OK: true,
 	})
 
-	if strings.Contains(line, "bash") || strings.Contains(line, "go build") {
-		t.Errorf("tool status should clear after tool_call_end, got %q", line)
+	if strings.Contains(line, "go build") {
+		t.Errorf("tool status should clear the arguments after tool_call_end, got %q", line)
 	}
+
+	// tool_call_end enters synthesizing: the finished tool's name and
+	// outcome stay visible while the model digests the results.
+	for _, want := range []string{"✓ bash", "working"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("post-tool status should show synthesizing %q, got %q", want, line)
+		}
+	}
+
+	// The next text delta moves past synthesizing into responding.
+	line = statusAfter(t, &m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "more"})
 	if !strings.Contains(line, "responding") {
-		t.Errorf("post-tool status should return to responding, got %q", line)
+		t.Errorf("text after tool results should return to responding, got %q", line)
 	}
 }
 
@@ -92,7 +103,7 @@ func TestStatus_IdleShowsModelAndUsageAfterTurnEnd(t *testing.T) {
 		Type: golemclient.TypeTurnStart, Provider: "zai", Model: "glm-5.3",
 	})
 	m = deliver(t, m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
-	line := statusAfter(t, m, golemclient.TurnEnd{
+	line := statusAfter(t, &m, golemclient.TurnEnd{
 		Type:  golemclient.TypeTurnEnd,
 		Usage: golemclient.Usage{InputTokens: 1200, OutputTokens: 3400},
 	})
@@ -109,7 +120,7 @@ func TestStatus_ErrorEventReturnsToIdle(t *testing.T) {
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-	line := statusAfter(t, m, golemclient.ErrorEvent{
+	line := statusAfter(t, &m, golemclient.ErrorEvent{
 		Type: golemclient.TypeError, Message: "boom",
 	})
 
@@ -118,52 +129,78 @@ func TestStatus_ErrorEventReturnsToIdle(t *testing.T) {
 	}
 }
 
-func TestStatus_InterruptedTurnStopsTicking(t *testing.T) {
+func TestStatus_SynthesizingShowsFailedToolMark(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-	m = deliver(t, m, golemclient.ErrorEvent{
-		Type: golemclient.TypeError, Code: "interrupted", Message: "interrupted",
+	m = deliver(t, m, golemclient.ToolCallStart{
+		Type: golemclient.TypeToolCallStart, CallID: "c1", Tool: "bash",
+		Args: []byte(`{"command":"go test ./..."}`),
+	})
+	line := statusAfter(t, &m, golemclient.ToolCallEnd{
+		Type: golemclient.TypeToolCallEnd, CallID: "c1", OK: false,
 	})
 
-	next, _ := m.Update(statusTickMsg{})
-	if m2, ok := next.(Model); ok {
-		m = m2
-	}
-
-	if strings.Contains(m.statusLine(), "thinking") {
-		t.Errorf("interrupted turn should stop ticking, got %q", m.statusLine())
+	if !strings.Contains(line, "✗ bash") {
+		t.Errorf("failed tool should show the ✗ mark in synthesizing, got %q", line)
 	}
 }
 
-func TestStatus_StaleTickIgnored(t *testing.T) {
+func TestStatus_RetryAnnouncementRendersRetrying(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	line := statusAfter(t, &m, golemclient.Retry{
+		Type: golemclient.TypeRetry, Attempt: 2, Retries: 6, DelayMs: 4000,
+	})
 
-	next, _ := m.Update(statusTickMsg{gen: 999})
-	m2, _ := next.(Model)
+	for _, want := range []string{"retrying 2/6", "4s"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("retry status should contain %q, got %q", want, line)
+		}
+	}
 
-	if !m2.turnActive {
-		t.Fatal("stale tick should not end the turn")
+	// The next text delta clears the retry state.
+	line = statusAfter(t, &m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
+	if !strings.Contains(line, "responding") {
+		t.Errorf("text after retry should show responding, got %q", line)
 	}
 }
 
-func TestStatus_ElapsedSecondsGrowWhileActive(t *testing.T) {
+func TestStatus_RetryOutranksToolWhileAnnounced(t *testing.T) {
 	t.Parallel()
 	m, _ := wired(t)
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	m = deliver(t, m, golemclient.ToolCallEnd{
+		Type: golemclient.TypeToolCallEnd, CallID: "c1", OK: true,
+	})
+	line := statusAfter(t, &m, golemclient.Retry{
+		Type: golemclient.TypeRetry, Attempt: 1, Retries: 6, DelayMs: 1000,
+	})
 
-	m.turnStart = m.turnStart.Add(-5 * time.Second)
+	if !strings.Contains(line, "retrying") {
+		t.Errorf("a retry while synthesizing should outrank it, got %q", line)
+	}
+}
 
-	next, _ := m.Update(statusTickMsg{gen: 0})
-	m2, _ := next.(Model)
+func TestStatus_ThinkingDeltaShowsReasoning(t *testing.T) {
+	t.Parallel()
+	m, _ := wired(t)
+	m = resize(m, 80, 24)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
+	line := statusAfter(t, &m, golemclient.ThinkingDelta{Type: golemclient.TypeThinkingDelta})
 
-	if !strings.Contains(m2.statusLine(), "5s") {
-		t.Errorf("elapsed time should render after a tick, got %q", m2.statusLine())
+	if !strings.Contains(line, "reasoning") {
+		t.Errorf("thinking_delta should show reasoning, got %q", line)
+	}
+
+	// Text after reasoning reports the answer underway, not more thinking.
+	line = statusAfter(t, &m, golemclient.TextDelta{Type: golemclient.TypeTextDelta, Delta: "hi"})
+	if !strings.Contains(line, "responding") {
+		t.Errorf("text after reasoning should show responding, got %q", line)
 	}
 }
 
@@ -347,6 +384,64 @@ func TestStatus_ResumeBusySessionRestoresActiveTurn(t *testing.T) {
 	}
 	if !strings.Contains(m.statusLine(), "200") {
 		t.Errorf("idle status should carry the resumed turn's usage, got %q", m.statusLine())
+	}
+}
+
+// Resuming a session whose turn is still in flight (meta busy=true, a
+// replay that ends mid-turn) must restore the active-turn status — and
+// the detailed state: a trailing tool_call_end resumes as synthesizing,
+// a trailing thinking_delta as reasoning.
+func TestStatus_ResumeBusySessionRestoresDetailedState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{
+			name: "synthesizing after tool_call_end",
+			lines: []string{
+				`{"type":"user_message","session":"s1","text":"hi"}`,
+				`{"type":"turn_start","session":"s1","turn":"t1","provider":"zai","model":"glm-5.3"}`,
+				`{"type":"tool_call_start","session":"s1","turn":"t1","call_id":"c1","tool":"bash","args":"{\"command\":\"go build\"}"}`,
+				`{"type":"tool_call_end","session":"s1","turn":"t1","call_id":"c1","ok":true}`,
+			},
+			want: "✓ bash",
+		},
+		{
+			name: "reasoning after thinking_delta",
+			lines: []string{
+				`{"type":"user_message","session":"s1","text":"hi"}`,
+				`{"type":"turn_start","session":"s1","turn":"t1","provider":"zai","model":"glm-5.3"}`,
+				`{"type":"thinking_delta","session":"s1","turn":"t1"}`,
+			},
+			want: "reasoning",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			m, _ := wired(t)
+			m = resize(m, 100, 40)
+
+			m = deliver(t, m, golemclient.SessionMeta{
+				Type: golemclient.TypeSessionMeta, Session: "s1", Busy: true,
+			})
+			m = deliver(t, m, golemclient.History{
+				Type: golemclient.TypeHistory, Session: "s1", Events: rawLines(tt.lines...),
+			})
+
+			if !m.turnActive {
+				t.Fatal("busy resume should restore turnActive")
+			}
+
+			line := strings.Join(strings.Fields(m.statusLine()), " ")
+			if !strings.Contains(line, tt.want) {
+				t.Errorf("resumed status should contain %q, got %q", tt.want, line)
+			}
+		})
 	}
 }
 
