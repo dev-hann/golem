@@ -118,7 +118,7 @@ Goal: daily-driver terminal client.
 
 ### Deliverables
 
-- `internal/tui` (behind a thin `cmd/golem-tui` binary): Bubble Tea app — chat view with streaming markdown-ish rendering, collapsible tool-call blocks, input box, `/sessions` picker, interrupt key.
+- `internal/tui` (behind a thin `cmd/golem-tui` binary): Bubble Tea app — chat view with streaming markdown-ish rendering *(made concrete as Phase 3.5, ADR-0026)*, collapsible tool-call blocks, input box, `/sessions` picker, interrupt key.
 - `pkg/golemclient`: streaming (non-blocking) client API.
 
 ### Acceptance criteria
@@ -138,6 +138,43 @@ Goal: daily-driver terminal client.
 - `TestModel_SessionPickerListsAndSwitches`
 - `TestModel_HistoryReplayRendersTranscript`
 - `TestViewport_HandlesLongOutputScrollback`
+
+---
+
+## Phase 3.5 — Assistant markdown rendering (ADR-0026)
+
+Status: implemented — all test-list items green, `make all` passes, package coverage 93.9%.
+
+Goal: assistant messages render markdown in the TUI — streaming-safe, cache-bounded, kit-token-only. Protocol and storage stay raw text.
+
+### Deliverables
+
+- `internal/tui/markdown`: block parser (paragraph, heading, fenced code, list, quote, hr; live-tail split), inline parser (bold/italic/code/link), kit-driven renderer with content+width caching.
+
+### Acceptance criteria
+
+1. Assistant blocks render headings/bold/code/lists from the same wire events; user/tool/error blocks unchanged.
+2. Per-delta work is bounded to the trailing partial block (completed blocks cached by content+width).
+3. Output uses kit tokens only — no raw ANSI escapes inserted by the markdown package; degrades cleanly under NO_COLOR (Ascii profile).
+4. Protocol/JSONL unchanged; history replay renders markdown identically.
+5. `make all` green, coverage ≥ 80%.
+
+### Test list
+
+**internal/tui/markdown**
+- `TestParse_BlockKinds_Table`
+- `TestParse_OpenFence_IsCodeBlock`
+- `TestParse_InlineSpans_Table`
+- `TestRender_UsesKitTokens_NoRawEscape`
+- `TestRender_WrapsToWidth_ListHangingIndent`
+- `TestRender_CodeBlockFrameAndLanguageLabel`
+- `TestStream_CompletedBlocksCached_TailOnlyReparsed`
+- `TestStream_UnclosedEmphasis_LiteralOutput`
+- `TestRender_NoColorProfile_Degrades`
+
+**internal/tui (integration)**
+- `TestRenderBlocks_SpansRecomputedWithMarkdownHeight`
+- `TestHistoryReplay_RendersMarkdown`
 
 ---
 

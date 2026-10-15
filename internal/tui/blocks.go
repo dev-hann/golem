@@ -9,7 +9,15 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
+	"github.com/dev-hann/golem/internal/tui/markdown"
 )
+
+// newMarkdownRenderer builds the streaming markdown renderer used for
+// assistant blocks (ADR-0026). One renderer per model: its cache lives
+// for the model's lifetime.
+func newMarkdownRenderer() *markdown.Renderer {
+	return markdown.NewRenderer(markdown.Render)
+}
 
 // blockKind distinguishes transcript entries.
 type blockKind int
@@ -49,10 +57,11 @@ const (
 )
 
 // render turns one block into display lines through the kit theme. User
-// messages carry the left bar in the user color; assistant output stays
-// plain so the bar itself marks what the human wrote. Every text kind is
-// hard-wrapped to width so nothing depends on terminal line wrapping.
-func (b block) render(k *kit.Kit, width int) string {
+// messages carry the left bar in the user color; assistant output
+// renders markdown (ADR-0026) through the streaming renderer; every text
+// kind is hard-wrapped to width so nothing depends on terminal line
+// wrapping.
+func (b block) render(k *kit.Kit, md *markdown.Renderer, width int) string {
 	switch b.kind {
 	case blockUser:
 		return k.MessageBar(kit.User, width, b.text)
@@ -61,7 +70,7 @@ func (b block) render(k *kit.Kit, width int) string {
 			return k.DimLine("…")
 		}
 
-		return k.WrapPlain(width, b.text)
+		return md.Render(k, width, b.text)
 	case blockError:
 		return k.ErrLine(width, b.text)
 	case blockDim:
@@ -180,7 +189,12 @@ type userSpan struct {
 // renderBlocks renders the whole transcript through the kit theme,
 // separating blocks with a blank line (tool lines attach to the block
 // they follow) and reporting every user and tool block's line span.
-func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, spans []userSpan, toolSpans []toolSpan) {
+func renderBlocks(
+	k *kit.Kit,
+	md *markdown.Renderer,
+	blocks []block,
+	width int,
+) (out string, spans []userSpan, toolSpans []toolSpan) {
 	var b strings.Builder
 
 	line := 0
@@ -200,7 +214,7 @@ func renderBlocks(k *kit.Kit, blocks []block, width int) (out string, spans []us
 			}
 		}
 
-		rendered := blk.render(k, width)
+		rendered := blk.render(k, md, width)
 		lines := strings.Count(rendered, "\n") + 1
 
 		switch blk.kind {

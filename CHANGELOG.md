@@ -7,6 +7,28 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — assistant markdown rendering in the TUI (2026-10-15)
+
+- Assistant messages now render markdown in the TUI (ADR-0026):
+  headings, bold/italic, inline code, links (label styled, URL shown
+  dim in parentheses), fenced code blocks with a language label and
+  left-bar frame, bullet/ordered lists with hanging indents, quotes
+  behind a dim bar, and thematic rules. Markdown is a view concern
+  only — the wire protocol and JSONL storage stay raw text, so replay
+  and every other client are unaffected.
+- Streaming is cache-bounded: the completed prefix of a message
+  renders once per content+width; only the trailing live block
+  re-renders per delta (the 200-delta turn costs tail-only parses).
+- Unclosed markers render literally mid-stream (an open `**` or `
+  shows its characters until the closing marker arrives); an open
+  code fence renders as a code block from its opening line.
+- Everything renders through `internal/tui/kit` tokens — the markdown
+  package inserts no raw ANSI — so NO_COLOR and profile degradation
+  behave exactly like the rest of the TUI. New in-house package
+  `internal/tui/markdown` (no new dependency): block parser, inline
+  parser, renderer, streaming cache. `golem chat` stays plain text by
+  design (pipe-friendly).
+
 ### Added — automatic context compaction (2026-10-15)
 
 - Long sessions now compact themselves: before each turn starts, a

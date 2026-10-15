@@ -8,24 +8,28 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
+	"github.com/dev-hann/golem/internal/tui/markdown"
 )
 
 // testKit builds the default kit; the test profile is Ascii, so plain
 // substring assertions hold.
 func testKit() *kit.Kit { return kit.New(kit.DefaultTheme()) }
 
+// testMarkdown builds the streaming markdown renderer for block tests.
+func testMarkdown() *markdown.Renderer { return newMarkdownRenderer() }
+
 func TestBlockRender_UserAndAssistant(t *testing.T) {
 	t.Parallel()
-	if got := (block{kind: blockUser, text: "hello"}).render(testKit(), 80); got != "▎ hello" {
+	if got := (block{kind: blockUser, text: "hello"}).render(testKit(), testMarkdown(), 80); got != "▎ hello" {
 		t.Errorf("user block should be a user-colored bar line, got %q", got)
 	}
-	if got := (block{kind: blockAssistant}).render(testKit(), 80); got != "…" {
+	if got := (block{kind: blockAssistant}).render(testKit(), testMarkdown(), 80); got != "…" {
 		t.Errorf("empty assistant block should be a bare ellipsis, got %q", got)
 	}
-	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit(), 80); got != "hi" {
+	if got := (block{kind: blockAssistant, text: "hi"}).render(testKit(), testMarkdown(), 80); got != "hi" {
 		t.Errorf("assistant block should be plain text without a bar, got %q", got)
 	}
-	if got := (block{kind: blockError, text: "boom"}).render(testKit(), 80); !strings.Contains(got, "error: boom") {
+	if got := (block{kind: blockError, text: "boom"}).render(testKit(), testMarkdown(), 80); !strings.Contains(got, "error: boom") {
 		t.Errorf("error block = %q", got)
 	}
 }
@@ -33,15 +37,15 @@ func TestBlockRender_UserAndAssistant(t *testing.T) {
 func TestBlockRender_ToolStatuses(t *testing.T) {
 	t.Parallel()
 	running := block{kind: blockTool, tool: "bash", args: `{"command":"ls"}`}
-	if got := running.render(testKit(), 80); !strings.Contains(got, "… bash") {
+	if got := running.render(testKit(), testMarkdown(), 80); !strings.Contains(got, "… bash") {
 		t.Errorf("running tool = %q", got)
 	}
 	done := block{kind: blockTool, tool: "read", done: true, ok: true}
-	if got := done.render(testKit(), 80); !strings.Contains(got, "✓ read") {
+	if got := done.render(testKit(), testMarkdown(), 80); !strings.Contains(got, "✓ read") {
 		t.Errorf("ok tool = %q", got)
 	}
 	failed := block{kind: blockTool, tool: "edit", done: true}
-	if got := failed.render(testKit(), 80); !strings.Contains(got, "✗ edit") {
+	if got := failed.render(testKit(), testMarkdown(), 80); !strings.Contains(got, "✗ edit") {
 		t.Errorf("failed tool = %q", got)
 	}
 }
@@ -63,7 +67,7 @@ func TestPreview_TruncatesAtBoundary(t *testing.T) {
 
 func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 	t.Parallel()
-	got, spans, _ := renderBlocks(testKit(), []block{
+	got, spans, _ := renderBlocks(testKit(), testMarkdown(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},
@@ -82,14 +86,14 @@ func TestRenderBlocks_JoinsAllBlocks(t *testing.T) {
 
 func TestRenderBlocks_NoUserBlockNoSpans(t *testing.T) {
 	t.Parallel()
-	if _, spans, _ := renderBlocks(testKit(), []block{{kind: blockAssistant, text: "a"}}, 80); len(spans) != 0 {
+	if _, spans, _ := renderBlocks(testKit(), testMarkdown(), []block{{kind: blockAssistant, text: "a"}}, 80); len(spans) != 0 {
 		t.Errorf("spans = %+v, want none without a user block", spans)
 	}
 }
 
 func TestRenderBlocks_BlankLineBetweenBlocks(t *testing.T) {
 	t.Parallel()
-	got, _, _ := renderBlocks(testKit(), []block{
+	got, _, _ := renderBlocks(testKit(), testMarkdown(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: "a"},
 		{kind: blockTool, tool: "read", done: true, ok: true},
@@ -137,7 +141,7 @@ func TestBlockRender_WrapsToViewportWidth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			assertRowsWithin(t, tt.block.render(testKit(), width), width)
+			assertRowsWithin(t, tt.block.render(testKit(), testMarkdown(), width), width)
 		})
 	}
 }
@@ -146,7 +150,7 @@ func TestBlockRender_ToolPreviewGutterAligned(t *testing.T) {
 	t.Parallel()
 
 	blk := block{kind: blockTool, tool: "bash", done: true, ok: true, expanded: true, result: strings.Repeat("x", 60)}
-	lines := strings.Split(blk.render(testKit(), 20), "\n")
+	lines := strings.Split(blk.render(testKit(), testMarkdown(), 20), "\n")
 
 	if len(lines) < 3 {
 		t.Fatalf("wrapped preview must span several rows, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
@@ -177,7 +181,7 @@ func TestPreview_CutRespectsRuneBoundary(t *testing.T) {
 func TestRenderBlocks_WrappedRowsCountedInSpans(t *testing.T) {
 	t.Parallel()
 
-	_, spans, _ := renderBlocks(testKit(), []block{
+	_, spans, _ := renderBlocks(testKit(), testMarkdown(), []block{
 		{kind: blockUser, text: "q"},
 		{kind: blockAssistant, text: strings.Repeat("x", 100)},
 		{kind: blockUser, text: "r"},
@@ -192,7 +196,7 @@ func TestRenderBlocks_WrappedRowsCountedInSpans(t *testing.T) {
 
 func TestRenderBlocks_TracksEveryUserBlock(t *testing.T) {
 	t.Parallel()
-	got, spans, _ := renderBlocks(testKit(), []block{
+	got, spans, _ := renderBlocks(testKit(), testMarkdown(), []block{
 		{kind: blockUser, text: "first"},
 		{kind: blockAssistant, text: strings.Repeat("x", 100)},
 		{kind: blockUser, text: "second"},

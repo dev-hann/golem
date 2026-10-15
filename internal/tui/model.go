@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
+	"github.com/dev-hann/golem/internal/tui/markdown"
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
@@ -67,6 +68,7 @@ type Model struct {
 	selAnchor       int    // content line where the drag began
 	selHead         int    // content line under the drag's pointer
 	copier          func(string) error
+	md              *markdown.Renderer // assistant markdown renderer (ADR-0026)
 	provider        string
 	modelName       string
 	models          []string
@@ -108,6 +110,7 @@ func NewThemed(socketPath string, k *kit.Kit) Model {
 		dial:      realDial,
 		socket:    socketPath,
 		kit:       k,
+		md:        newMarkdownRenderer(),
 		vp:        vp,
 		input:     input,
 		mode:      modeChat,
@@ -1622,7 +1625,7 @@ func (m *Model) foldReplayEvent(ev any, live replayTurn) replayTurn {
 // paged back (follow=false until they reach the bottom again or send a
 // new message).
 func (m *Model) refreshView() {
-	content, spans, toolSpans := renderBlocks(m.kit, m.blocks, m.vp.Width)
+	content, spans, toolSpans := renderBlocks(m.kit, m.md, m.blocks, m.vp.Width)
 	m.userSpans = spans
 	m.toolSpans = toolSpans
 	m.content = content
