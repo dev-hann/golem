@@ -195,13 +195,41 @@ Status: implemented — parser, renderer, and streaming rules extended; `make al
 
 ## Phase 4 — Session management polish
 
-### Deliverable
+Status: `/new` and `/resume` (session picker) implemented. Added 2026-10-16: session fork (ADR-0034) — v1 fork through the last completed turn from the command palette; a transcript turn-picking UI is the v2 candidate.
+
+### Deliverables
 
 - `/new`, `/resume` commands. *(The approval UX originally planned here was cancelled — the approval gate was removed entirely; see ADR-0016.)*
+- Session fork (ADR-0034): `Store.Fork` (raw-line copy through a turn boundary), `fork_session`/`session_forked` protocol, palette entry + child load in the TUI.
 
 ### Acceptance criteria
 
 1. `/new` starts a fresh session from the TUI; `/resume` restores a prior one.
+2. Forking a session yields a loadable child whose folded messages and turns equal the parent's prefix through the boundary; the parent file is byte-identical before and after.
+3. Refusals are explicit: busy session, no completed turn, unknown turn id → `invalid_request`; unknown session → `session_not_found`.
+4. The TUI's fork command switches to the child (fresh load, history replay); with no current session it is a no-op (ADR-0018 lazy creation).
+
+### Test list
+
+**internal/session**
+- `TestFork_CopiesRawEventsThroughLastCompleteTurn`
+- `TestFork_ThroughSpecificTurn_TruncatesAtTurnEnd`
+- `TestFork_ChildFoldsIdenticallyToParentPrefix`
+- `TestFork_InheritsCompactionBarrier`
+- `TestFork_EmptyParentFails`
+- `TestFork_UnknownTurnFails`
+- `TestFork_ParentKeptIntact`
+- `TestFork_TitleIncrementsForkSuffix`
+
+**internal/server**
+- `TestServer_ForkSession_RepliesAndChildLoads`
+- `TestServer_ForkSession_BusyParentRefused`
+- `TestServer_ForkSession_EmptyParentRefused`
+- `TestServer_ForkChildTurnsRunIndependently`
+
+**internal/tui**
+- `TestForkCommand_SwitchesToForkedSession`
+- `TestForkCommand_NoSessionIsNoOp`
 
 ---
 
@@ -287,7 +315,7 @@ Status: implemented — parser, renderer, and streaming rules extended; `make al
 - 2026-10-15 — TUI session header: a one-row title strip above the transcript (title + cwd tail; dim placeholders for the no-session and untitled states), always rendered on terminals ≥ 16 rows and dropped below that floor (ADR-0024). `session_meta` gains an optional `title` field so a loading client labels the session at once; the header also updates from `session_title` events and optimistic picker renames.
 - 2026-10-15 — TUI sticky question line adopts push-out semantics (ADR-0028): the pin holds the latest user bar pushed above the *rendered window's top* — submitting the next question no longer clears it (the old rule cleared at the turn-start follow snap with a one-row jump); the pin swaps in place when streamed content pushes the new bar past the top.
 - 2026-10-16 — Session cache folds incrementally (ADR-0029): a cached session keeps its live fold and a byte frontier, so `Get` after appends folds only the new lines instead of reloading the whole file; `List` summaries cache per file by (size, mtime). The server's post-turn/rename/compaction `Invalidate` calls are gone — `Get` is always fresh. A 500-turn cold replay folds in ~3 ms (Phase 7 budget 100 ms, `TestReplayBenchmark_500Turns`).
-- 2026-10-16 — Session titles generate at turn start and push on completion (ADR-0032): an untitled session's title side call fires alongside the agent loop instead of after `turn_end`, and the persisted `session_title` is pushed to the connection that started the turn — clients see the title within one side call of the first message, no `list_sessions` round-trip.
+- 2026-10-16 — Session titles generate at turn start and push on completion (ADR-0034): an untitled session's title side call fires alongside the agent loop instead of after `turn_end`, and the persisted `session_title` is pushed to the connection that started the turn — clients see the title within one side call of the first message, no `list_sessions` round-trip.
 
 ## Explicitly deferred (needs new ADR before starting)
 

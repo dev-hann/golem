@@ -369,3 +369,24 @@ func (m Model) send(event any) tea.Cmd {
 		return nil
 	}
 }
+
+// forkCmd sends a fork_session for the current session — through the
+// last completed turn (ADR-0034). With no session yet there is nothing
+// to fork (ADR-0018 lazy creation); the switch to the child happens on
+// the session_forked confirmation, which loads the child like a picker
+// open.
+func (m Model) forkCmd() (tea.Model, tea.Cmd) {
+	if m.sessionID == "" || m.client == nil {
+		m.blocks = append(m.blocks, block{
+			kind: blockError,
+			text: "no session to fork yet — send a message first",
+		})
+		m.refreshView()
+
+		return m, nil
+	}
+
+	return m, m.send(golemclient.ForkSession{
+		Type: golemclient.TypeForkSession, Session: m.sessionID,
+	})
+}

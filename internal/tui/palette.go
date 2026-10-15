@@ -26,6 +26,7 @@ func (m Model) commands() []command {
 		{name: "session list", keys: "ctrl+x l", run: Model.openSessions},
 		{name: "model list", keys: "ctrl+x m", run: Model.openModels},
 		{name: "compact session", keys: "/compact", run: Model.paletteCompact},
+		{name: "fork session", keys: "ctrl+x f", run: Model.paletteFork},
 		{name: "quit", keys: "ctrl+d", run: Model.quitCmd},
 	}
 }
@@ -33,6 +34,13 @@ func (m Model) commands() []command {
 // paletteCompact runs the compaction from the command palette.
 func (m Model) paletteCompact() (tea.Model, tea.Cmd) {
 	return m.compactCmd()
+}
+
+// paletteFork forks the current session from the command palette —
+// through its last completed turn (ADR-0034; the protocol's turn field
+// is the v2 turn-picking extension point).
+func (m Model) paletteFork() (tea.Model, tea.Cmd) {
+	return m.forkCmd()
 }
 
 // filteredCommands returns the palette commands whose names match the

@@ -20,6 +20,7 @@ const (
 	TypeDeleteSession  = "delete_session"
 	TypeVersionQuery   = "version_query"
 	TypeCompactSession = "compact_session"
+	TypeForkSession    = "fork_session"
 )
 
 // Event type names (server → client).
@@ -40,6 +41,7 @@ const (
 	TypeServerHello      = "server_hello"
 	TypeSessionCompacted = "session_compacted"
 	TypeCompactFailed    = "compact_failed"
+	TypeSessionForked    = "session_forked"
 )
 
 // Envelope is the minimal shape every message shares. Unknown types must be
@@ -243,6 +245,17 @@ type CompactSession struct {
 	Session string `json:"session"`
 }
 
+// ForkSession asks the server to copy a session's stored lines through
+// a turn boundary into a new child session (ADR-0034). Turn names the
+// turn to fork through (its turn_end inclusive); empty means the last
+// completed turn. Rejected while a turn runs (appends would race the
+// copy), for a session with no completed turn, or an unknown turn id.
+type ForkSession struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Turn    string `json:"turn,omitempty"`
+}
+
 // SessionCompacted confirms a completed compaction: summary is the
 // synthesized context the next turns start from. Persisted as a session
 // record (append-only — the file is never rewritten) and replayed to
@@ -278,6 +291,17 @@ type ServerHello struct {
 type SessionDeleted struct {
 	Type    string `json:"type"`
 	Session string `json:"session"`
+}
+
+// SessionForked confirms a completed fork: the child session exists and
+// holds the copied prefix; the parent file is untouched. Emitted to the
+// requesting client only. Title carries the fork title and is present
+// when the parent was titled (ADR-0034).
+type SessionForked struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Parent  string `json:"parent"`
+	Title   string `json:"title,omitempty"`
 }
 
 // TypeSetModel labels a client set_model event.
@@ -322,6 +346,8 @@ var decoders = map[string]decoder{ //nolint:lll // one line per type
 	TypeCompactSession:   typed[CompactSession],
 	TypeSessionCompacted: typed[SessionCompacted],
 	TypeCompactFailed:    typed[CompactFailed],
+	TypeForkSession:      typed[ForkSession],
+	TypeSessionForked:    typed[SessionForked],
 }
 
 // Decode classifies one raw NDJSON line into a typed event. It returns the
