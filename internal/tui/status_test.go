@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
 	"github.com/dev-hann/golem/pkg/golemclient"
@@ -256,7 +256,7 @@ func TestStatus_EscInterruptsActiveTurn(t *testing.T) {
 	m, fc := wired(t)
 	m = resize(m, 80, 24)
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
-	_ = key(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	_ = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 
 	if _, ok := lastSent(t, fc).(golemclient.Interrupt); !ok {
 		t.Errorf("esc should send Interrupt, got %#v", lastSent(t, fc))
@@ -288,8 +288,8 @@ func TestStatus_SessionSwitchResetsStatus(t *testing.T) {
 			{ID: "s2", Cwd: "/b", Turns: 2},
 		},
 	})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	if _, ok := lastSent(t, fc).(golemclient.LoadSession); !ok {
 		t.Fatal("picker enter should send a load_session")
 	}
@@ -490,7 +490,7 @@ func TestStatus_ResumeBusySessionArmsTicker(t *testing.T) {
 			{ID: "s1", Cwd: "/a", Turns: 1, Busy: true},
 		},
 	})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // load s1
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // load s1
 	if _, ok := lastSent(t, fc).(golemclient.LoadSession); !ok {
 		t.Fatal("picker enter should send a load_session")
 	}
@@ -563,7 +563,7 @@ func TestStatus_ResumeBusySessionRestoresActiveTurn(t *testing.T) {
 			{ID: "s2", Cwd: "/b", Turns: 2},
 		},
 	})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter}) // load s1
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter}) // load s1
 	if _, ok := lastSent(t, fc).(golemclient.LoadSession); !ok {
 		t.Fatal("picker enter should send a load_session")
 	}

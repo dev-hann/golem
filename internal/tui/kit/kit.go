@@ -1,9 +1,10 @@
 package kit
 
 import (
+	"image/color"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -11,22 +12,29 @@ import (
 // components. All TUI output goes through here.
 type Kit struct {
 	theme  *Theme
-	r      *lipgloss.Renderer
+	dark   bool
 	styles map[Token]lipgloss.Style
 }
 
-// New builds a Kit on the default renderer.
+// New builds a Kit for a dark terminal (the common case; the TUI picks
+// the variant from the terminal's reported background color).
 func New(theme *Theme) *Kit {
-	return NewWithRenderer(theme, lipgloss.DefaultRenderer())
+	return NewFor(theme, true)
 }
 
-// NewWithRenderer builds a Kit against a pinned renderer (tests force
-// color profiles; NO_COLOR terminals degrade automatically).
-func NewWithRenderer(theme *Theme, r *lipgloss.Renderer) *Kit {
-	k := &Kit{theme: theme, r: r, styles: map[Token]lipgloss.Style{}}
+// NewFor builds a Kit with the theme variant pinned by dark — the
+// terminal's light/dark background flag (lipgloss v2 made adaptive
+// colors explicit; the Kit resolves the pair once at build time).
+func NewFor(theme *Theme, dark bool) *Kit {
+	lightDark := lipgloss.LightDark(dark)
+
+	k := &Kit{theme: theme, dark: dark, styles: map[Token]lipgloss.Style{}}
 
 	for _, token := range Tokens {
-		k.styles[token] = r.NewStyle().Foreground(theme.Colors[token])
+		pair := theme.Colors[token]
+		k.styles[token] = lipgloss.NewStyle().Foreground(lightDark(
+			lipgloss.Color(pair.Light), lipgloss.Color(pair.Dark),
+		))
 	}
 
 	return k
@@ -34,6 +42,10 @@ func NewWithRenderer(theme *Theme, r *lipgloss.Renderer) *Kit {
 
 // Theme returns the active theme.
 func (k *Kit) Theme() *Theme { return k.theme }
+
+// Dark reports whether the Kit resolved its palette for a dark
+// terminal background (the light/dark variant selector).
+func (k *Kit) Dark() bool { return k.dark }
 
 // Style exposes a token's base style for the rare component needing raw
 // composition — still token-driven, never a raw color.
@@ -122,11 +134,18 @@ func (k *Kit) Prompt(text string) string {
 // leftBorder colors the left rail — the composer's mode edge — while the
 // rest of the frame stays in the border token.
 func (k *Kit) Box(content string, leftBorder Token) string {
-	return k.r.NewStyle().
+	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(k.theme.Colors[Border]).
-		BorderLeftForeground(k.theme.Colors[leftBorder]).
+		BorderForeground(k.color(Border)).
+		BorderLeftForeground(k.color(leftBorder)).
 		Render(content)
+}
+
+// color resolves a token's pair against the Kit's dark flag — for the
+// style fields lipgloss v2 takes as plain color.Color values.
+func (k *Kit) color(token Token) color.Color {
+	pair := k.theme.Colors[token]
+	return lipgloss.LightDark(k.dark)(lipgloss.Color(pair.Light), lipgloss.Color(pair.Dark))
 }
 
 // WrapPlain hard-wraps text so no display row exceeds width cells,
@@ -238,23 +257,14 @@ func (k *Kit) Modal(width int, title, body string) string {
 
 	content := k.Title(title) + "\n" + strings.TrimRight(body, "\n")
 
-	panel := 0
-	for _, line := range strings.Split(content, "\n") {
-		if w := ansi.StringWidth(line); w > panel {
-			panel = w
-		}
-	}
-
-	style := k.r.NewStyle().
+	style := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(k.theme.Colors[Border]).
-		Background(k.theme.Colors[Bg]).
+		BorderForeground(k.color(Border)).
+		Background(k.color(Bg)).
 		Padding(0, modalPaddingH).
-		Width(panel + 2*modalPaddingH)
-
-	if width > 0 {
-		style = style.MaxWidth(width)
-	}
+		// v2's Width is an exact total (content wraps to fit); the panel
+		// must stay content-sized, so no Width — only the terminal cap.
+		MaxWidth(max(width, 0))
 
 	return style.Render(content)
 }

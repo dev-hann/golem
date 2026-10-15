@@ -4,11 +4,12 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/internal/config"
 	"github.com/dev-hann/golem/internal/llm"
@@ -23,10 +24,14 @@ const pickerFetchTimeout = 5 * time.Second
 func RunTUI(socket string) error {
 	model := tui.New(socket).WithModels(FetchModelsForPicker(LiveListModels))
 
-	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	program := tea.NewProgram(model)
 
 	final, err := program.Run()
 	if err != nil {
+		if errors.Is(err, tea.ErrInterrupted) {
+			return nil // ctrl+c at the no-TTY prompt: a cancel, not a failure
+		}
+
 		return fmt.Errorf("cli: running tui: %w", err)
 	}
 

@@ -8,14 +8,14 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
 
 // handleKey dispatches key input by mode.
-func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if key.Type == tea.KeyCtrlC {
+func (m Model) handleKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if key.String() == "ctrl+c" {
 		return m.ctrlC()
 	}
 
@@ -104,14 +104,14 @@ func (m Model) quitCmd() (tea.Model, tea.Cmd) {
 }
 
 // updateChat handles chat-mode keys.
-func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateChat(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.leaderArmed {
 		return m.leaderKey(key)
 	}
 
 	// A pending quit confirmation dies on the next key of any kind — the
 	// ladder must not swallow typing (ctrl+c itself already handled).
-	if m.exitArmed && key.Type != tea.KeyCtrlC {
+	if m.exitArmed && key.String() != "ctrl+c" {
 		m.setExit(false)
 	}
 
@@ -119,32 +119,32 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch key.Type { //nolint:exhaustive // foreign enum; default routes to the textarea
-	case tea.KeyCtrlX:
+	switch key.String() { //nolint:exhaustive // key names, not enum values; default routes to the textarea
+	case "ctrl+x":
 		m.setLeader(true)
 		m.leaderGen++
 
 		return m, armLeader(m.leaderGen)
-	case tea.KeyCtrlP:
+	case "ctrl+p":
 		m.mode = modeCommand
 		m.cmdQuery, m.cmdCursor = "", 0
 
 		return m, nil
-	case tea.KeyCtrlD:
+	case "ctrl+d":
 		return m.quitCmd()
-	case tea.KeyCtrlJ:
+	case "ctrl+j":
 		m.insertNewline()
 
 		return m, nil
-	case tea.KeyEscape:
+	case "esc":
 		return m.escKey()
-	case tea.KeyEnter:
-		if key.Alt { // alt/option+enter inserts a newline; plain enter submits
-			m.insertNewline()
+	case "alt+enter", "shift+enter":
+		// alt/option+enter and — on terminals with the kitty keyboard
+		// protocol — shift+enter insert a newline; plain enter submits.
+		m.insertNewline()
 
-			return m, nil
-		}
-
+		return m, nil
+	case "enter":
 		line := strings.TrimSpace(m.input.Value())
 		if line == "" {
 			return m, nil
@@ -164,7 +164,7 @@ func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// insertNewline adds a line break to the composer (alt+enter / ctrl+j).
+// insertNewline adds a line break to the composer (alt+enter / shift+enter / ctrl+j).
 func (m *Model) insertNewline() {
 	m.input.InsertString("\n")
 	m.syncInputHeight()
@@ -174,7 +174,7 @@ func (m *Model) insertNewline() {
 // hint points at the key-list reference while a ctrl+x sequence pends,
 // and the exit hint demands the confirming press.
 const (
-	chatPlaceholder   = "message… (enter send · alt+enter newline · ctrl+p commands)"
+	chatPlaceholder   = "message… (enter send · alt/shift+enter newline · ctrl+p commands)"
 	leaderPlaceholder = "shortcut mode — n new · l sessions · m model · q quit · esc cancels"
 	exitPlaceholder   = "quit? press ctrl+c again to exit · any key cancels"
 )
@@ -242,25 +242,25 @@ func (m Model) openModels() (tea.Model, tea.Cmd) {
 // leaderKey dispatches the second key of a ctrl+x sequence. Bound keys
 // consume the press; esc cancels; anything else disarms and continues as
 // ordinary chat input, so a stray arm never swallows typing (ctrl+x here
-// re-arms with a fresh window). Direct chords stay impossible where the
-// terminal protocol cannot distinguish them — ctrl+m is enter (CR), which
-// is why every command rides the leader namespace.
-func (m Model) leaderKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+// re-arms with a fresh window). The leader namespace exists because
+// direct chords stay impossible where the terminal protocol cannot
+// distinguish them — ctrl+m is enter (CR).
+func (m Model) leaderKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.setLeader(false)
 
-	if key.Type == tea.KeyEscape {
+	if key.String() == "esc" {
 		return m, nil
 	}
 
-	if !key.Alt && key.Type == tea.KeyRunes && len(key.Runes) == 1 {
-		switch key.Runes[0] {
-		case 'n':
+	if !key.Mod.Contains(tea.ModAlt) && len(key.Text) == 1 {
+		switch key.Text {
+		case "n":
 			return m.newSessionCmd()
-		case 'l':
+		case "l":
 			return m.openSessions()
-		case 'm':
+		case "m":
 			return m.openModels()
-		case 'q':
+		case "q":
 			return m.quitCmd()
 		}
 	}

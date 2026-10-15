@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -63,11 +63,11 @@ func TestSticky_HoldsPinnedQuestionAcrossSubmit(t *testing.T) {
 	if got := m.stickyText(); got != "question one" {
 		t.Fatalf("precondition: sticky must pin question one, got %q", got)
 	}
-	before := lineCount(m.View())
+	before := lineCount(m.View().Content)
 
 	// Submit the next question through the real composer path.
 	m.input.SetValue("question two")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	// The server echoes turn_start, whose follow snap to the bottom was
 	// the exact moment the old rule dropped the pin.
@@ -76,7 +76,7 @@ func TestSticky_HoldsPinnedQuestionAcrossSubmit(t *testing.T) {
 	if got := m.stickyText(); got != "question one" {
 		t.Fatalf("turn start must not clear the pin: sticky = %q, want question one", got)
 	}
-	view := m.View()
+	view := plain(m.View().Content)
 	if !strings.Contains(view, "▎ question one") {
 		t.Errorf("the pinned line must keep rendering after submit:\n%s", view)
 	}
@@ -101,8 +101,8 @@ func TestSticky_HoldsPinnedQuestionAcrossSubmit(t *testing.T) {
 	if got := m.stickyText(); got != "question one" {
 		t.Fatalf("pin must hold while the new bar is visible, got %q", got)
 	}
-	if !strings.Contains(m.View(), "▎ question two") {
-		t.Errorf("the new bar must stay on screen through the early deltas:\n%s", m.View())
+	if !strings.Contains(plain(m.View().Content), "▎ question two") {
+		t.Errorf("the new bar must stay on screen through the early deltas:\n%s", m.View().Content)
 	}
 }
 
@@ -114,7 +114,7 @@ func TestSticky_SwapsWhenPushedPastWindowTop(t *testing.T) {
 
 	m := stickyTranscript(t)
 	m.input.SetValue("question two")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart})
 
 	span := m.userSpans[len(m.userSpans)-1]
@@ -141,7 +141,7 @@ func TestSticky_SwapsWhenPushedPastWindowTop(t *testing.T) {
 		if got == "question two" {
 			// The swap happened: assert the push-out shape and stop —
 			// further deltas cannot change the outcome.
-			view := m.View()
+			view := plain(m.View().Content)
 			if n := strings.Count(view, "▎"); n != 1 {
 				t.Errorf("exactly one bar line should render, found %d:\n%s", n, view)
 			}
@@ -196,7 +196,7 @@ func TestSticky_SwapBoundaryAtWindowTop(t *testing.T) {
 			// Copy per subtest: the closure would otherwise share one
 			// model variable across parallel writers (data race).
 			m := m
-			m.vp.YOffset = tt.offset
+			m.vp.SetYOffset(tt.offset)
 
 			if got := m.stickyText(); got != tt.want {
 				t.Errorf("offset=%d: sticky = %q, want %q", tt.offset, got, tt.want)

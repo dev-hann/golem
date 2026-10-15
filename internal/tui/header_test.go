@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -21,8 +21,8 @@ func leaderKey(t *testing.T, m Model, r rune) Model {
 }
 
 // enterKey is the plain enter press used to commit picker inputs.
-func enterKey() tea.KeyMsg {
-	return tea.KeyMsg{Type: tea.KeyEnter}
+func enterKey() tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: tea.KeyEnter}
 }
 
 // deliverMeta is a one-liner for folding a session_meta event with the
@@ -38,7 +38,7 @@ func deliverMeta(t *testing.T, m Model, title, cwd string) Model {
 // headerLineOf returns the top content row of the chat screen — the row
 // below the screen's top padding (and the header when it renders).
 func headerLineOf(m Model) string {
-	lines := strings.Split(m.View(), "\n")
+	lines := strings.Split(m.View().Content, "\n")
 
 	return lines[screenPadV]
 }
@@ -55,11 +55,11 @@ func TestModel_SessionHeaderShowsTitleAndDir(t *testing.T) {
 
 	line := headerLineOf(m)
 	if !strings.Contains(line, "Fix auth middleware") {
-		t.Errorf("header must show the session title, got:\n%s", m.View())
+		t.Errorf("header must show the session title, got:\n%s", m.View().Content)
 	}
 
 	if !strings.Contains(line, "golem") {
-		t.Errorf("header must show the cwd tail, got:\n%s", m.View())
+		t.Errorf("header must show the cwd tail, got:\n%s", m.View().Content)
 	}
 }
 
@@ -73,7 +73,7 @@ func TestModel_SessionHeaderPlaceholderUntilTitled(t *testing.T) {
 	m = deliverMeta(t, m, "", "/work/golem")
 
 	if line := headerLineOf(m); !strings.Contains(line, "untitled") {
-		t.Errorf("untitled session must show a placeholder, got:\n%s", m.View())
+		t.Errorf("untitled session must show a placeholder, got:\n%s", m.View().Content)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestModel_SessionHeaderNoSessionIsDimPlaceholder(t *testing.T) {
 	m = resize(m, 80, 24)
 
 	if line := headerLineOf(m); !strings.Contains(line, "no session") {
-		t.Errorf("sessionless header must show a placeholder, got:\n%s", m.View())
+		t.Errorf("sessionless header must show a placeholder, got:\n%s", m.View().Content)
 	}
 }
 
@@ -106,7 +106,7 @@ func TestModel_SessionTitleEventUpdatesHeader(t *testing.T) {
 	})
 
 	if line := headerLineOf(m); !strings.Contains(line, "Server title") {
-		t.Errorf("session_title event must refresh the header:\n%s", m.View())
+		t.Errorf("session_title event must refresh the header:\n%s", m.View().Content)
 	}
 }
 
@@ -123,7 +123,7 @@ func TestModel_SessionHeaderResetsOnNewSession(t *testing.T) {
 	m = leaderKey(t, m, 'n')
 
 	if line := headerLineOf(m); strings.Contains(line, "Old title") {
-		t.Errorf("header must reset on new session:\n%s", m.View())
+		t.Errorf("header must reset on new session:\n%s", m.View().Content)
 	}
 }
 
@@ -145,15 +145,15 @@ func TestModel_SessionHeaderRenameUpdatesImmediately(t *testing.T) {
 		},
 	})
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlR}) // rename the highlighted row
+	m = key(t, m, tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl}) // rename the highlighted row
 	for _, r := range "New name" {
 		m = key(t, m, rkey(r))
 	}
 	m = key(t, m, enterKey())
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEscape}) // close the picker
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape}) // close the picker
 
 	if line := headerLineOf(m); !strings.Contains(line, "New name") {
-		t.Errorf("rename must update the header immediately:\n%s", m.View())
+		t.Errorf("rename must update the header immediately:\n%s", m.View().Content)
 	}
 
 	if len(fc.sent) == 0 {
@@ -170,7 +170,7 @@ func TestModel_SessionHeaderHiddenOnTinyTerminal(t *testing.T) {
 	m = resize(m, 24, 10)
 	m = deliverMeta(t, m, "Fix auth", "/w")
 
-	view := m.View()
+	view := m.View().Content
 	if got := strings.Count(view, "\n") + 1; got > m.height {
 		t.Errorf("tiny terminal height = %d rows, exceeds terminal %d:\n%s", got, m.height, view)
 	}
@@ -189,15 +189,15 @@ func TestModel_SessionHeaderHeightConstant(t *testing.T) {
 	m = resize(m, 80, 24)
 
 	heights := make([]int, 0, 3)
-	heights = append(heights, strings.Count(m.View(), "\n")+1)
+	heights = append(heights, strings.Count(m.View().Content, "\n")+1)
 
 	m = deliverMeta(t, m, "", "/w")
-	heights = append(heights, strings.Count(m.View(), "\n")+1)
+	heights = append(heights, strings.Count(m.View().Content, "\n")+1)
 
 	m = deliver(t, m, golemclient.SessionTitle{
 		Type: golemclient.TypeSessionTitle, Session: "s1", Title: "Now titled",
 	})
-	heights = append(heights, strings.Count(m.View(), "\n")+1)
+	heights = append(heights, strings.Count(m.View().Content, "\n")+1)
 
 	for _, h := range heights {
 		if h != heights[0] {

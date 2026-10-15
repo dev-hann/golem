@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -30,7 +30,7 @@ func TestLazySession_FirstSubmitCreatesThenFlushes(t *testing.T) {
 	m = resize(m, 100, 40)
 
 	m.input.SetValue("hello golem")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if created, ok := lastSent(t, fc).(golemclient.CreateSession); !ok || created.Type != golemclient.TypeCreateSession {
 		t.Fatalf("sent = %#v, want CreateSession", lastSent(t, fc))
@@ -40,8 +40,8 @@ func TestLazySession_FirstSubmitCreatesThenFlushes(t *testing.T) {
 		t.Fatalf("no user_message before session_meta, sent: %+v", fc.sent)
 	}
 
-	if !strings.Contains(m.View(), "hello golem") {
-		t.Errorf("queued message should render in the transcript:\n%s", m.View())
+	if !strings.Contains(m.View().Content, "hello golem") {
+		t.Errorf("queued message should render in the transcript:\n%s", m.View().Content)
 	}
 
 	if !strings.Contains(m.statusLine(), "creating session") {
@@ -66,9 +66,9 @@ func TestLazySession_SubmitsWhilePendingAllFlushInOrder(t *testing.T) {
 	m, fc := wired(t)
 
 	m = key(t, m, rkey('o'))
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m.input.SetValue("second")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(fc.sent) != 1 {
 		t.Fatalf("both submits must queue behind one create_session, sent: %+v", fc.sent)
@@ -113,8 +113,8 @@ func TestLazySession_ModelPickBeforeSessionDefersSetModel(t *testing.T) {
 
 	m = arm(m)
 	m = key(t, m, rkey('m'))
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyDown})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if len(fc.sent) != 0 {
 		t.Fatalf("set_model needs a session; nothing may send yet, sent: %+v", fc.sent)
@@ -125,7 +125,7 @@ func TestLazySession_ModelPickBeforeSessionDefersSetModel(t *testing.T) {
 	}
 
 	m.input.SetValue("hi")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
 
 	if len(fc.sent) != 3 {

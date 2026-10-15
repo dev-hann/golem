@@ -6,7 +6,7 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -447,7 +447,7 @@ func (m *Model) foldReplayEvent(ev any, live replayTurn) replayTurn {
 // paged back (follow=false until they reach the bottom again or send a
 // new message).
 func (m *Model) refreshView() {
-	content, spans, toolSpans := renderBlocks(m.kit, m.md, m.blocks, m.vp.Width)
+	content, spans, toolSpans := renderBlocks(m.kit, m.md, m.blocks, m.vp.Width())
 	m.userSpans = spans
 	m.toolSpans = toolSpans
 	m.content = content

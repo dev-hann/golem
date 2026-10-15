@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
@@ -18,21 +18,21 @@ import (
 
 // updateModels drives the model picker modal: arrows move, enter applies
 // via set_model, esc cancels.
-func (m Model) updateModels(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateModels(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if len(m.models) == 0 {
 		m.mode = modeChat
 
 		return m, nil
 	}
 
-	switch key.Type { //nolint:exhaustive // foreign enum; default ignores
-	case tea.KeyUp, tea.KeyCtrlP:
+	switch key.String() { //nolint:exhaustive // key names, not enum values; default ignores
+	case "up", "ctrl+p":
 		m.modelCursor = max(m.modelCursor-1, 0)
-	case tea.KeyDown, tea.KeyCtrlN:
+	case "down", "ctrl+n":
 		m.modelCursor = min(m.modelCursor+1, len(m.models)-1)
-	case tea.KeyEsc:
+	case "esc":
 		m.mode = modeChat
-	case tea.KeyEnter:
+	case "enter":
 		chosen := m.models[m.modelCursor]
 		m.modelName = chosen
 		m.mode = modeChat
@@ -77,15 +77,15 @@ func (m Model) WithModels(models []string) Model {
 // the dialog keys move/confirm. esc clears the query first, then closes.
 // Every cursor or filter change funnels through one trailing
 // scrollToCursor so the window tracks the cursor.
-func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) updateSessions(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.sessRenaming {
 		return m.renameKey(key)
 	}
 
 	filtered := m.filteredSessions()
 
-	switch key.Type { //nolint:exhaustive // foreign enum; default filters
-	case tea.KeyEsc:
+	switch key.String() { //nolint:exhaustive // key names, not enum values; default filters
+	case "esc":
 		m.sessDeleteArmed = ""
 
 		if m.sessQuery != "" {
@@ -98,7 +98,7 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeChat
 
 		return m, nil
-	case tea.KeyCtrlR:
+	case "ctrl+r":
 		if len(filtered) == 0 {
 			return m, nil
 		}
@@ -107,22 +107,22 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sessRenameText = filtered[m.pickIndex].Title
 
 		return m, nil
-	case tea.KeyCtrlD:
+	case "ctrl+d":
 		return m.deleteKey(filtered)
-	case tea.KeyUp, tea.KeyCtrlP:
+	case "up", "ctrl+p":
 		m.sessDeleteArmed = ""
 		m.pickIndex = max(m.pickIndex-1, 0)
-	case tea.KeyDown, tea.KeyCtrlN:
+	case "down", "ctrl+n":
 		m.sessDeleteArmed = ""
 		m.pickIndex = min(m.pickIndex+1, len(filtered)-1)
-	case tea.KeyBackspace:
+	case "backspace":
 		m.sessDeleteArmed = ""
 
 		if runes := []rune(m.sessQuery); len(runes) > 0 {
 			m.sessQuery = string(runes[:len(runes)-1])
 			m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
 		}
-	case tea.KeyEnter:
+	case "enter":
 		if len(filtered) == 0 {
 			return m, nil
 		}
@@ -135,14 +135,13 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.send(golemclient.LoadSession{
 			Type: golemclient.TypeLoadSession, Session: chosen.ID,
 		})
-	case tea.KeyRunes:
-		if !key.Alt {
+	default:
+		// Printable input without modifiers extends the query.
+		if key.Text != "" && key.Mod == 0 {
 			m.sessDeleteArmed = ""
-			m.sessQuery += string(key.Runes)
+			m.sessQuery += key.Text
 			m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
 		}
-	default:
-		return m, nil
 	}
 
 	m.scrollToCursor()
@@ -197,7 +196,7 @@ func (m Model) deleteKey(filtered []golemclient.SessionSummary) (tea.Model, tea.
 // renameKey edits the highlighted session's title: typing and backspace
 // edit, ctrl+u clears, enter commits (optimistically — the server's
 // session_title reply reconciles), esc cancels.
-func (m Model) renameKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) renameKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	filtered := m.filteredSessions()
 
 	commit := func() (tea.Model, tea.Cmd) {
@@ -227,31 +226,30 @@ func (m Model) renameKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 	}
 
-	switch key.Type { //nolint:exhaustive // foreign enum; default ignores
-	case tea.KeyEscape:
+	switch key.String() { //nolint:exhaustive // key names, not enum values; default ignores
+	case "esc":
 		m.sessRenaming = false
 		m.sessRenameText = ""
 
 		return m, nil
-	case tea.KeyEnter:
+	case "enter":
 		return commit()
-	case tea.KeyCtrlU:
+	case "ctrl+u":
 		m.sessRenameText = ""
 
 		return m, nil
-	case tea.KeyBackspace:
+	case "backspace":
 		if runes := []rune(m.sessRenameText); len(runes) > 0 {
 			m.sessRenameText = string(runes[:len(runes)-1])
 		}
 
 		return m, nil
-	case tea.KeyRunes:
-		if !key.Alt {
-			m.sessRenameText += string(key.Runes)
+	default:
+		// Printable input without modifiers extends the edit buffer.
+		if key.Text != "" && key.Mod == 0 {
+			m.sessRenameText += key.Text
 		}
 
-		return m, nil
-	default:
 		return m, nil
 	}
 }
@@ -600,7 +598,7 @@ const pickerVisibleRows = 15
 // two-cell gutter (one on each flank, every row alike). The floor keeps
 // a narrow terminal readable.
 func (m Model) sessRowWidth() int {
-	return max(m.vp.Width-modalChromeTotal-sessGutterCols, 20)
+	return max(m.vp.Width()-modalChromeTotal-sessGutterCols, 20)
 }
 
 // modalChromeTotal mirrors kit's modal frame cost (two border columns

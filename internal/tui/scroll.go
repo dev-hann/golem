@@ -4,7 +4,7 @@
 package tui
 
 import (
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // pageLines is the scroll step for page keys.
@@ -34,24 +34,24 @@ const wheelLines = 3
 // scrollKey handles transcript-scroll keys, reporting whether it
 // consumed the key. ctrl+g / ctrl+alt+g jump to the top / bottom; plain
 // home / end stay with the composer, matching opencode's split.
-func (m *Model) scrollKey(key tea.KeyMsg) bool {
-	switch key.Type { //nolint:exhaustive // only the scroll keys are ours
-	case tea.KeyPgUp:
+func (m *Model) scrollKey(key tea.KeyPressMsg) bool {
+	switch key.String() { //nolint:exhaustive // only the scroll keys are ours
+	case "pgup":
 		m.scrollBy(-pageLines)
 
 		return true
-	case tea.KeyPgDown:
+	case "pgdown":
 		m.scrollBy(pageLines)
 
 		return true
-	case tea.KeyCtrlG:
-		if key.Alt {
-			m.vp.GotoBottom()
-			m.follow = true
-		} else {
-			m.vp.GotoTop()
-			m.follow = false
-		}
+	case "ctrl+alt+g":
+		m.vp.GotoBottom()
+		m.follow = true
+
+		return true
+	case "ctrl+g":
+		m.vp.GotoTop()
+		m.follow = false
 
 		return true
 	default:
@@ -62,12 +62,12 @@ func (m *Model) scrollKey(key tea.KeyMsg) bool {
 // mouseClick toggles the tool block under a left click — the chevron
 // rows — reporting whether one was hit. Clicks on the composer, the
 // sticky header, or modal backdrops are not tool rows and do nothing.
-func (m *Model) mouseClick(msg tea.MouseMsg) bool {
+func (m *Model) mouseClick(_, y int) bool {
 	if m.mode != modeChat {
 		return false
 	}
 
-	line, ok := m.lineAt(msg.Y)
+	line, ok := m.lineAt(y)
 	if !ok {
 		return false
 	}
@@ -89,32 +89,32 @@ func (m *Model) mouseClick(msg tea.MouseMsg) bool {
 // toggles the tool row under it or begins a text selection, drags
 // extend the selection, and the release finishes it.
 func (m *Model) handleMouse(msg tea.MouseMsg) {
-	switch {
-	case msg.Button == tea.MouseButtonWheelUp:
+	switch msg := msg.(type) {
+	case tea.MouseWheelMsg:
+		delta := -wheelLines // wheel up scrolls toward older output
+		if msg.Button != tea.MouseWheelUp {
+			delta = wheelLines
+		}
+
 		if m.mode == modeSessions {
-			m.scrollPicker(-wheelLines)
+			m.scrollPicker(delta)
 
 			return
 		}
 
-		m.scrollBy(-wheelLines)
-	case msg.Button == tea.MouseButtonWheelDown:
-		if m.mode == modeSessions {
-			m.scrollPicker(wheelLines)
-
-			return
-		}
-
-		m.scrollBy(wheelLines)
-	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress:
-		if !m.mouseClick(msg) {
+		m.scrollBy(delta)
+	case tea.MouseClickMsg:
+		if msg.Button == tea.MouseLeft && !m.mouseClick(msg.X, msg.Y) {
 			m.beginSelection(msg.Y)
 		}
-	case msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionMotion:
-		m.extendSelection(msg.Y)
-	case msg.Action == tea.MouseActionRelease &&
-		(msg.Button == tea.MouseButtonLeft || msg.Button == tea.MouseButtonNone):
-		m.endSelection()
+	case tea.MouseMotionMsg:
+		if msg.Button == tea.MouseLeft {
+			m.extendSelection(msg.Y)
+		}
+	case tea.MouseReleaseMsg:
+		if msg.Button == tea.MouseLeft || msg.Button == 0 {
+			m.endSelection()
+		}
 	default:
 	}
 }

@@ -4,30 +4,28 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/muesli/termenv"
 )
 
-func pickKey(s string) tea.KeyMsg {
+func pickKey(s string) tea.KeyPressMsg {
 	switch s {
 	case "up":
-		return tea.KeyMsg{Type: tea.KeyUp}
+		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
-		return tea.KeyMsg{Type: tea.KeyDown}
+		return tea.KeyPressMsg{Code: tea.KeyDown}
 	case "j":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}}
+		return tea.KeyPressMsg{Code: 'j', Text: "j"}
 	case "k":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}
+		return tea.KeyPressMsg{Code: 'k', Text: "k"}
 	case "enter":
-		return tea.KeyMsg{Type: tea.KeyEnter}
+		return tea.KeyPressMsg{Code: tea.KeyEnter}
 	case "q":
-		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
+		return tea.KeyPressMsg{Code: 'q', Text: "q"}
 	case "esc":
-		return tea.KeyMsg{Type: tea.KeyEsc}
+		return tea.KeyPressMsg{Code: tea.KeyEscape}
 	default:
 		panic("unknown key " + s)
 	}
@@ -91,11 +89,11 @@ func TestKitPicker_ViewMarksCursor(t *testing.T) {
 	// TrueColor pins reverse video into the output so the cursor row is
 	// assertable (Ascii strips every escape).
 	p := kit.NewPicker(
-		kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor)),
+		kit.New(kit.DefaultTheme()),
 		"pick", []string{"a", "b"}, 1,
 	)
 
-	view := p.View()
+	view := p.View().Content
 	if !strings.Contains(view, "pick") {
 		t.Errorf("view missing title:\n%s", view)
 	}
@@ -171,9 +169,9 @@ func TestKitPicker_ViewRespectsWidth(t *testing.T) {
 			p := kit.NewPicker(k, tt.title, tt.items, 0)
 			p.SetWidth(tt.width)
 
-			for i, line := range strings.Split(p.View(), "\n") {
+			for i, line := range strings.Split(p.View().Content, "\n") {
 				if w := ansi.StringWidth(line); w > tt.width {
-					t.Errorf("row %d width %d exceeds %d:\n%s", i, w, tt.width, p.View())
+					t.Errorf("row %d width %d exceeds %d:\n%s", i, w, tt.width, p.View().Content)
 				}
 			}
 		})
@@ -186,7 +184,7 @@ func TestKitPicker_ZeroWidthRendersUnbounded(t *testing.T) {
 	p := kit.NewPicker(kit.New(kit.DefaultTheme()), "pick", []string{"a"}, 0)
 	p.SetWidth(0)
 
-	if !strings.Contains(p.View(), "a") {
-		t.Errorf("zero width must not drop items:\n%s", p.View())
+	if !strings.Contains(p.View().Content, "a") {
+		t.Errorf("zero width must not drop items:\n%s", p.View().Content)
 	}
 }

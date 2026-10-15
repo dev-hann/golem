@@ -4,20 +4,22 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
-	"github.com/muesli/termenv"
 
 	"github.com/dev-hann/golem/internal/tui/kit"
 )
 
-// forcedRenderer builds a renderer with a pinned color profile so style
-// output is deterministic regardless of the test environment.
-func forcedRenderer(p termenv.Profile) *lipgloss.Renderer {
-	r := lipgloss.NewRenderer(nil)
-	r.SetColorProfile(p)
+// downsampled renders styled output through a colorprofile.Writer with
+// the profile pinned — v2 moved downsampling from render time to write
+// time, so the pipeline is style.Render then write.
+func downsampled(p colorprofile.Profile, s string) string {
+	var b strings.Builder
+	w := colorprofile.NewWriter(&b, nil)
+	w.Profile = p
+	_, _ = w.WriteString(s)
 
-	return r
+	return b.String()
 }
 
 func TestDefaultTheme_CoversEveryToken(t *testing.T) {
@@ -38,25 +40,28 @@ func TestDefaultTheme_CoversEveryToken(t *testing.T) {
 func TestKit_ComponentOutputPerProfile(t *testing.T) {
 	tests := []struct {
 		name     string
-		profile  termenv.Profile
+		profile  colorprofile.Profile
 		wantANSI bool
 	}{
-		{name: "truecolor renders color", profile: termenv.TrueColor, wantANSI: true},
-		{name: "ascii renders plain", profile: termenv.Ascii, wantANSI: false},
+		{name: "truecolor renders color", profile: colorprofile.TrueColor, wantANSI: true},
+		{name: "ascii renders plain", profile: colorprofile.Ascii, wantANSI: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(tt.profile))
+			k := kit.New(kit.DefaultTheme())
 
-			out := k.ErrLine(0, "boom")
+			out := downsampled(tt.profile, k.ErrLine(0, "boom"))
 			if !strings.Contains(out, "boom") {
 				t.Errorf("message lost: %q", out)
 			}
 
-			hasANSI := strings.Contains(out, "\x1b[")
+			// The Ascii writer may still emit bare SGR resets ("\x1b[m");
+			// only visible styling counts as color.
+			visible := strings.ReplaceAll(out, "\x1b[m", "")
+			hasANSI := strings.Contains(visible, "\x1b[")
 			if hasANSI != tt.wantANSI {
 				t.Errorf("profile %v: ANSI=%v, want %v (output %q)", tt.profile, hasANSI, tt.wantANSI, out)
 			}
@@ -96,16 +101,16 @@ func TestKit_TokensUseTheirOwnColor(t *testing.T) {
 	t.Parallel()
 
 	theme := kit.DefaultTheme()
-	theme.Colors[kit.Error] = lipgloss.AdaptiveColor{Light: "1", Dark: "1"}
-	theme.Colors[kit.OK] = lipgloss.AdaptiveColor{Light: "2", Dark: "2"}
+	theme.Colors[kit.Error] = kit.Pair{Light: "1", Dark: "1"}
+	theme.Colors[kit.OK] = kit.Pair{Light: "2", Dark: "2"}
 
-	k := kit.NewWithRenderer(theme, forcedRenderer(termenv.ANSI))
+	k := kit.NewFor(theme, true)
 
-	if out := k.ErrLine(0, "x"); !strings.Contains(out, "\x1b[31") {
+	if out := downsampled(colorprofile.ANSI, k.ErrLine(0, "x")); !strings.Contains(out, "\x1b[31") {
 		t.Errorf("error line not red: %q", out)
 	}
 
-	if out := k.OKLine("x"); !strings.Contains(out, "\x1b[32") {
+	if out := downsampled(colorprofile.ANSI, k.OKLine("x")); !strings.Contains(out, "\x1b[32") {
 		t.Errorf("ok line not green: %q", out)
 	}
 }
@@ -113,10 +118,10 @@ func TestKit_TokensUseTheirOwnColor(t *testing.T) {
 func TestKit_MessageBarMarksEveryLine(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	barred := k.MessageBar(kit.User, 30, "one\ntwo")
-	lines := strings.Split(barred, "\n")
+	lines := strings.Split(ansi.Strip(barred), "\n")
 	if len(lines) != 2 || lines[0] != "▎ one" || lines[1] != "▎ two" {
 		t.Errorf("every line should carry the bar:\n%s", barred)
 	}
@@ -125,14 +130,14 @@ func TestKit_MessageBarMarksEveryLine(t *testing.T) {
 func TestKit_MessageBarWrapsWithinWidth(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	barred := k.MessageBar(kit.User, 20, strings.Repeat("a", 50))
 	for i, line := range strings.Split(barred, "\n") {
 		if w := ansi.StringWidth(line); w > 20 {
 			t.Errorf("bar line %d width %d exceeds cap 20:\n%s", i, w, barred)
 		}
-		if !strings.HasPrefix(line, "▎") {
+		if !strings.HasPrefix(ansi.Strip(line), "▎") {
 			t.Errorf("bar line %d missing bar:\n%s", i, barred)
 		}
 	}
@@ -141,7 +146,7 @@ func TestKit_MessageBarWrapsWithinWidth(t *testing.T) {
 func TestKit_WrapPlainWithinWidth(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	tests := []struct {
 		name  string
@@ -170,7 +175,7 @@ func TestKit_WrapPlainWithinWidth(t *testing.T) {
 func TestKit_WrapPlainNarrowWidthPassthrough(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	if got := k.WrapPlain(0, "unchanged"); got != "unchanged" {
 		t.Errorf("width 0 must not wrap, got %q", got)
@@ -184,7 +189,7 @@ func TestKit_WrapPlainNarrowWidthPassthrough(t *testing.T) {
 func TestKit_WrapPlainPreservesANSI(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+	k := kit.New(kit.DefaultTheme())
 
 	wrapped := k.WrapPlain(20, k.Style(kit.Error).Render(strings.Repeat("e", 60)))
 
@@ -203,11 +208,11 @@ func TestKit_WrapPlainPreservesANSI(t *testing.T) {
 func TestKit_ErrLineWrapsWithinWidth(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	out := k.ErrLine(20, strings.Repeat("e", 60))
 
-	if !strings.Contains(out, "error: ") {
+	if !strings.Contains(ansi.Strip(out), "error: ") {
 		t.Errorf("wrap lost the error prefix: %q", out)
 	}
 
@@ -221,7 +226,7 @@ func TestKit_ErrLineWrapsWithinWidth(t *testing.T) {
 func TestKit_MessageBarUsesTokenColor(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+	k := kit.New(kit.DefaultTheme())
 
 	if out := k.MessageBar(kit.User, 30, "hi"); !strings.Contains(out, "\x1b[") {
 		t.Errorf("bar should carry the token color: %q", out)
@@ -231,7 +236,7 @@ func TestKit_MessageBarUsesTokenColor(t *testing.T) {
 func TestKit_StickyUserOneLineTruncated(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	sticky := k.StickyUser(12, strings.Repeat("b", 50))
 	if strings.Contains(sticky, "\n") {
@@ -240,7 +245,8 @@ func TestKit_StickyUserOneLineTruncated(t *testing.T) {
 	if w := ansi.StringWidth(sticky); w > 12 {
 		t.Errorf("sticky width %d exceeds 12:\n%s", w, sticky)
 	}
-	if !strings.Contains(sticky, "▎") || !strings.HasSuffix(sticky, "…") {
+	plain := ansi.Strip(sticky)
+	if !strings.Contains(plain, "▎") || !strings.HasSuffix(plain, "…") {
 		t.Errorf("sticky missing bar or ellipsis:\n%s", sticky)
 	}
 }
@@ -248,7 +254,7 @@ func TestKit_StickyUserOneLineTruncated(t *testing.T) {
 func TestKit_BoxRendersRoundedFrame(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	boxed := k.Box("hello", kit.Border)
 	for _, want := range []string{"╭", "╮", "╰", "╯", "hello"} {
@@ -261,7 +267,7 @@ func TestKit_BoxRendersRoundedFrame(t *testing.T) {
 func TestKit_BoxLeftRailCarriesTokenColor(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+	k := kit.New(kit.DefaultTheme())
 
 	// The accent-styled rail glyph is exactly what the left edge must emit.
 	rail := k.Style(kit.Accent).Render("│")
@@ -278,11 +284,11 @@ func TestKit_BoxLeftRailCarriesTokenColor(t *testing.T) {
 func TestKit_ModalRendersTitleAndFrame(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	modal := k.Modal(0, "keys", "ctrl+n new session\nglm-5.3")
 	for _, want := range []string{"╭", "╮", "╰", "╯", "keys", "ctrl+n new session", "glm-5.3"} {
-		if !strings.Contains(modal, want) {
+		if !strings.Contains(ansi.Strip(modal), want) {
 			t.Errorf("modal missing %q:\n%s", want, modal)
 		}
 	}
@@ -291,7 +297,7 @@ func TestKit_ModalRendersTitleAndFrame(t *testing.T) {
 func TestKit_OverlayMergesModalOverBase(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	base := strings.Repeat("background line\n", 12)
 	placed := k.Overlay(40, 12, base, "MODAL")
@@ -337,7 +343,7 @@ func TestKit_OverlayMergesModalOverBase(t *testing.T) {
 func TestKit_OverlayZeroSizeFallsBackToBase(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	got := k.Overlay(0, 0, "the base", "M")
 	if !strings.Contains(got, "the base") || !strings.Contains(got, "M") {
@@ -348,7 +354,7 @@ func TestKit_OverlayZeroSizeFallsBackToBase(t *testing.T) {
 func TestKit_Divider(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	if d := k.Divider(10); strings.Count(d, "─") != 10 {
 		t.Errorf("divider width wrong: %q", d)
@@ -358,7 +364,7 @@ func TestKit_Divider(t *testing.T) {
 func TestKit_StatusBarOneLineTruncates(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	bar := k.StatusBar(40, "◆ bash — go test ./... 5s", kit.Tool)
 	if strings.Contains(bar, "\n") {
@@ -375,7 +381,7 @@ func TestKit_StatusBarOneLineTruncates(t *testing.T) {
 func TestKit_StatusBarZeroWidthNoPanic(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	if bar := k.StatusBar(0, "left", kit.Tool); strings.Contains(bar, "\n") {
 		t.Errorf("zero width must not produce newlines:\n%s", bar)
@@ -385,7 +391,7 @@ func TestKit_StatusBarZeroWidthNoPanic(t *testing.T) {
 func TestKit_ModalCapsWidth(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	tests := []struct {
 		name  string
@@ -447,7 +453,7 @@ func TestKit_ModalCapsWidth(t *testing.T) {
 func TestKit_OverlayModalWiderThanScreen(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
+	k := kit.New(kit.DefaultTheme())
 
 	modal := strings.Repeat("M", 60)
 	placed := k.Overlay(30, 5, "base", modal)
@@ -469,7 +475,7 @@ func TestKit_OverlayModalWiderThanScreen(t *testing.T) {
 func TestKit_SpinnerCyclesFrames(t *testing.T) {
 	t.Parallel()
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
+	k := kit.New(kit.DefaultTheme())
 
 	got := make([]string, 0, len(kit.SpinnerFrames)+2)
 	for i := range len(kit.SpinnerFrames) + 1 {
@@ -500,13 +506,13 @@ func TestKit_SpinnerColoredPerProfile(t *testing.T) {
 
 	glyph := kit.SpinnerFrames[0]
 
-	k := kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.TrueColor))
-	if !strings.Contains(k.Spinner(0), "\x1b[") {
-		t.Errorf("truecolor spinner = %q, want ANSI styling", k.Spinner(0))
+	spun := kit.New(kit.DefaultTheme()).Spinner(0)
+
+	if !strings.Contains(downsampled(colorprofile.TrueColor, spun), "\x1b[") {
+		t.Errorf("truecolor spinner = %q, want ANSI styling", spun)
 	}
 
-	k = kit.NewWithRenderer(kit.DefaultTheme(), forcedRenderer(termenv.Ascii))
-	if got := k.Spinner(0); got != glyph {
+	if got := ansi.Strip(downsampled(colorprofile.Ascii, spun)); got != glyph {
 		t.Errorf("ascii spinner = %q, want the bare glyph %q", got, glyph)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/dev-hann/golem/pkg/golemclient"
 )
@@ -16,8 +16,8 @@ func TestInput_MultilineAltEnter(t *testing.T) {
 
 	// Type a line, then alt+enter twice must insert newlines, not submit.
 	m.input.SetValue("first")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter, Alt: true})
+	m = key(t, m, altEnterKey())
+	m = key(t, m, altEnterKey())
 
 	if got := m.input.Value(); got != "first\n\n" {
 		t.Fatalf("value = %q, want two trailing newlines", got)
@@ -28,12 +28,36 @@ func TestInput_MultilineAltEnter(t *testing.T) {
 	}
 }
 
+// TestInput_ShiftEnterNewline pins the v2 keyboard-enhancement payoff:
+// shift+enter (indistinguishable from enter under the v1 terminal
+// protocol) inserts a newline exactly like alt+enter, and — unlike a
+// kitty-protocol terminal's shifted runes — never uppercases the next
+// typed rune.
+func TestInput_ShiftEnterNewline(t *testing.T) {
+	t.Parallel()
+
+	m := New("/tmp/unused.sock")
+
+	m.input.SetValue("first")
+	m = key(t, m, shiftEnterKey())
+
+	if got := m.input.Value(); got != "first\n" {
+		t.Fatalf("value = %q, want one trailing newline", got)
+	}
+
+	m = key(t, m, textKey('a'))
+
+	if got := m.input.Value(); got != "first\na" {
+		t.Fatalf("value = %q, want the rune after the newline, unshifted", got)
+	}
+}
+
 func TestInput_PlainEnterStillSubmits(t *testing.T) {
 	t.Parallel()
 
 	m, _ := wired(t)
 	m.input.SetValue("hello")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	if m.input.Value() != "" {
 		t.Errorf("input should reset after submit, got %q", m.input.Value())
@@ -45,7 +69,7 @@ func TestInput_CtrlJNewline(t *testing.T) {
 
 	m, fc := wired(t)
 	m.input.SetValue("first")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	m = key(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
 
 	if got := m.input.Value(); got != "first\n" {
 		t.Fatalf("value = %q, want newline inserted", got)
@@ -81,8 +105,8 @@ func TestInput_HeightGrowsWithContentAndResets(t *testing.T) {
 		t.Errorf("rows = %d exceed the terminal share cap", m.inputRows)
 	}
 
-	if m.vp.Height < viewportMinHeight {
-		t.Errorf("viewport height = %d, below floor", m.vp.Height)
+	if m.vp.Height() < viewportMinHeight {
+		t.Errorf("viewport height = %d, below floor", m.vp.Height())
 	}
 
 	m.input.Reset()
@@ -170,8 +194,8 @@ func TestInput_WrappedCapHoldsAndRewrapOnResize(t *testing.T) {
 		t.Errorf("inputRows = %d, want capped at %d", m.inputRows, want)
 	}
 
-	if m.vp.Height < viewportMinHeight {
-		t.Errorf("viewport height = %d, below floor", m.vp.Height)
+	if m.vp.Height() < viewportMinHeight {
+		t.Errorf("viewport height = %d, below floor", m.vp.Height())
 	}
 
 	// The same text at a narrower terminal needs more rows, cap still holds.
@@ -198,7 +222,7 @@ func TestInput_PasteMultilineKeptUntilEnter(t *testing.T) {
 	m, fc := wired(t)
 	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
 	m.input.SetValue("line one\nline two")
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+	m = key(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
 
 	msg, ok := lastSent(t, fc).(golemclient.UserMessage)
 	if !ok {
