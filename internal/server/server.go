@@ -12,6 +12,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oklog/ulid/v2"
 
@@ -53,6 +54,7 @@ type Server struct {
 type turnState struct {
 	ctx    context.Context
 	cancel context.CancelFunc
+	done   chan struct{} // closed by endTurn; delete_session waits on it
 }
 
 // New builds a Server.
@@ -145,6 +147,8 @@ func (s *Server) dispatch(_ net.Conn, writer *connWriter, event any) bool {
 		s.handleSetModel(writer, ev)
 	case golemclient.RenameSession:
 		s.handleRenameSession(writer, ev)
+	case golemclient.DeleteSession:
+		s.handleDeleteSession(writer, ev)
 	case golemclient.VersionQuery:
 		writer.send(golemclient.ServerHello{
 			Type: golemclient.TypeServerHello, Version: s.cfg.Version,
@@ -263,8 +267,13 @@ func (s *Server) handleUserMessage(writer *connWriter, ev golemclient.UserMessag
 
 // handleInterrupt cancels the active turn for the session.
 func (s *Server) handleInterrupt(ev golemclient.Interrupt) {
+	s.cancelTurn(ev.Session)
+}
+
+// cancelTurn cancels the session's active turn, if any.
+func (s *Server) cancelTurn(sessionID string) {
 	s.mu.Lock()
-	state := s.turns[ev.Session]
+	state := s.turns[sessionID]
 	s.mu.Unlock()
 
 	if state != nil {
@@ -327,6 +336,58 @@ func (s *Server) handleRenameSession(writer *connWriter, ev golemclient.RenameSe
 	})
 }
 
+// deleteTurnWait bounds how long delete_session waits for a cancelled
+// turn's goroutine to drain before removing the file anyway. Draining is
+// the rule (the cancel propagates through the provider stream); the cap
+// covers a wedged provider.
+const deleteTurnWait = 10 * time.Second
+
+// handleDeleteSession removes a session, opencode-style: cancel a running
+// turn first, wait for its goroutine to stop appending, then delete the
+// file and confirm with session_deleted. The wait-then-delete ordering
+// keeps a turn's Appends from resurrecting the file; a turn goroutine
+// that finds its session deleted stops before appending (ADR-0019).
+func (s *Server) handleDeleteSession(writer *connWriter, ev golemclient.DeleteSession) {
+	if _, err := s.cfg.Store.Get(ev.Session); err != nil {
+		writer.send(errorOf(ev.Session, "", "session_not_found", err))
+
+		return
+	}
+
+	s.mu.Lock()
+	state := s.turns[ev.Session]
+	s.mu.Unlock()
+
+	if state != nil {
+		state.cancel()
+
+		timer := time.NewTimer(deleteTurnWait)
+		defer timer.Stop()
+
+		select {
+		case <-state.done:
+		case <-timer.C:
+		}
+	}
+
+	s.cfg.Store.MarkDeleted(ev.Session) // blocks late appends (title side call)
+	defer s.cfg.Store.UnmarkDeleted(ev.Session)
+
+	if err := s.cfg.Store.Delete(ev.Session); err != nil {
+		writer.send(errorOf(ev.Session, "", "internal", err))
+
+		return
+	}
+
+	s.mu.Lock()
+	delete(s.modelOverrides, ev.Session)
+	s.mu.Unlock()
+
+	writer.send(golemclient.SessionDeleted{
+		Type: golemclient.TypeSessionDeleted, Session: ev.Session,
+	})
+}
+
 // turnModel resolves the model a session's next turn runs with.
 func (s *Server) turnModel(sessionID string) string {
 	s.mu.Lock()
@@ -348,17 +409,22 @@ func (s *Server) beginTurn(ctx context.Context, sessionID string, cancel context
 		return false
 	}
 
-	s.turns[sessionID] = &turnState{ctx: ctx, cancel: cancel}
+	s.turns[sessionID] = &turnState{ctx: ctx, cancel: cancel, done: make(chan struct{})}
 
 	return true
 }
 
-// endTurn unregisters the active turn.
+// endTurn unregisters the active turn. Closing done wakes delete_session
+// waiters; the map delete guarantees this runs at most once per turn.
 func (s *Server) endTurn(sessionID string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
+	state := s.turns[sessionID]
 	delete(s.turns, sessionID)
+	s.mu.Unlock()
+
+	if state != nil {
+		close(state.done)
+	}
 }
 
 // rfc3339 is the timestamp format used on the wire.

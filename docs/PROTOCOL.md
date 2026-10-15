@@ -49,13 +49,14 @@ Override the model this session uses for subsequent turns (same provider; switch
 
 ### `create_session` / `list_sessions` / `load_session`
 
-Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
+Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. `delete_session` → the server cancels a running turn in that session (opencode-style), waits for it to drain, removes the session's file, and confirms with `session_deleted`; a mid-delete session refuses appends until the delete resolves. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
 
 Clients create their session lazily (ADR-0018): no session is minted until the first submitted message — an abandoned launch must leave nothing behind. A client may connect, `list_sessions`, and `load_session` without ever sending `create_session`.
 
 ```json
 {"type":"create_session","cwd":"/home/user/project"}
 {"type":"list_sessions"}
+{"type":"delete_session","session":"01J..."}
 {"type":"load_session","session":"01J..."}
 ```
 
@@ -95,6 +96,14 @@ Server-persisted record naming a session for listings. Emitted to a client after
 
 ```json
 {"type":"session_title","session":"01J...","title":"Fix auth middleware"}
+```
+
+### `session_deleted`
+
+Confirmation that a `delete_session` completed: the session's stored file is gone. Emitted to the requesting client only; other clients reconcile on their next `list_sessions`. Events still in flight for the deleted session (a cancelled turn's error/turn_end tail) carry no forward meaning — clients drop them. A client whose *current* session was deleted falls back to the lazy-start state: no session until the next `create_session`.
+
+```json
+{"type":"session_deleted","session":"01J..."}
 ```
 
 ### Version handshake
@@ -142,7 +151,7 @@ Examples:
 
 ## Session persistence mirror
 
-Every event in this protocol (except `interrupt` and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format. Sessions recorded before the approval gate's removal may still contain legacy `approval_request` lines; replay skips unknown event types.
+Every event in this protocol (except `interrupt` and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format. Sessions recorded before the approval gate's removal may still contain legacy `approval_request` lines; replay skips unknown event types. Deletion (`delete_session`) removes the whole file (ADR-0019); a session mid-delete refuses appends until the delete resolves.
 
 ## Versioning
 

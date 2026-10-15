@@ -34,49 +34,50 @@ type Model struct {
 	connErr string
 	kit     *kit.Kit
 
-	mode           mode
-	sessionID      string
-	pendingMsgs    []string // submits awaiting a session (ADR-0018 lazy create)
-	pendingModel   string   // set_model deferred until a session exists
-	turnActive     bool
-	follow         bool
-	blocks         []block
-	userSpans      []userSpan
-	toolSpans      []toolSpan
-	leaderArmed    bool
-	leaderGen      int
-	cmdQuery       string
-	cmdCursor      int
-	sessions       []golemclient.SessionSummary
-	pickIndex      int
-	sessQuery      string
-	sessSpinFrame  int // picker spinner frame (braille loader for live turns)
-	sessTickGen    int // spinner ticker generation (stale-tick guard)
-	sessRenaming   bool
-	sessRenameText string
-	vp             viewport.Model
-	input          textarea.Model
-	width          int
-	height         int
-	content        string // plain rendered transcript; the copy source
-	selecting      bool   // a left-button drag over the transcript is in progress
-	selAnchor      int    // content line where the drag began
-	selHead        int    // content line under the drag's pointer
-	copier         func(string) error
-	provider       string
-	modelName      string
-	models         []string
-	modelCursor    int
-	inputRows      int
-	quitting       bool
-	listRequest    bool
-	activeTool     string            // tool name of the in-flight ToolCallStart
-	activeArgs     string            // raw args of the in-flight tool call
-	turnStart      time.Time         // when the active turn began (elapsed display)
-	statusGen      int               // status ticker generation (stale-tick guard)
-	lastUsage      golemclient.Usage // usage of the most recent completed turn
-	streamedText   bool              // any TextDelta seen this turn (thinking vs responding)
-	metaBusy       bool              // the loaded session's live busy flag (session_meta)
+	mode            mode
+	sessionID       string
+	pendingMsgs     []string // submits awaiting a session (ADR-0018 lazy create)
+	pendingModel    string   // set_model deferred until a session exists
+	turnActive      bool
+	follow          bool
+	blocks          []block
+	userSpans       []userSpan
+	toolSpans       []toolSpan
+	leaderArmed     bool
+	leaderGen       int
+	cmdQuery        string
+	cmdCursor       int
+	sessions        []golemclient.SessionSummary
+	pickIndex       int
+	sessQuery       string
+	sessSpinFrame   int // picker spinner frame (braille loader for live turns)
+	sessTickGen     int // spinner ticker generation (stale-tick guard)
+	sessRenaming    bool
+	sessRenameText  string
+	sessDeleteArmed string // picker row armed for ctrl+d delete (session id)
+	vp              viewport.Model
+	input           textarea.Model
+	width           int
+	height          int
+	content         string // plain rendered transcript; the copy source
+	selecting       bool   // a left-button drag over the transcript is in progress
+	selAnchor       int    // content line where the drag began
+	selHead         int    // content line under the drag's pointer
+	copier          func(string) error
+	provider        string
+	modelName       string
+	models          []string
+	modelCursor     int
+	inputRows       int
+	quitting        bool
+	listRequest     bool
+	activeTool      string            // tool name of the in-flight ToolCallStart
+	activeArgs      string            // raw args of the in-flight tool call
+	turnStart       time.Time         // when the active turn began (elapsed display)
+	statusGen       int               // status ticker generation (stale-tick guard)
+	lastUsage       golemclient.Usage // usage of the most recent completed turn
+	streamedText    bool              // any TextDelta seen this turn (thinking vs responding)
+	metaBusy        bool              // the loaded session's live busy flag (session_meta)
 }
 
 // New builds the model for a socket path.
@@ -835,7 +836,8 @@ func (m Model) WithModels(models []string) Model {
 }
 
 // updateSessions drives the session picker: typing filters (fuzzy over
-// title and directory), ctrl+r renames the highlighted row inline, and
+// title and directory), ctrl+r renames the highlighted row inline,
+// ctrl+d deletes it (press twice to confirm — opencode's pattern), and
 // the dialog keys move/confirm. esc clears the query first, then closes.
 func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.sessRenaming {
@@ -846,6 +848,8 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch key.Type { //nolint:exhaustive // foreign enum; default filters
 	case tea.KeyEsc:
+		m.sessDeleteArmed = ""
+
 		if m.sessQuery != "" {
 			m.sessQuery = ""
 			m.pickIndex = 0
@@ -865,15 +869,20 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.sessRenameText = filtered[m.pickIndex].Title
 
 		return m, nil
+	case tea.KeyCtrlD:
+		return m.deleteKey(filtered)
 	case tea.KeyUp, tea.KeyCtrlP:
+		m.sessDeleteArmed = ""
 		m.pickIndex = max(m.pickIndex-1, 0)
 
 		return m, nil
 	case tea.KeyDown, tea.KeyCtrlN:
+		m.sessDeleteArmed = ""
 		m.pickIndex = min(m.pickIndex+1, len(filtered)-1)
 
 		return m, nil
 	case tea.KeyBackspace:
+		m.sessDeleteArmed = ""
 		if runes := []rune(m.sessQuery); len(runes) > 0 {
 			m.sessQuery = string(runes[:len(runes)-1])
 			m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
@@ -887,6 +896,7 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		chosen := filtered[m.pickIndex]
 		m.mode = modeChat
+		m.sessDeleteArmed = ""
 		m.clearTranscript()
 
 		return m, m.send(golemclient.LoadSession{
@@ -894,6 +904,7 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 	case tea.KeyRunes:
 		if !key.Alt {
+			m.sessDeleteArmed = ""
 			m.sessQuery += string(key.Runes)
 			m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
 		}
@@ -902,6 +913,49 @@ func (m Model) updateSessions(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		return m, nil
 	}
+}
+
+// removeSession drops a session from the picker list, clamping the
+// cursor back into range.
+func (m *Model) removeSession(id string) {
+	out := m.sessions[:0:0]
+	for _, s := range m.sessions {
+		if s.ID != id {
+			out = append(out, s)
+		}
+	}
+
+	m.sessions = out
+	m.pickIndex = min(m.pickIndex, max(len(m.filteredSessions())-1, 0))
+}
+
+// deleteKey handles the picker's ctrl+d: the first press arms the
+// highlighted row, the second deletes it optimistically (opencode
+// removes the row immediately) and lets session_deleted reconcile.
+func (m Model) deleteKey(filtered []golemclient.SessionSummary) (tea.Model, tea.Cmd) {
+	if len(filtered) == 0 {
+		return m, nil
+	}
+
+	chosen := filtered[m.pickIndex]
+
+	if m.sessDeleteArmed != chosen.ID {
+		m.sessDeleteArmed = chosen.ID
+
+		return m, nil
+	}
+
+	m.sessDeleteArmed = ""
+	m.removeSession(chosen.ID)
+
+	if m.sessionID == chosen.ID { // deleted the session we stand in
+		m.clearTranscript()
+		m.sessionID = ""
+	}
+
+	return m, m.send(golemclient.DeleteSession{
+		Type: golemclient.TypeDeleteSession, Session: chosen.ID,
+	})
 }
 
 // renameKey edits the highlighted session's title: typing and backspace
@@ -1184,6 +1238,8 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		if i := chosenIndex(m.sessions, e.Session); i >= 0 {
 			m.sessions[i].Title = e.Title
 		}
+	case golemclient.SessionDeleted:
+		m.applySessionDeleted(e)
 	case golemclient.History:
 		tick = m.replayHistory(e)
 	default:
@@ -1261,6 +1317,7 @@ func (m *Model) applySessionList(e golemclient.SessionList) tea.Cmd {
 	m.sessQuery = ""
 	m.sessRenaming = false
 	m.sessRenameText = ""
+	m.sessDeleteArmed = ""
 	m.pickIndex = m.cursorOnSession()
 
 	if m.listRequest {
@@ -1276,6 +1333,20 @@ func (m *Model) applySessionList(e golemclient.SessionList) tea.Cmd {
 	}
 
 	return nil
+}
+
+// applySessionDeleted folds the server's delete confirmation: drop the
+// row (already gone for the optimistic deleter — a no-op), and if the
+// deleted session is the one this client stands in, fall back to the
+// lazy-start state (no session until the next message, ADR-0018).
+func (m *Model) applySessionDeleted(e golemclient.SessionDeleted) {
+	m.removeSession(e.Session)
+	m.sessDeleteArmed = ""
+
+	if m.sessionID == e.Session {
+		m.clearTranscript()
+		m.sessionID = ""
+	}
 }
 
 // anyRunning reports whether any listed session has a live turn — the
@@ -1662,6 +1733,10 @@ func (m Model) sessionsBody() string {
 	for i, s := range filtered {
 		row := m.sessionRow(s, time.Now(), m.sessRowWidth())
 
+		if m.sessDeleteArmed == s.ID {
+			row = m.sessDeleteRow(s, m.sessRowWidth())
+		}
+
 		if i == m.pickIndex && m.sessRenaming {
 			row = m.kit.Prompt("› " + m.sessRenameText + "_")
 		}
@@ -1669,9 +1744,31 @@ func (m Model) sessionsBody() string {
 		fmt.Fprintf(&b, "%s\n", m.kit.Row(row, i == m.pickIndex)) //nolint:errcheck // strings.Builder
 	}
 
-	b.WriteString("\n" + m.kit.DimLine("type to filter · ctrl+r rename · enter open · esc cancel"))
+	b.WriteString("\n" + m.kit.DimLine("type to filter · ctrl+r rename · ctrl+d delete · enter open · esc cancel"))
 
 	return b.String()
+}
+
+// sessDeleteHint is the armed row's confirm prompt.
+const sessDeleteHint = "ctrl+d again to confirm"
+
+// sessDeleteRow renders the armed row: same bar and status columns, the
+// title replaced by the confirm hint in the error token — one
+// destructive cue per opencode's press-again pattern, columns aligned.
+func (m Model) sessDeleteRow(s golemclient.SessionSummary, width int) string {
+	bar := strings.Repeat(" ", sessBarCols)
+	if s.ID == m.sessionID {
+		bar = m.kit.Marker(kit.User, "▎ ")
+	}
+
+	status := strings.Repeat(" ", sessStatusCols)
+	if m.sessionRunning(s) {
+		status = m.kit.Spinner(m.sessSpinFrame) + " "
+	}
+
+	hintCols := max(width-sessBarCols-sessStatusCols, 1)
+
+	return bar + status + m.kit.Marker(kit.Error, ansi.Truncate(sessDeleteHint, hintCols, "…"))
 }
 
 // Session-row geometry: the current-session bar (one cell plus a space),

@@ -158,11 +158,28 @@ func (h *harness) createSession() string {
 	return meta.Session
 }
 
+// expectTypeTolerant reads events until one of the wanted type arrives,
+// skipping interim error events (a cancelled turn's tail).
+func (h *harness) expectTypeTolerant(typ string) any {
+	h.t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		ev, got, err := h.client.ReceiveWithTimeout(2 * time.Second)
+		if err != nil || !got {
+			continue
+		}
+		if typeName(h.t, ev) == typ {
+			return ev
+		}
+	}
+	h.t.Fatalf("timed out waiting for %s", typ)
+	return nil
+}
+
 // expectTypeError reads events until an error event with the wanted code
 // arrives, failing on anything else.
 func (h *harness) expectTypeError(code string) error {
 	h.t.Helper()
-
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		ev, got, err := h.client.ReceiveWithTimeout(2 * time.Second)
@@ -896,5 +913,108 @@ func TestServer_TitleRetryFailsAgainStaysUntitled(t *testing.T) {
 
 	if strings.Contains(string(raw), "session_title") {
 		t.Errorf("permanently failing title generation must never persist a record:\n%s", raw)
+	}
+}
+
+func TestServer_DeleteSessionRemovesFileAndList(t *testing.T) {
+	t.Parallel()
+	provider := &scriptedProvider{rounds: [][]llm.Event{
+		{{Type: llm.EventTextDelta, Delta: "hi"}},
+	}}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "hello",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	h.expectType(golemclient.TypeTurnEnd)
+
+	if err := h.client.Send(golemclient.DeleteSession{
+		Type: golemclient.TypeDeleteSession, Session: sess,
+	}); err != nil {
+		t.Fatalf("send delete_session: %v", err)
+	}
+	deleted := h.expectType(golemclient.TypeSessionDeleted).(golemclient.SessionDeleted)
+	if deleted.Session != sess {
+		t.Errorf("deleted.Session = %q, want %q", deleted.Session, sess)
+	}
+
+	if _, err := os.Stat(filepath.Join(h.storeDir, sess+".jsonl")); !os.IsNotExist(err) {
+		t.Errorf("session file still on disk (stat err = %v)", err)
+	}
+
+	if err := h.client.Send(golemclient.ListSessions{Type: golemclient.TypeListSessions}); err != nil {
+		t.Fatalf("send list: %v", err)
+	}
+	list := h.expectType(golemclient.TypeSessionList).(golemclient.SessionList)
+	for _, s := range list.Sessions {
+		if s.ID == sess {
+			t.Errorf("deleted session still listed: %+v", list.Sessions)
+		}
+	}
+}
+
+func TestServer_DeleteSessionUnknownIDErrors(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, &scriptedProvider{})
+	if err := h.client.Send(golemclient.DeleteSession{
+		Type: golemclient.TypeDeleteSession, Session: "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	if err := h.expectTypeError("session_not_found"); err != nil {
+		t.Fatalf("unknown session: %v", err)
+	}
+}
+
+func TestServer_DeleteSessionCancelsRunningTurn(t *testing.T) {
+	t.Parallel()
+	gate := make(chan struct{})
+	provider := &scriptedProvider{}
+	provider.streamFn = func(ctx context.Context, _ int) <-chan llm.Event {
+		out := make(chan llm.Event, 2)
+		out <- llm.Event{Type: llm.EventTextDelta, Delta: "streaming"}
+		go func() {
+			defer close(out)
+			select {
+			case <-ctx.Done(): // the delete's cancel propagates here
+			case <-gate:
+			}
+		}()
+		return out
+	}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "run",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	h.expectType(golemclient.TypeTextDelta)
+
+	if err := h.client.Send(golemclient.DeleteSession{
+		Type: golemclient.TypeDeleteSession, Session: sess,
+	}); err != nil {
+		t.Fatalf("send delete: %v", err)
+	}
+
+	// The cancelled turn's tail (a provider_error) may precede the
+	// confirmation; scan tolerantly until session_deleted arrives.
+	deleted := h.expectTypeTolerant(golemclient.TypeSessionDeleted).(golemclient.SessionDeleted)
+	if deleted.Session != sess {
+		t.Errorf("deleted.Session = %q, want %q", deleted.Session, sess)
+	}
+	if _, err := os.Stat(filepath.Join(h.storeDir, sess+".jsonl")); !os.IsNotExist(err) {
+		t.Errorf("session file reappeared after delete (stat err = %v)", err)
+	}
+
+	// The turn goroutine ends and never resurrects the file.
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(filepath.Join(h.storeDir, sess+".jsonl")); !os.IsNotExist(err) {
+			t.Errorf("session file resurrected after cancelled turn: stat err = %v", err)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
