@@ -27,7 +27,7 @@ func TestDefaultTheme_CoversEveryToken(t *testing.T) {
 
 	theme := kit.DefaultTheme()
 
-	for _, token := range kit.Tokens {
+	for _, token := range kit.Tokens() {
 		color, ok := theme.Colors[token]
 		if !ok {
 			t.Errorf("token %q missing from default theme", token)
@@ -476,20 +476,21 @@ func TestKit_SpinnerCyclesFrames(t *testing.T) {
 	t.Parallel()
 
 	k := kit.New(kit.DefaultTheme())
+	frames := kit.SpinnerFrames()
 
-	got := make([]string, 0, len(kit.SpinnerFrames)+2)
-	for i := range len(kit.SpinnerFrames) + 1 {
+	got := make([]string, 0, len(frames)+2)
+	for i := range len(frames) + 1 {
 		got = append(got, k.Spinner(i))
 	}
 
-	if got[0] != got[len(kit.SpinnerFrames)] {
+	if got[0] != got[len(frames)] {
 		t.Errorf("frame %d = %q, want the cycle to wrap to frame 0 (%q)",
-			len(kit.SpinnerFrames), got[len(kit.SpinnerFrames)], got[0])
+			len(frames), got[len(frames)], got[0])
 	}
 
-	for i, frame := range got[:len(kit.SpinnerFrames)] {
-		if !strings.Contains(frame, kit.SpinnerFrames[i]) {
-			t.Errorf("Spinner(%d) = %q, want it to render frame %q", i, frame, kit.SpinnerFrames[i])
+	for i, frame := range got[:len(frames)] {
+		if !strings.Contains(frame, frames[i]) {
+			t.Errorf("Spinner(%d) = %q, want it to render frame %q", i, frame, frames[i])
 		}
 	}
 
@@ -504,7 +505,8 @@ func TestKit_SpinnerCyclesFrames(t *testing.T) {
 func TestKit_SpinnerColoredPerProfile(t *testing.T) {
 	t.Parallel()
 
-	glyph := kit.SpinnerFrames[0]
+	frames := kit.SpinnerFrames()
+	glyph := frames[0]
 
 	spun := kit.New(kit.DefaultTheme()).Spinner(0)
 
@@ -514,5 +516,73 @@ func TestKit_SpinnerColoredPerProfile(t *testing.T) {
 
 	if got := ansi.Strip(downsampled(colorprofile.Ascii, spun)); got != glyph {
 		t.Errorf("ascii spinner = %q, want the bare glyph %q", got, glyph)
+	}
+}
+
+// TestKit_SpinnerFramesImmutable pins that mutating the returned frame
+// sequence cannot corrupt the shared spinner — the exported slice is a
+// defensive copy, not the package's own backing array.
+func TestKit_SpinnerFramesImmutable(t *testing.T) {
+	t.Parallel()
+
+	frames := kit.SpinnerFrames()
+	if len(frames) == 0 {
+		t.Fatal("SpinnerFrames() is empty")
+	}
+
+	frames[0] = "mutated"
+
+	if got := kit.New(kit.DefaultTheme()).Spinner(0); strings.Contains(got, "mutated") {
+		t.Errorf("mutating the returned frames leaked into Spinner: %q", got)
+	}
+}
+
+// TestKit_TokensImmutable pins that mutating the returned token list
+// cannot retheme every Kit built afterwards — the exported slice is a
+// defensive copy.
+func TestKit_TokensImmutable(t *testing.T) {
+	t.Parallel()
+
+	tokens := kit.Tokens()
+	if len(tokens) == 0 {
+		t.Fatal("Tokens() is empty")
+	}
+
+	tokens[0] = "accent"
+	tokens[len(tokens)-1] = "accent"
+
+	theme := kit.DefaultTheme()
+	theme.Colors[kit.Accent] = kit.Pair{Light: "#ff0000", Dark: "#ff0000"}
+
+	k := kit.NewFor(theme, true)
+	if got := ansi.Strip(k.Spinner(0)); !strings.Contains(got, "⠋") {
+		t.Errorf("Spinner after token-list mutation = %q, want the spinner glyph", got)
+	}
+}
+
+// TestKit_WarnLinePrefixIsRenderedOnce pins the labeled warn line: one
+// named prefix constant (the errPrefix shape), one render pass — no
+// split-render seam between the label and the message.
+func TestKit_WarnLinePrefixIsRenderedOnce(t *testing.T) {
+	t.Parallel()
+
+	k := kit.New(kit.DefaultTheme())
+
+	if got := ansi.Strip(k.WarnLine(0, "disk full")); !strings.HasPrefix(got, "warning: disk full") {
+		t.Errorf("WarnLine = %q, want the %q prefix", got, "warning: ")
+	}
+
+	// The wrap path must mirror ErrLine's: labeled, wrapped, styled —
+	// the label survives wrapping (on whichever row fits) and rows cap.
+	wrapped := k.WarnLine(12, "disk full")
+
+	if !strings.Contains(ansi.Strip(wrapped), "warning: ") {
+		t.Errorf("wrapped WarnLine lost its label: %q", wrapped)
+	}
+
+	for i, line := range strings.Split(wrapped, "\n") {
+		if w := ansi.StringWidth(line); w > 12 {
+			t.Errorf("row %d width %d exceeds 12:\n%s", i, w, wrapped)
+		}
 	}
 }

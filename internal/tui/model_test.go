@@ -122,6 +122,7 @@ func typeRunes(m Model, s string) Model {
 
 	return m
 }
+
 // flattenCmds expands a (possibly batched) cmd into its leaves so tests
 // can run each and pick out the message they await.
 func flattenCmds(cmd tea.Cmd) []tea.Cmd {
@@ -566,7 +567,7 @@ func pickerLine(view, title string) string {
 func spinnerIn(plainView, title string) bool {
 	for _, line := range strings.Split(plainView, "\n") {
 		if strings.Contains(line, title) {
-			for _, frame := range kit.SpinnerFrames {
+			for _, frame := range kit.SpinnerFrames() {
 				if strings.Contains(line, frame) {
 					return true
 				}
@@ -677,7 +678,7 @@ func TestModel_SessionPickerSpinnerTicks(t *testing.T) {
 	})
 
 	// The row spins from frame 0 while the picker is open.
-	if !strings.Contains(ansi.Strip(m.View().Content), kit.SpinnerFrames[0]) {
+	if !strings.Contains(ansi.Strip(m.View().Content), kit.SpinnerFrames()[0]) {
 		t.Errorf("picker spinner must start at frame 0:\n%s", m.View().Content)
 	}
 
@@ -686,7 +687,7 @@ func TestModel_SessionPickerSpinnerTicks(t *testing.T) {
 	if m2.spinFrame != 1 {
 		t.Errorf("spinFrame after tick = %d, want 1", m2.spinFrame)
 	}
-	if !strings.Contains(ansi.Strip(m2.View().Content), kit.SpinnerFrames[1]) {
+	if !strings.Contains(ansi.Strip(m2.View().Content), kit.SpinnerFrames()[1]) {
 		t.Errorf("picker spinner must advance to frame 1:\n%s", m2.View().Content)
 	}
 

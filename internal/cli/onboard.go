@@ -18,7 +18,6 @@ import (
 
 	"github.com/dev-hann/golem/internal/config"
 	"github.com/dev-hann/golem/internal/llm"
-	"github.com/dev-hann/golem/internal/tui"
 	"github.com/dev-hann/golem/internal/tui/kit"
 )
 
@@ -126,7 +125,7 @@ func RunOnboard(opts OnboardOptions) error {
 	))
 
 	if Probe(DefaultSocketPath()) {
-		fmt.Fprintln(out, k.WarnLine( //nolint:errcheck // terminal output
+		fmt.Fprintln(out, k.WarnLine(0, //nolint:errcheck // terminal output
 			"a golem server is already running and predates this config — restart it:",
 		))
 		fmt.Fprintln(out, "  pkill -f 'golem serve'   # then run: golem") //nolint:errcheck // terminal output
@@ -238,7 +237,7 @@ func promptKeyAndList(
 
 		if key == "" {
 			fmt.Fprintln(out, //nolint:errcheck // terminal output
-				k.WarnLine("no key available — set it in your shell or paste it here"))
+				k.WarnLine(0, "no key available — set it in your shell or paste it here"))
 
 			continue
 		}
@@ -255,7 +254,7 @@ func promptKeyAndList(
 			fmt.Fprintln(out, k.ErrLine(0, fmt.Sprintf("key rejected: %v", err))) //nolint:errcheck // terminal output
 
 			if hint := planHint(id); hint != "" {
-				fmt.Fprintln(out, k.WarnLine("hint: "+hint)) //nolint:errcheck // terminal output
+				fmt.Fprintln(out, k.WarnLine(0, "hint: "+hint)) //nolint:errcheck // terminal output
 			}
 
 			continue
@@ -338,7 +337,7 @@ func pickModelFromList(
 
 	cursor := cursorFor(listed, defaultModel)
 
-	if item, ok := tui.PickFromList(titleFor(id, listed), listed, cursor); ok {
+	if item, ok := k.PickFromList(titleFor(id, listed), listed, cursor); ok {
 		return item, nil
 	}
 

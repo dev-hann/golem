@@ -381,8 +381,8 @@ func TestStatus_ActiveStatesAnimateSpinnerFrames(t *testing.T) {
 
 			// The strip shows frame 0 while the turn runs.
 			line := m.statusLine()
-			if !strings.Contains(line, kit.SpinnerFrames[0]) {
-				t.Errorf("%s: strip should animate, want %q in %q", tt.name, kit.SpinnerFrames[0], line)
+			if !strings.Contains(line, kit.SpinnerFrames()[0]) {
+				t.Errorf("%s: strip should animate, want %q in %q", tt.name, kit.SpinnerFrames()[0], line)
 			}
 			if !strings.Contains(line, tt.want) {
 				t.Errorf("%s: strip should still name the state %q, got %q", tt.name, tt.want, line)
@@ -394,8 +394,8 @@ func TestStatus_ActiveStatesAnimateSpinnerFrames(t *testing.T) {
 			// A tick advances to frame 1 and renders it.
 			next, _ := m.Update(spinTickMsg{gen: m.spinGen})
 			m2 := next.(Model)
-			if got := m2.statusLine(); !strings.Contains(got, kit.SpinnerFrames[1]) {
-				t.Errorf("%s: after a tick the strip should show %q, got %q", tt.name, kit.SpinnerFrames[1], got)
+			if got := m2.statusLine(); !strings.Contains(got, kit.SpinnerFrames()[1]) {
+				t.Errorf("%s: after a tick the strip should show %q, got %q", tt.name, kit.SpinnerFrames()[1], got)
 			}
 
 			// Turn end freezes the strip back on the static dot.
@@ -403,7 +403,7 @@ func TestStatus_ActiveStatesAnimateSpinnerFrames(t *testing.T) {
 			if line := m3.statusLine(); !strings.Contains(line, "●") {
 				t.Errorf("%s: idle strip should return to the static dot, got %q", tt.name, line)
 			}
-			for _, frame := range kit.SpinnerFrames {
+			for _, frame := range kit.SpinnerFrames() {
 				if strings.Contains(m3.statusLine(), frame) {
 					t.Errorf("%s: idle strip must not animate, found %q", tt.name, frame)
 				}

@@ -31,9 +31,20 @@ const (
 	Selection Token = "selection"
 )
 
-// Tokens lists every token; themes must cover them all.
-var Tokens = []Token{
+// tokens lists every token; themes must cover them all. Unexported and
+// returned as a copy — the palette is fixed data, not state anyone can
+// mutate (AGENTS.md's no-global-mutable-state rule).
+var tokens = []Token{
 	Fg, Bg, Accent, Dim, Error, OK, Warn, User, Assistant, Tool, Border, Title, Selection,
+}
+
+// Tokens lists every token; themes must cover them all. The slice is a
+// defensive copy — mutating it cannot retheme Kits built afterwards.
+func Tokens() []Token {
+	out := make([]Token, len(tokens))
+	copy(out, tokens)
+
+	return out
 }
 
 // Theme is a pure-data palette: token → color (a hex string or ANSI

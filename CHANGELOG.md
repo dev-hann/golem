@@ -63,6 +63,21 @@ config schema may change without notice.
 ### Changed — session titles generate during the turn and arrive as they land (2026-10-16)
 
 - The title side call now fires when a turn of an untitled session *starts* (ADR-0032) instead of after `turn_end`: the first user message already names the task, so the title is generated while the agent works — minutes-long tool loops no longer delay it. On success the server pushes the persisted `session_title` event to the connection that started the turn, so the TUI header (and any client folding session records) updates within one side call instead of waiting for the next `session_list` (previously: the picker had to be reopened to see the title). The event may interleave anywhere among the turn's events; a per-session guard prevents double generation when turns overlap on an untitled session. Failure behavior is unchanged (logged, no record, retried next turn).
+### Changed — kit cleanup: immutable palette data, WarnLine gains wrap parity (2026-10-17)
+
+- `kit.Tokens` and `kit.SpinnerFrames` are no longer exported mutable
+  slices — they are functions returning defensive copies (the palette
+  and spinner frames are fixed data; a caller mutating the exported
+  slice could previously retheme every Kit or corrupt the spinner).
+  Call sites that indexed the slices now take the copy once.
+- `kit.WarnLine(width, text)` mirrors `ErrLine`: a named `warnPrefix`
+  constant, one render pass (the old path rendered the label and the
+  message separately), and width-based wrapping. The setup wizard
+  passes 0 (no known terminal width).
+- The `tui.PickFromList` compatibility wrapper is gone — its one caller
+  (the setup wizard) now calls `k.PickFromList` on its own Kit, so the
+  picker renders in the wizard's theme instead of a fresh default one.
+
 ### Changed — Bubble Tea v2 migration: shift+enter newline, OSC 7501 status (2026-10-16, ADR-0035)
 
 - The TUI runtime moved from bubbletea v1 to `charm.land/bubbletea/v2`

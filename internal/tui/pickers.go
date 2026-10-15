@@ -548,7 +548,9 @@ func (m Model) rowStatus(s golemclient.SessionSummary, focused bool) string {
 		return strings.Repeat(" ", sessStatusCols)
 	}
 
-	glyph := kit.SpinnerFrames[(m.spinFrame%len(kit.SpinnerFrames)+len(kit.SpinnerFrames))%len(kit.SpinnerFrames)]
+	frames := kit.SpinnerFrames()
+	n := len(frames)
+	glyph := frames[(m.spinFrame%n+n)%n]
 
 	if focused {
 		return glyph + " "

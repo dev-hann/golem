@@ -30,7 +30,7 @@ func NewFor(theme *Theme, dark bool) *Kit {
 
 	k := &Kit{theme: theme, dark: dark, styles: map[Token]lipgloss.Style{}}
 
-	for _, token := range Tokens {
+	for _, token := range tokens {
 		pair := theme.Colors[token]
 		k.styles[token] = lipgloss.NewStyle().Foreground(lightDark(
 			lipgloss.Color(pair.Light), lipgloss.Color(pair.Dark),
@@ -61,6 +61,9 @@ func (k *Kit) ToolLine(text string) string {
 // errPrefix labels every error line.
 const errPrefix = "error: "
 
+// warnPrefix labels every warning line — the same shape as errPrefix.
+const warnPrefix = "warning: "
+
 // ErrLine renders an error message. A positive width wraps the labeled
 // message to fit; width <= 0 leaves it unwrapped (callers printing to a
 // terminal without knowing its width).
@@ -79,9 +82,16 @@ func (k *Kit) OKLine(text string) string {
 	return k.styles[OK].Render(text)
 }
 
-// WarnLine renders a warning message.
-func (k *Kit) WarnLine(text string) string {
-	return k.styles[Warn].Render("warning: ") + k.styles[Warn].Render(text)
+// WarnLine renders a warning message. A positive width wraps the labeled
+// message to fit, mirroring ErrLine; width <= 0 leaves it unwrapped.
+func (k *Kit) WarnLine(width int, text string) string {
+	s := warnPrefix + text
+
+	if width > 0 {
+		s = k.WrapPlain(width, s)
+	}
+
+	return k.styles[Warn].Render(s)
 }
 
 // DimLine renders secondary/muted text.
@@ -94,16 +104,26 @@ func (k *Kit) Marker(token Token, glyph string) string {
 	return k.styles[token].Render(glyph)
 }
 
-// SpinnerFrames is the braille spinner's frame sequence (⠋⠙⠹…) — one
-// glyph per render tick while a turn runs.
-var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+// spinnerFrames is the braille spinner's frame sequence (⠋⠙⠹…) — one
+// glyph per render tick while a turn runs. Unexported and copied out:
+// fixed data, not state.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// SpinnerFrames returns the spinner's frame sequence as a defensive
+// copy — mutating the result cannot corrupt the shared spinner.
+func SpinnerFrames() []string {
+	out := make([]string, len(spinnerFrames))
+	copy(out, spinnerFrames)
+
+	return out
+}
 
 // Spinner renders the spinner's frame (any int; the sequence cycles) in
 // the accent token's color — a live-turn marker that needs no words.
 func (k *Kit) Spinner(frame int) string {
-	n := len(SpinnerFrames)
+	n := len(spinnerFrames)
 
-	return k.Marker(Accent, SpinnerFrames[((frame%n)+n)%n])
+	return k.Marker(Accent, spinnerFrames[((frame%n)+n)%n])
 }
 
 // --- structure ---------------------------------------------------------
