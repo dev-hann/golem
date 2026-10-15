@@ -116,6 +116,40 @@ func TestParse_BlockKinds_Table(t *testing.T) {
 	}
 }
 
+// TestParse_LineAfterBlock_NotDropped pins a lossless-parse rule: the
+// line immediately following a closed fence, a quote, or a list is its
+// own block (lazy continuation is not supported, but content is never
+// silently dropped).
+func TestParse_LineAfterBlock_NotDropped(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		in      string
+		wantLen int
+		want    string // text of the block after the first
+	}{
+		{name: "line after closed fence", in: "```\ncode\n```\nafter", wantLen: 2, want: "after"},
+		{name: "line after quote", in: "> quote\nafter", wantLen: 2, want: "after"},
+		{name: "line after list", in: "- item\nafter", wantLen: 2, want: "after"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := Parse(tt.in)
+			if len(got) != tt.wantLen {
+				t.Fatalf("Parse(%q) = %d blocks %+v, want %d", tt.in, len(got), got, tt.wantLen)
+			}
+
+			if got[1].Text != tt.want {
+				t.Errorf("block after = %+v, want text %q", got[1], tt.want)
+			}
+		})
+	}
+}
+
 // TestParse_OpenFence_IsCodeBlock pins the streaming rule: from an
 // unclosed fence to the end of input, everything is code — never a
 // half-styled paragraph.

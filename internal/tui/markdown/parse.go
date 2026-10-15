@@ -69,75 +69,114 @@ const maxHeading = 4
 // marked Open so the renderer can keep re-evaluating it; text that ends
 // in a newline has settled its final block.
 func Parse(text string) []Block {
-	settled := strings.HasSuffix(text, "\n")
-	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-
-	var (
-		blocks []Block
-		para   []string
-	)
-
-	flushPara := func() {
-		if len(para) == 0 {
-			return
-		}
-
-		// Line breaks inside a paragraph are preserved: in a terminal
-		// chat the model's newlines are deliberate formatting, not
-		// CommonMark soft breaks to collapse.
-		blocks = append(blocks, Block{Kind: BlockParagraph, Text: strings.Join(para, "\n")})
-		para = nil
+	s := &blockScanner{
+		lines:   strings.Split(strings.TrimSuffix(text, "\n"), "\n"),
+		settled: strings.HasSuffix(text, "\n"),
 	}
 
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-
-		switch {
-		case strings.TrimSpace(line) == "":
-			flushPara()
-		case isFence(line):
-			flushPara()
-
-			body, lang, next, closed := readFence(lines, i)
-			blocks = append(blocks, Block{Kind: BlockCode, Lang: lang, Text: body, settled: closed})
-			i = next
-		case line == "---" || line == "***":
-			flushPara()
-
-			blocks = append(blocks, Block{Kind: BlockRule})
-		case strings.HasPrefix(line, "> "):
-			flushPara()
-
-			quote, next := readQuote(lines, i)
-			blocks = append(blocks, Block{Kind: BlockQuote, Text: quote})
-			i = next
-		case headingDepth(line) > 0:
-			flushPara()
-
-			level := headingDepth(line)
-
-			blocks = append(blocks, Block{
-				Kind: BlockHeading, Level: level,
-				Text: strings.TrimSpace(strings.TrimLeft(line, "#")),
-			})
-		case listItem(line) != nil:
-			flushPara()
-
-			items, ordered, next := readList(lines, i)
-			blocks = append(blocks, Block{Kind: BlockList, Ordered: ordered, Items: items})
-			i = next
-		default:
-			para = append(para, line)
-		}
+	for i := 0; i < len(s.lines); {
+		i = s.consume(i)
 	}
 
-	flushPara()
+	s.flushPara()
 
-	if settled && len(blocks) > 0 {
-		blocks[len(blocks)-1].settled = true
+	if s.settled && len(s.blocks) > 0 {
+		s.blocks[len(s.blocks)-1].settled = true
 	}
 
-	return blocks
+	return s.blocks
+}
+
+// blockScanner holds one Parse run's accumulators.
+type blockScanner struct {
+	lines   []string
+	blocks  []Block
+	para    []string
+	settled bool
+}
+
+// consume handles lines[i], returning the next unconsumed index.
+func (s *blockScanner) consume(i int) int {
+	line := s.lines[i]
+
+	switch {
+	case strings.TrimSpace(line) == "":
+		s.flushPara()
+
+		return i + 1
+	case isFence(line):
+		return s.consumeFence(i)
+	case line == "---" || line == "***":
+		s.flushPara()
+		s.blocks = append(s.blocks, Block{Kind: BlockRule})
+
+		return i + 1
+	case strings.HasPrefix(line, "> "):
+		return s.consumeQuote(i)
+	case headingDepth(line) > 0:
+		return s.consumeHeading(line, i)
+	case listItem(line) != nil:
+		return s.consumeList(i)
+	default:
+		s.para = append(s.para, line)
+
+		return i + 1
+	}
+}
+
+// consumeHeading consumes one heading line.
+func (s *blockScanner) consumeHeading(line string, i int) int {
+	s.flushPara()
+	s.blocks = append(s.blocks, Block{
+		Kind:  BlockHeading,
+		Level: headingDepth(line),
+		Text:  strings.TrimSpace(strings.TrimLeft(line, "#")),
+	})
+
+	return i + 1
+}
+
+// consumeFence consumes one fenced code block from lines[i].
+func (s *blockScanner) consumeFence(i int) int {
+	s.flushPara()
+
+	body, lang, next, closed := readFence(s.lines, i)
+	s.blocks = append(s.blocks, Block{Kind: BlockCode, Lang: lang, Text: body, settled: closed})
+
+	return next
+}
+
+// consumeQuote consumes one quote block from lines[i].
+func (s *blockScanner) consumeQuote(i int) int {
+	s.flushPara()
+
+	quote, next := readQuote(s.lines, i)
+	s.blocks = append(s.blocks, Block{Kind: BlockQuote, Text: quote})
+
+	return next
+}
+
+// consumeList consumes one list block from lines[i].
+func (s *blockScanner) consumeList(i int) int {
+	s.flushPara()
+
+	items, ordered, next := readList(s.lines, i)
+	s.blocks = append(s.blocks, Block{Kind: BlockList, Ordered: ordered, Items: items})
+
+	return next
+}
+
+// flushPara closes the pending paragraph, if any.
+func (s *blockScanner) flushPara() {
+	if len(s.para) == 0 {
+		return
+	}
+
+	// Line breaks inside a paragraph are preserved: in a terminal
+	// chat the model's newlines are deliberate formatting, not
+	// CommonMark soft breaks to collapse.
+	s.blocks = append(s.blocks, Block{Kind: BlockParagraph, Text: strings.Join(s.para, "\n")})
+	s.para = nil
 }
 
 // Split partitions parsed blocks into completed (cacheable) and live
