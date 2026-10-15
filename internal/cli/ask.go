@@ -29,15 +29,7 @@ func Ask(ctx context.Context, opts AskOptions) error {
 		return fmt.Errorf("cli: empty prompt")
 	}
 
-	registry, err := tools.NewRegistry(
-		tools.ReadTool{Root: opts.Root},
-		tools.WriteTool{Root: opts.Root},
-		tools.EditTool{Root: opts.Root},
-		tools.BashTool{Root: opts.Root},
-		tools.GrepTool{Root: opts.Root},
-		tools.GlobTool{Root: opts.Root},
-		tools.WebFetchTool{},
-	)
+	registry, err := tools.Builtin(opts.Root)
 	if err != nil {
 		return fmt.Errorf("cli: building tools: %w", err)
 	}

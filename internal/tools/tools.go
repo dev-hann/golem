@@ -54,6 +54,21 @@ func NewRegistry(toolList ...Tool) (*Registry, error) {
 	return &Registry{byName: byName}, nil
 }
 
+// Builtin assembles golem's default tool set rooted at root — the single
+// list every entrypoint (server, ask, chat) ships. A new built-in lands
+// here, once.
+func Builtin(root string) (*Registry, error) {
+	return NewRegistry(
+		ReadTool{Root: root},
+		WriteTool{Root: root},
+		EditTool{Root: root},
+		BashTool{Root: root},
+		GrepTool{Root: root},
+		GlobTool{Root: root},
+		WebFetchTool{},
+	)
+}
+
 // Get looks a tool up by name.
 func (r *Registry) Get(name string) (Tool, bool) {
 	t, ok := r.byName[name]

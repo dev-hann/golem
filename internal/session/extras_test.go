@@ -106,33 +106,3 @@ func TestDir_MatchesCreationPath(t *testing.T) {
 		t.Errorf("Dir() = %q, want %q", store.Dir(), dir)
 	}
 }
-
-func TestApplyMessage_UncachedSessionIsNoop(t *testing.T) {
-	t.Parallel()
-	store := newStore(t, 2)
-	if err := store.ApplyMessage("01JZZZZZZZZZZZZZZZZZZZZZZZ"); err != nil {
-		t.Errorf("ApplyMessage on uncached session should be a no-op, got %v", err)
-	}
-	if err := store.FinishTurn("01JZZZZZZZZZZZZZZZZZZZZZZZ"); err != nil {
-		t.Errorf("FinishTurn on uncached session should be a no-op, got %v", err)
-	}
-}
-
-func TestFinishTurn_IncrementsCount(t *testing.T) {
-	t.Parallel()
-	store := newStore(t, 4)
-	sess, err := store.Create("/proj")
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-	if err := store.FinishTurn(sess.ID); err != nil {
-		t.Fatalf("FinishTurn: %v", err)
-	}
-	got, err := store.Get(sess.ID)
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.Turns != 1 {
-		t.Errorf("turns = %d, want 1", got.Turns)
-	}
-}

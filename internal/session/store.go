@@ -210,8 +210,10 @@ func (s *Store) Get(id string) (*Session, error) {
 }
 
 // Append writes one event as a JSON line to the session file. The in-memory
-// copy, if cached, is not modified here; ApplyMessage updates it. Appends
-// to a session mid-delete fail with ErrDeleted — the file stays removed.
+// copy, if cached, is not modified here; the cache is invalidated by the
+// caller (the server) once the turn ends, so the next Get re-folds from
+// disk. Appends to a session mid-delete fail with ErrDeleted — the file
+// stays removed.
 func (s *Store) Append(id string, event any) error {
 	if !validID(id) {
 		return fmt.Errorf("session: invalid id %q", id)
@@ -244,44 +246,6 @@ func (s *Store) Append(id string, event any) error {
 
 	if _, err := f.Write(append(line, '\n')); err != nil {
 		return fmt.Errorf("session: appending to %s: %w", path, err)
-	}
-
-	return nil
-}
-
-// ApplyMessage appends messages to the cached session's folded history so
-// subsequent turns see them without a disk reload.
-func (s *Store) ApplyMessage(id string, msgs ...llm.Message) error {
-	if !validID(id) {
-		return fmt.Errorf("session: invalid id %q", id)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	entry, ok := s.cache[id]
-	if !ok {
-		return nil // uncached sessions reload from disk next Get
-	}
-
-	entry.sess.Messages = append(entry.sess.Messages, msgs...)
-	entry.lastUsed = time.Now()
-
-	return nil
-}
-
-// FinishTurn increments the cached session's turn count.
-func (s *Store) FinishTurn(id string) error {
-	if !validID(id) {
-		return fmt.Errorf("session: invalid id %q", id)
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if entry, ok := s.cache[id]; ok {
-		entry.sess.Turns++
-		entry.lastUsed = time.Now()
 	}
 
 	return nil

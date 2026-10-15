@@ -66,6 +66,31 @@ func TestRegistry_SpecsSortedByName(t *testing.T) {
 	}
 }
 
+// builtinTools pins the default set Builtin ships — every entrypoint
+// (server, ask, chat) presents this exact list to providers.
+var builtinTools = []string{
+	"bash", "edit", "glob", "grep", "read", "webfetch", "write",
+}
+
+func TestBuiltin_AssemblesDefaultSet(t *testing.T) {
+	t.Parallel()
+
+	reg, err := tools.Builtin(t.TempDir())
+	if err != nil {
+		t.Fatalf("Builtin: %v", err)
+	}
+
+	for _, name := range builtinTools {
+		if _, ok := reg.Get(name); !ok {
+			t.Errorf("builtin registry missing %q", name)
+		}
+	}
+
+	if got := len(reg.Specs()); got != len(builtinTools) {
+		t.Errorf("Builtin shipped %d tools, want %d (%v)", got, len(builtinTools), builtinTools)
+	}
+}
+
 func TestRegistry_ExecuteUnknownToolErrors(t *testing.T) {
 	t.Parallel()
 	reg, err := tools.NewRegistry(stubTool{name: "alpha"})

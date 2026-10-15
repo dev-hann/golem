@@ -63,15 +63,7 @@ type turnState struct {
 
 // New builds a Server.
 func New(cfg Config) (*Server, error) {
-	registry, err := tools.NewRegistry(
-		tools.ReadTool{Root: cfg.Root},
-		tools.WriteTool{Root: cfg.Root},
-		tools.EditTool{Root: cfg.Root},
-		tools.BashTool{Root: cfg.Root},
-		tools.GrepTool{Root: cfg.Root},
-		tools.GlobTool{Root: cfg.Root},
-		tools.WebFetchTool{},
-	)
+	registry, err := tools.Builtin(cfg.Root)
 	if err != nil {
 		return nil, fmt.Errorf("server: building tools: %w", err)
 	}
