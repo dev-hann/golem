@@ -55,7 +55,7 @@ func (m Model) View() tea.View {
 	switch {
 	case m.connErr != "":
 		v.ProgramStatus = &tea.ProgramStatus{State: tea.ProgramStateError}
-	case m.turnActive:
+	case m.turnActive || m.compacting:
 		v.ProgramStatus = &tea.ProgramStatus{State: tea.ProgramStateWorking}
 	case m.mode == modeSessions || m.mode == modeModels || m.mode == modeCommand:
 		v.ProgramStatus = &tea.ProgramStatus{State: tea.ProgramStateBlocked}
@@ -216,9 +216,10 @@ func (m Model) statusLine() string {
 // everything (its stall is the thing needing explanation), then the
 // in-flight tool, then synthesizing (results back at the model), then
 // reasoning, responding, thinking. Reasoned-then-text shows responding —
-// the answer has begun.
+// the answer has begun. A running compaction (ADR-0037) covers the
+// pre-turn window before thinking exists to show.
 func (m Model) activeState() (string, kit.Token) {
-	if m.turnActive {
+	if m.turnActive || m.compacting {
 		return m.activeTurnState()
 	}
 
@@ -236,9 +237,9 @@ func (m Model) activeState() (string, kit.Token) {
 }
 
 // activeTurnState resolves the strip while a turn runs: retry, tool,
-// synthesizing, responding, reasoning, thinking — in that priority. The
-// leading glyph is the animated spinner (the strip's motion marker);
-// only the idle strip is static.
+// synthesizing, responding, reasoning, thinking, compacting — in that
+// priority. The leading glyph is the animated spinner (the strip's
+// motion marker); only the idle strip is static.
 func (m Model) activeTurnState() (string, kit.Token) {
 	spin := m.kit.Spinner(m.spinFrame) + " "
 
@@ -254,6 +255,11 @@ func (m Model) activeTurnState() (string, kit.Token) {
 		return spin + "responding", kit.Accent
 	case m.reasoned:
 		return spin + "reasoning", kit.Accent
+	case m.compacting:
+		// ADR-0037: the summary side call runs — the 60 s window no
+		// other event covers. Shows before thinking on the automatic
+		// pre-turn path and alone on a manual /compact.
+		return spin + "compacting context", kit.Accent
 	default:
 		return spin + "thinking", kit.Accent
 	}

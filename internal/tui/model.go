@@ -79,6 +79,7 @@ type Model struct {
 	reasoned        bool              // any ThinkingDelta seen this turn (reasoning state)
 	retryState      *retryInfo        // live provider retry, nil when none runs
 	synthDone       *toolDone         // last ToolCallEnd while synthesizing follows-up
+	compacting      bool              // a compaction's summary side call runs (ADR-0037)
 	metaBusy        bool              // the loaded session's live busy flag (session_meta)
 	usageIn         int64             // session-cumulative input tokens (meta-restored)
 	usageOut        int64             // session-cumulative output tokens (meta-restored)

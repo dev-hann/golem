@@ -40,14 +40,15 @@ func armSpinTick(gen int) tea.Cmd {
 }
 
 // spinTick advances the animation frame: an open picker animates its
-// rows, an active turn animates the status strip. Ticks from a closed
-// picker with no live turn (or a stale generation) are dropped.
+// rows, an active turn or a running compaction (ADR-0037) animates the
+// status strip. Ticks from a closed picker with no live turn (or a
+// stale generation) are dropped.
 func (m Model) spinTick(msg spinTickMsg) (tea.Model, tea.Cmd) {
 	if m.spinGen != msg.gen {
 		return m, nil
 	}
 
-	if m.mode == modeSessions || m.turnActive {
+	if m.mode == modeSessions || m.turnActive || m.compacting {
 		m.spinFrame++
 
 		return m, armSpinTick(m.spinGen)

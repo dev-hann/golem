@@ -28,11 +28,11 @@ func sessionOf(ev any) string {
 		return e.Session
 	case golemclient.ToolCallEnd:
 		return e.Session
-	case golemclient.ErrorEvent:
+	case golemclient.SessionCompacted:
 		return e.Session
-	case golemclient.TurnEnd:
+	case golemclient.CompactFailed:
 		return e.Session
-	case golemclient.History:
+	case golemclient.Compacting:
 		return e.Session
 	default:
 		return ""
@@ -84,7 +84,6 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.replayHistory(e)
 	case golemclient.TurnStart:
 		m.applyTurnEvent(ev)
-		m.applySessionRecord(ev)
 
 		if m.turnActive { // arm the status strip's animation
 			tick = armSpinTick(m.spinGen)
@@ -95,12 +94,12 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		// anything else is ignored per PROTOCOL.md forward
 		// compatibility.
 		m.applyTurnEvent(ev)
-		m.applySessionRecord(ev)
+		cmd = m.applySessionRecord(ev)
 	}
 
 	// A busy session resumed mid-turn (replayHistory set turnActive
 	// above) arms the animation too — the strip must not freeze.
-	if m.turnActive && tick == nil {
+	if m.turnActive && tick == nil && cmd == nil {
 		m.spinFrame = 0
 		m.spinGen++
 		tick = armSpinTick(m.spinGen)
@@ -167,6 +166,7 @@ func (m *Model) endTurn() {
 	m.reasoned = false
 	m.retryState = nil
 	m.synthDone = nil
+	m.compacting = false
 }
 
 // applySessionList stores a session list and, when it was explicitly
@@ -213,6 +213,7 @@ func (m *Model) applyTurnEvent(ev any) {
 		m.retryState = nil
 		m.activeTool, m.activeArgs = "", ""
 		m.synthDone = nil
+		m.compacting = false // the pre-turn side call resolved; the turn runs
 		m.spinFrame = 0
 		m.spinGen++ // orphan any open animation; this one is live
 	case golemclient.TextDelta:
@@ -251,8 +252,8 @@ func (m *Model) applyTurnEvent(ev any) {
 
 // applySessionRecord folds the non-streaming session record events —
 // title, deletion, compaction, and compaction failure — that carry no
-// turn lifecycle.
-func (m *Model) applySessionRecord(ev any) {
+// turn lifecycle. It returns the cmd the fold arms, if any.
+func (m *Model) applySessionRecord(ev any) tea.Cmd {
 	switch e := ev.(type) {
 	case golemclient.SessionTitle:
 		if i := chosenIndex(m.sessions, e.Session); i >= 0 {
@@ -265,14 +266,32 @@ func (m *Model) applySessionRecord(ev any) {
 	case golemclient.SessionDeleted:
 		m.applySessionDeleted(e)
 	case golemclient.SessionForked:
-		m.applySessionForked(e)
+		return m.applySessionForked(e)
 	case golemclient.SessionCompacted:
 		m.applyCompacted(e)
 	case golemclient.CompactFailed:
 		m.applyCompactFailed(e)
+	case golemclient.Compacting:
+		return m.applyCompacting(e)
 	default:
 		// not a session record; nothing to fold
 	}
+
+	return nil
+}
+
+// applyCompacting folds the compaction announcement (ADR-0037): the
+// summary side call is running — up to 60 s with no other events — so
+// the status strip carries a live, animated state instead of a frozen
+// one, and esc/ctrl+c can interrupt the cancellable call (ADR-0025).
+// The next session_compacted, compact_failed, or turn terminal event on
+// this session resolves it.
+func (m *Model) applyCompacting(golemclient.Compacting) tea.Cmd {
+	m.compacting = true
+	m.spinFrame = 0
+	m.spinGen++ // orphan any open animation; this one is live
+
+	return armSpinTick(m.spinGen)
 }
 
 // applySessionForked folds the fork confirmation: the client switches
@@ -305,14 +324,19 @@ func (m *Model) applySessionForked(e golemclient.SessionForked) tea.Cmd {
 }
 
 // applyCompacted folds the compaction barrier confirmation: a dim
-// summary block lands in the transcript.
+// summary block lands in the transcript, and the compacting state
+// resolves (the side call announced by ADR-0037's event is done).
 func (m *Model) applyCompacted(e golemclient.SessionCompacted) {
+	m.compacting = false
 	m.blocks = append(m.blocks, blockDimCompacted(e))
 }
 
 // applyCompactFailed folds a failed compaction: an error block carrying
-// the reason; the transcript is otherwise untouched.
+// the reason; the transcript is otherwise untouched. The compacting
+// state resolves — a stranded announcement would leave the strip
+// spinning forever (ADR-0037).
 func (m *Model) applyCompactFailed(e golemclient.CompactFailed) {
+	m.compacting = false
 	m.blocks = append(m.blocks, block{
 		kind: blockError, text: "compact failed: " + e.Reason,
 	})
@@ -387,6 +411,7 @@ type replayTurn struct {
 	open         bool
 	streamedText bool
 	reasoned     bool
+	compacting   bool // the replay ends inside a compaction's side call
 	tool, args   string
 	done         *toolDone
 	retry        *retryInfo
@@ -431,6 +456,7 @@ func (m *Model) replayHistory(hist golemclient.History) {
 	m.turnActive = true
 	m.streamedText = live.streamedText
 	m.reasoned = live.reasoned
+	m.compacting = live.compacting
 	m.activeTool, m.activeArgs = live.tool, live.args
 	m.synthDone = live.done
 	m.retryState = live.retry
@@ -447,6 +473,11 @@ func (m *Model) foldReplayEvent(ev any, live replayTurn) replayTurn {
 	case golemclient.SessionCompacted:
 		m.blocks = append(m.blocks, blockDimCompacted(e))
 		return replayTurn{}
+	case golemclient.Compacting:
+		// The announcement precedes a barrier that never came (the
+		// replay ends mid-side-call): the busy session resumes inside
+		// the compaction (ADR-0037).
+		return replayTurn{open: true, compacting: true}
 	case golemclient.UserMessage:
 		m.blocks = append(m.blocks, block{kind: blockUser, text: e.Text})
 		return replayTurn{open: true} // a message opens its turn

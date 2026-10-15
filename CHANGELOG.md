@@ -7,6 +7,10 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — compactions announce themselves: `compacting` before the summary side call (2026-10-18, ADR-0037)
+
+- A new server→client event `compacting {session}` is emitted (and persisted) immediately before a compaction's summary side call starts — both the manual `/compact` path and the automatic pre-turn trigger (ADR-0025). Until now that bounded 60 s wait emitted nothing, so the TUI's status strip sat on a static idle dot and long sessions looked frozen at submit time. The strip now shows an animated `compacting context` state (below reasoning, above thinking), the tab dot reports working, and `esc`/`ctrl+c` interrupt the cancellable side call — previously unreachable in the pre-turn window. `golem chat` prints a progress line; busy-session replays ending on the announcement restore the state. The event folds to nothing in conversation state and resolves with the next `session_compacted`/`compact_failed`.
+
 ### Changed — interrupted turns render as a deliberate stop, not an error (2026-10-18, ADR-0036)
 
 - Pressing esc/ctrl+c during a running turn used to surface the

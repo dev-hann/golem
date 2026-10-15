@@ -59,6 +59,13 @@ func (m *Model) setExit(armed bool) {
 	m.input.Placeholder = chatPlaceholder
 }
 
+// interruptible reports whether an interrupt has something to stop: an
+// active turn, or a compaction's summary side call (cancellable with
+// the turn context — ADR-0025, surfaced by ADR-0037's announcement).
+func (m Model) interruptible() bool {
+	return m.turnActive || m.compacting
+}
+
 // ctrlC mirrors opencode's exit ladder: a live selection copies first,
 // an active turn interrupts, then the composer clears, and only a second
 // ctrl+c on an already-empty composer quits — the first press asks.
@@ -72,7 +79,7 @@ func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 		return m, m.copyText(text)
 	}
 
-	if m.turnActive && m.client != nil {
+	if m.interruptible() && m.client != nil {
 		return m, m.send(golemclient.Interrupt{
 			Type: golemclient.TypeInterrupt, Session: m.sessionID,
 		})
@@ -269,8 +276,9 @@ func (m Model) leaderKey(key tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m.updateChat(key)
 }
 
-// escKey clears a text selection, then interrupts an active turn; idle
-// presses do nothing (quitting is ctrl+c's job).
+// escKey clears a text selection, then interrupts an active turn or a
+// running compaction; idle presses do nothing (quitting is ctrl+c's
+// job).
 func (m Model) escKey() (tea.Model, tea.Cmd) {
 	if m.selectedText() != "" {
 		m.clearSelection()
@@ -279,7 +287,7 @@ func (m Model) escKey() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	if m.turnActive {
+	if m.interruptible() {
 		return m.ctrlC()
 	}
 

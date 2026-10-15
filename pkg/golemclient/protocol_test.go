@@ -75,6 +75,15 @@ func TestRoundTrip_AllServerEvents(t *testing.T) {
 	}
 }
 
+// Round-trip for the transient compaction announcement (ADR-0037).
+func TestRoundTrip_Compacting(t *testing.T) {
+	t.Parallel()
+
+	roundTrip(t, golemclient.Compacting{
+		Type: golemclient.TypeCompacting, Session: "s1",
+	})
+}
+
 func TestDecode_UnknownTypeReturnsEnvelope(t *testing.T) {
 	t.Parallel()
 	got, err := golemclient.Decode([]byte(`{"type":"future_thing","session":"s1"}`))

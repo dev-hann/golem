@@ -170,6 +170,8 @@ func drainCompaction(
 			}
 
 			switch e := ev.(type) {
+			case golemclient.Compacting:
+				stderr.printf("compacting context…\n")
 			case golemclient.SessionCompacted:
 				stderr.printf("context compacted (%d chars of summary)\n", len(e.Summary))
 
@@ -288,6 +290,10 @@ func renderChatEvent(
 		}
 
 		stderr.printf("%s %s\n", status, e.CallID)
+	case golemclient.Compacting:
+		// ADR-0037: the pre-turn auto-compaction announces itself — the
+		// 60 s side call would otherwise read as a stall.
+		stderr.printf("… compacting context\n")
 	case golemclient.ErrorEvent:
 		stderr.printf("error[%s]: %s\n", e.Code, e.Message)
 		return true

@@ -42,6 +42,7 @@ const (
 	TypeSessionCompacted = "session_compacted"
 	TypeCompactFailed    = "compact_failed"
 	TypeSessionForked    = "session_forked"
+	TypeCompacting       = "compacting"
 )
 
 // Error codes carried by ErrorEvent.Code (see docs/PROTOCOL.md's error
@@ -287,6 +288,17 @@ type CompactFailed struct {
 	Reason  string `json:"reason"`
 }
 
+// Compacting announces that a compaction's summary side call (ADR-0022
+// manual, ADR-0025 automatic) just started — emitted before the call so
+// clients render a live state across the bounded 60 s wait instead of a
+// frozen one (the retry announcement's rule, ADR-0037). Resolved by the
+// next session_compacted or compact_failed on the session. Persisted
+// and replayed; it carries no turn and folds to nothing.
+type Compacting struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+}
+
 // VersionQuery asks the server to identify its build (ServerHello).
 type VersionQuery struct {
 	Type string `json:"type"`
@@ -359,6 +371,7 @@ var decoders = map[string]decoder{ //nolint:lll // one line per type
 	TypeCompactSession:   typed[CompactSession],
 	TypeSessionCompacted: typed[SessionCompacted],
 	TypeCompactFailed:    typed[CompactFailed],
+	TypeCompacting:       typed[Compacting],
 	TypeForkSession:      typed[ForkSession],
 	TypeSessionForked:    typed[SessionForked],
 }

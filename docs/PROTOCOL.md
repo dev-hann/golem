@@ -127,19 +127,22 @@ The boundary is turn-granular (ADR-0034): `fork_session`'s optional `turn` names
 
 Fork titles follow opencode's rule: `"X (fork #N)"`, N = 1 + the max suffix among existing siblings with the same base; a parent already carrying a suffix forks as the next number of the same base. Copied lines include any `session_compacted` barriers, so compaction context rules (ADR-0022/0025/0030) apply to the child unchanged.
 
-### `session_compacted` / `compact_failed`
+### `session_compacted` / `compact_failed` / `compacting`
 
 Compaction (ADR-0022 manual, ADR-0025 automatic). `compact_session` asks the server to fold the session's history into a summary; the server runs a bounded provider side call, appends a `session_compacted` barrier record (append-only storage — never a rewrite), and confirms:
 
 ```json
 {"type":"compact_session","session":"01J..."}
+{"type":"compacting","session":"01J..."}
 {"type":"session_compacted","session":"01J...","summary":"Built the auth middleware; edit.go remains..."}
 {"type":"compact_failed","session":"01J...","reason":"summary call failed: 429 rate limited"}
 ```
 
 The barrier is a fold rule, not just a receipt: everything before it drops from the model's context, replaced by one synthesized user message carrying the summary. Title, turn count, and cwd survive. Replaying a session (`history`) includes the barrier — clients render the summary block where it happened. The fold rule scopes to the model's context only: the view keeps the turns before the barrier (they remain in the file and in `history` batches), because the transcript is the audit surface users scroll. Refused compaction requests (turn running, empty session) answer `error` with `invalid_request`.
 
-The server also compacts automatically (ADR-0025): before a `user_message` is appended and its turn starts, a folded history measuring at or above the configured byte threshold (`[session] auto_compact_bytes`, default 128 KiB; 0 disables) compacts through the exact same barrier path. Clients see the same `session_compacted` record before `turn_start`; a failed automatic attempt emits `compact_failed` with a reason prefixed `auto compaction skipped:` and the turn proceeds on the un-compacted history.
+`compacting` (ADR-0037) announces that the summary side call just started — emitted (and persisted) *before* the call, for both the manual and automatic paths, so a client watching the bounded 60 s wait renders a live state instead of a frozen one (the `retry` announcement's rule). It carries no `turn`, folds to nothing in conversation state, and resolves with the next `session_compacted` or `compact_failed` on the session; the automatic path's following `turn_start` also supersedes it. Replays of a busy session may end on it.
+
+The server also compacts automatically (ADR-0025): before a `user_message` is appended and its turn starts, a folded history measuring at or above the configured byte threshold (`[session] auto_compact_bytes`, default 128 KiB; 0 disables) compacts through the exact same barrier path. Clients see `compacting`, then the same `session_compacted` record, before `turn_start`; a failed automatic attempt emits `compact_failed` with a reason prefixed `auto compaction skipped:` and the turn proceeds on the un-compacted history.
 ### Version handshake
 
 `version_query` asks the running server to identify its build; `server_hello` answers. The launcher uses this to detect (and restart) a stale detached server — a server that cannot answer is treated as outdated.

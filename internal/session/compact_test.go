@@ -131,6 +131,34 @@ func TestFold_BarrierWithoutPriorHistoryFoldsSummary(t *testing.T) {
 	}
 }
 
+// ADR-0037: the persisted compacting announcement folds to nothing —
+// it is client-facing progress, not conversation state. The barrier it
+// precedes does all the work.
+func TestFold_CompactingAnnouncementChangesNoState(t *testing.T) {
+	t.Parallel()
+
+	store := newStore(t, 4)
+	sess := mustCreate(t, store)
+
+	appendEvents(t, store, sess.ID, textTurn("q1", "a1")...)
+	appendEvents(t, store, sess.ID,
+		map[string]any{"type": "compacting", "session": "x"})
+	appendEvents(t, store, sess.ID, compactedRecord("SUMMARY"))
+
+	got, err := reopenStore(t, store).Get(sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	if len(got.Messages) != 1 || got.Messages[0].Text != "[Context summary]\nSUMMARY" {
+		t.Fatalf("messages = %+v, want the bare summary (announcement folded to nothing)",
+			got.Messages)
+	}
+	if got.Turns != 1 {
+		t.Errorf("turns = %d, want the pre-announcement count", got.Turns)
+	}
+}
+
 // mustCreate starts a session or fails the test.
 func mustCreate(t *testing.T, store *session.Store) *session.Session {
 	t.Helper()

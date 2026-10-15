@@ -69,7 +69,7 @@ func (s *Server) handleCompact(writer *connWriter, ev golemclient.CompactSession
 		return
 	}
 
-	record, err := s.compactSession(context.Background(), ev.Session, sess)
+	record, err := s.compactSession(context.Background(), writer, ev.Session, sess)
 	if err != nil {
 		// The session is untouched — no barrier record was appended.
 		writer.send(golemclient.CompactFailed{
@@ -112,7 +112,7 @@ func (s *Server) autoCompact(ctx context.Context, writer *connWriter, sessionID 
 		return
 	}
 
-	record, err := s.compactSession(ctx, sessionID, sess)
+	record, err := s.compactSession(ctx, writer, sessionID, sess)
 	if err != nil {
 		// An interrupt cancelled the summary side call: the compaction
 		// never happened, and a "skipped" notice after the user's stop
@@ -133,17 +133,28 @@ func (s *Server) autoCompact(ctx context.Context, writer *connWriter, sessionID 
 	writer.send(record)
 }
 
-// compactSession summarizes a session's folded history and appends the
-// session_compacted barrier record (the shared body of the manual and
-// automatic paths, ADR-0022/ADR-0025). ctx bounds the side call — for the
-// automatic path it is the turn context, so an interrupt cancels an
-// in-flight summary; the manual path passes Background. The cache is
-// invalidated so the next Get folds from disk.
+// compactSession announces the compaction (ADR-0037), summarizes a
+// session's folded history, and appends the session_compacted barrier
+// record (the shared body of the manual and automatic paths,
+// ADR-0022/ADR-0025). ctx bounds the side call — for the automatic path
+// it is the turn context, so an interrupt cancels an in-flight summary;
+// the manual path passes Background. The announcement is persisted and
+// emitted before the side call starts, so a client watching the bounded
+// 60 s call renders a live state instead of a frozen one (the retry
+// announcement's rule); session_compacted or compact_failed resolves it.
 func (s *Server) compactSession(
 	ctx context.Context,
+	writer *connWriter,
 	sessionID string,
 	sess *session.Session,
 ) (golemclient.SessionCompacted, error) {
+	announce := golemclient.Compacting{Type: golemclient.TypeCompacting, Session: sessionID}
+	if err := s.cfg.Store.Append(sessionID, announce); err != nil {
+		return golemclient.SessionCompacted{}, err
+	}
+
+	writer.send(announce)
+
 	summary, err := s.summarizeForCompact(ctx, sessionID, sess)
 	if err != nil {
 		return golemclient.SessionCompacted{}, err

@@ -2,8 +2,10 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/server"
@@ -168,6 +170,135 @@ func TestCompact_RejectedWhileTurnRunning(t *testing.T) {
 	h.expectType(golemclient.TypeTurnEnd)
 }
 
+// TestCompact_AnnouncesCompactingBeforeSideCall pins ADR-0037's client
+// visibility rule: the server emits `compacting` before the summary
+// side call starts, so a client watching a 60 s compaction renders a
+// live state instead of a frozen one (the retry announcement's rule).
+// The announcement precedes session_compacted (manual) and, in the
+// automatic path, turn_start.
+func TestCompact_AnnouncesCompactingBeforeSideCall(t *testing.T) {
+	t.Parallel()
+
+	provider := &compactProvider{
+		scriptedProvider: scriptedProvider{rounds: [][]llm.Event{
+			{{Type: llm.EventTextDelta, Delta: "first answer"}},
+			{{Type: llm.EventTextDelta, Delta: "second answer"}},
+		}},
+		summaryEvents: []llm.Event{{Type: llm.EventTextDelta, Delta: "THE SUMMARY"}},
+	}
+	h := newHarness(t, provider)
+	sess := h.createSessionTracked()
+
+	h.runTurn(t, "first question")
+
+	// The side call blocks until released; the announcement must arrive
+	// while it is still in flight.
+	started := make(chan struct{})
+	release := make(chan struct{})
+	provider.summaryOverride = func(context.Context) (<-chan llm.Event, error) {
+		close(started)
+
+		out := make(chan llm.Event, 1)
+		go func() {
+			<-release
+			out <- llm.Event{Type: llm.EventTextDelta, Delta: "THE SUMMARY"}
+			close(out)
+		}()
+
+		return out, nil
+	}
+
+	if err := h.client.Send(golemclient.CompactSession{
+		Type: golemclient.TypeCompactSession, Session: sess,
+	}); err != nil {
+		t.Fatalf("send compact_session: %v", err)
+	}
+
+	announced := h.expectType(golemclient.TypeCompacting).(golemclient.Compacting)
+	if announced.Session != sess {
+		t.Errorf("compacting session = %q, want %q", announced.Session, sess)
+	}
+
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("side call never started after the announcement")
+	}
+
+	close(release)
+
+	compacted := h.expectType(golemclient.TypeSessionCompacted).(golemclient.SessionCompacted)
+	if compacted.Summary != "THE SUMMARY" {
+		t.Errorf("summary = %q, want THE SUMMARY", compacted.Summary)
+	}
+
+	// The announcement is persisted ahead of its barrier, so replay
+	// renders the announcement → summary pair in order.
+	raw, err := h.store.RawEvents(sess)
+	if err != nil {
+		t.Fatalf("RawEvents: %v", err)
+	}
+
+	order := []string{}
+
+	for _, line := range raw {
+		var env struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(line, &env); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+
+		if env.Type == golemclient.TypeCompacting || env.Type == golemclient.TypeSessionCompacted {
+			order = append(order, env.Type)
+		}
+	}
+
+	want := []string{golemclient.TypeCompacting, golemclient.TypeSessionCompacted}
+	if len(order) != len(want) || order[0] != want[0] || order[1] != want[1] {
+		t.Errorf("stored compaction order = %v, want %v", order, want)
+	}
+}
+
+// TestAutoCompact_AnnouncesCompactingBeforeTurn pins the automatic
+// path: a history over the threshold announces compacting before the
+// side call and before turn_start.
+func TestAutoCompact_AnnouncesCompactingBeforeTurn(t *testing.T) {
+	t.Parallel()
+
+	provider := &compactProvider{
+		scriptedProvider: scriptedProvider{rounds: [][]llm.Event{compactTurnEvents}},
+		summaryEvents:    []llm.Event{{Type: llm.EventTextDelta, Delta: "SUMMARY-OF-PAST"}},
+	}
+	h := newHarnessWithConfig(t, provider, server.Config{
+		AutoCompactBytes: server.DefaultAutoCompactBytes,
+	})
+	id := h.createSessionTracked()
+
+	appendWire(t, h, id, []string{
+		`{"type":"user_message","text":"` + giantText("q") + `"}`,
+		`{"type":"text_delta","delta":"` + giantText("a") + `"}`,
+		`{"type":"turn_end","usage":{"input_tokens":1,"output_tokens":1}}`,
+	})
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: id, Text: "fresh question",
+	}); err != nil {
+		t.Fatalf("send user_message: %v", err)
+	}
+
+	// compacting must be the first event of the turn pipeline, ahead of
+	// the barrier and turn_start.
+	ev := h.expectType(golemclient.TypeCompacting)
+	if e, ok := ev.(golemclient.Compacting); !ok || e.Session != id {
+		t.Errorf("first pipeline event = %#v, want compacting for %q", ev, id)
+	}
+
+	h.expectType(golemclient.TypeSessionCompacted)
+	h.expectType(golemclient.TypeTurnStart)
+	h.expectType(golemclient.TypeTurnEnd)
+}
+
 func TestCompact_RejectedOnEmptySession(t *testing.T) {
 	t.Parallel()
 
@@ -200,6 +331,10 @@ func TestCompact_FailedSideCallEmitsCompactFailed(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("send compact_session: %v", err)
 	}
+
+	// The announcement precedes the failure: the client learned the
+	// compaction started before it learned it failed (ADR-0037).
+	h.expectType(golemclient.TypeCompacting)
 
 	failed := h.expectType(golemclient.TypeCompactFailed).(golemclient.CompactFailed)
 	if failed.Reason == "" {

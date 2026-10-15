@@ -30,12 +30,21 @@ func TestChat_CompactCommand(t *testing.T) {
 			wantOut: "context compacted",
 		},
 		{
+			name:    "compaction announces itself before resolving",
+			stdin:   "hello\n/compact\n/quit\n",
+			wantOut: "compacting context…",
+		},
+		{
 			name:     "compact before any message is refused",
 			stdin:    "/compact\n/quit\n",
 			wantNone: "context compacted",
 		},
+		{
+			name:     "refusal before any message never announces",
+			stdin:    "/compact\n/quit\n",
+			wantNone: "compacting context…",
+		},
 	}
-
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

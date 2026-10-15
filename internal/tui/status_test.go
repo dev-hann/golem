@@ -641,6 +641,19 @@ func TestStatus_ResumeBusySessionRestoresDetailedState(t *testing.T) {
 			},
 			want: "reasoning",
 		},
+		{
+			// ADR-0037: a busy session resumed while the pre-turn
+			// compaction's summary side call runs (the announcement is
+			// the replay's last line) restores the compacting state.
+			name: "compacting after the announcement",
+			lines: []string{
+				`{"type":"user_message","session":"s1","text":"hi"}`,
+				`{"type":"text_delta","session":"s1","turn":"t0","delta":"answer"}`,
+				`{"type":"turn_end","session":"s1","turn":"t0","usage":{"input_tokens":1,"output_tokens":1}}`,
+				`{"type":"compacting","session":"s1"}`,
+			},
+			want: "compacting",
+		},
 	}
 
 	for _, tt := range tests {
@@ -698,5 +711,117 @@ func TestStatus_ResumeIdleSessionStaysIdle(t *testing.T) {
 	}
 	if !strings.Contains(m.statusLine(), "200") {
 		t.Errorf("idle status should carry the replay's last usage, got %q", m.statusLine())
+	}
+}
+
+// ADR-0037: the compacting announcement renders a live state while the
+// summary side call runs — manual /compact (idle → compacting → back to
+// idle on the barrier) and the automatic pre-turn path (compacting while
+// awaiting turn_start) both spend up to 60 s with no other events; the
+// strip must animate that window instead of reading as a stall.
+func TestStatus_CompactingRendersLiveState(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		armed bool // turn already active (automatic pre-turn path)
+	}{
+		{name: "manual compact from idle"},
+		{name: "automatic pre-turn", armed: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m, _ := wired(t)
+			m = resize(m, 100, 40)
+
+			if tc.armed {
+				m = deliver(t, m, golemclient.TurnStart{
+					Type: golemclient.TypeTurnStart, Provider: "zai", Model: "glm-5.3",
+				})
+			}
+
+			line := statusAfter(t, &m, golemclient.Compacting{
+				Type: golemclient.TypeCompacting, Session: "s1",
+			})
+
+			for _, want := range []string{"compacting", "context"} {
+				if !strings.Contains(line, want) {
+					t.Errorf("%s: strip should mention %q, got %q", tc.name, want, line)
+				}
+			}
+
+			if strings.Contains(line, "●") {
+				t.Errorf("%s: live strip must drop the static dot, got %q", tc.name, line)
+			}
+
+			// The strip animates while the side call runs.
+			next, _ := m.Update(spinTickMsg{gen: m.spinGen})
+			m2 := next.(Model)
+			if got := strings.Join(strings.Fields(m2.statusLine()), " "); !strings.Contains(got, kit.SpinnerFrames()[1]) {
+				t.Errorf("%s: tick should advance the spinner, got %q", tc.name, got)
+			}
+
+			// The barrier resolves the state: back to idle (manual) or
+			// on to thinking (automatic).
+			var resolved string
+
+			if tc.armed {
+				resolved = statusAfter(t, &m2, golemclient.TurnStart{
+					Type: golemclient.TypeTurnStart,
+				})
+			} else {
+				resolved = statusAfter(t, &m2, golemclient.SessionCompacted{
+					Type: golemclient.TypeSessionCompacted, Session: "s1", Summary: "S",
+				})
+			}
+
+			if strings.Contains(resolved, "compacting") {
+				t.Errorf("%s: resolved strip must leave compacting, got %q", tc.name, resolved)
+			}
+		})
+	}
+}
+
+// The compacting state accepts an interrupt — the summary side call is
+// cancellable (ADR-0025) and the user needs a visible way to stop it.
+func TestStatus_CompactingEscInterrupts(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+
+	m = deliver(t, m, golemclient.Compacting{
+		Type: golemclient.TypeCompacting, Session: "s1",
+	})
+	_ = key(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+
+	if _, ok := lastSent(t, fc).(golemclient.Interrupt); !ok {
+		t.Errorf("esc during compacting should send Interrupt, got %#v", lastSent(t, fc))
+	}
+}
+
+// compact_failed must clear the compacting state, not strand the strip
+// announcing a compaction that never lands (ADR-0037).
+func TestStatus_CompactFailedClearsCompacting(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+
+	m = deliver(t, m, golemclient.Compacting{
+		Type: golemclient.TypeCompacting, Session: "s1",
+	})
+	line := statusAfter(t, &m, golemclient.CompactFailed{
+		Type: golemclient.TypeCompactFailed, Session: "s1", Reason: "down",
+	})
+
+	if strings.Contains(line, "compacting") {
+		t.Errorf("compact_failed must clear the compacting state, got %q", line)
+	}
+	if !strings.Contains(line, "●") {
+		t.Errorf("idle strip expected after a failed compaction, got %q", line)
 	}
 }
