@@ -161,8 +161,13 @@ func handleStreamEvent(
 			if acc, ok := tools[ev.Index]; ok {
 				acc.args.WriteString(ev.Delta.PartialJSON)
 			}
+		case "thinking_delta":
+			// Extended thinking streams as its own delta kind. The TUI
+			// renders only a state from it (reasoning); the content stays
+			// unforwarded to the conversation.
+			send(llm.Event{Type: llm.EventThinkingDelta, Delta: ev.Delta.Thinking})
 		default:
-			// thinking/citations deltas are not forwarded in this phase.
+			// citations deltas are not forwarded in this phase.
 		}
 	case "message_delta":
 		*usage = llm.Event{

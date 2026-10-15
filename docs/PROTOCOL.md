@@ -132,7 +132,9 @@ Emitted in order during a turn. All carry `turn`.
 | Type | Fields | Meaning |
 |---|---|---|
 | `turn_start` | `provider`, `model` | Turn began |
+| `thinking_delta` | — | Model is reasoning (extended thinking). No content on the wire — the event exists so clients can render a reasoning state; reasoning text is never streamed, stored, or replayed |
 | `text_delta` | `delta` | Assistant text chunk (append) |
+| `retry` | `attempt`, `retries`, `delay_ms` | Server is about to retry the provider (`attempt` of at most `retries`, after sleeping `delay_ms`). Emitted before the wait so clients can render a retrying state instead of a frozen one |
 | `tool_call_start` | `call_id`, `tool`, `args` | Tool invocation; `args` is the parsed JSON object |
 | `tool_call_end` | `call_id`, `ok`, `result` | Tool finished. Failures carry the error text in `result`; `result` truncated to 16 KiB display budget |
 | `error` | `code`, `message` | Recoverable error within the turn (tool failures already reported via `tool_call_end`; this is loop/provider level) |
@@ -142,7 +144,9 @@ Examples:
 
 ```json
 {"type":"turn_start","session":"01J...","turn":"01J...","provider":"anthropic","model":"claude-opus-5"}
+{"type":"thinking_delta","session":"01J...","turn":"01J..."}
 {"type":"text_delta","session":"01J...","turn":"01J...","delta":"Reading the test file.\n"}
+{"type":"retry","session":"01J...","turn":"01J...","attempt":2,"retries":6,"delay_ms":4000}
 {"type":"tool_call_start","session":"01J...","turn":"01J...","call_id":"tc_1","tool":"read","args":{"path":"internal/tools/edit.go"}}
 {"type":"tool_call_end","session":"01J...","turn":"01J...","call_id":"tc_1","ok":true,"result":"package tools..."}
 {"type":"turn_end","session":"01J...","turn":"01J...","usage":{"input_tokens":4211,"output_tokens":380}}

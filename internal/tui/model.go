@@ -75,6 +75,9 @@ type Model struct {
 	activeArgs      string            // raw args of the in-flight tool call
 	lastUsage       golemclient.Usage // usage of the most recent completed turn
 	streamedText    bool              // any TextDelta seen this turn (thinking vs responding)
+	reasoned        bool              // any ThinkingDelta seen this turn (reasoning state)
+	retryState      *retryInfo        // live provider retry, nil when none runs
+	synthDone       *toolDone         // last ToolCallEnd while synthesizing follows-up
 	metaBusy        bool              // the loaded session's live busy flag (session_meta)
 }
 
@@ -1156,6 +1159,10 @@ func sessionOf(ev any) string {
 		return e.Session
 	case golemclient.TextDelta:
 		return e.Session
+	case golemclient.ThinkingDelta:
+		return e.Session
+	case golemclient.Retry:
+		return e.Session
 	case golemclient.ToolCallStart:
 		return e.Session
 	case golemclient.ToolCallEnd:
@@ -1212,18 +1219,31 @@ func (m *Model) applyEvent(ev any) tea.Cmd {
 		m.provider = e.Provider
 		m.modelName = e.Model
 		m.streamedText = false
+		m.reasoned = false
+		m.retryState = nil
 		m.activeTool, m.activeArgs = "", ""
+		m.synthDone = nil
 	case golemclient.TextDelta:
 		m.appendToAssistant(e.Delta)
 		m.streamedText = true
+		m.retryState = nil // a retry only precedes first content
+		m.synthDone = nil  // the model's follow-up has begun
+	case golemclient.ThinkingDelta:
+		m.reasoned = true
+		m.retryState = nil
+	case golemclient.Retry:
+		m.retryState = &retryInfo{Attempt: e.Attempt, Retries: e.Retries, DelayMs: e.DelayMs}
 	case golemclient.ToolCallStart:
 		m.blocks = append(m.blocks, block{
 			kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
 		})
 		m.activeTool, m.activeArgs = e.Tool, string(e.Args)
+		m.synthDone = nil
 	case golemclient.ToolCallEnd:
 		m.finishToolBlock(e)
+		m.synthDone = &toolDone{Tool: m.activeTool, OK: e.OK}
 		m.activeTool, m.activeArgs = "", ""
+		m.retryState = nil
 	case golemclient.ErrorEvent:
 		m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
 		m.endTurn()
@@ -1309,6 +1329,9 @@ func (m *Model) endTurn() {
 	m.turnActive = false
 	m.activeTool, m.activeArgs = "", ""
 	m.streamedText = false
+	m.reasoned = false
+	m.retryState = nil
+	m.synthDone = nil
 }
 
 // applySessionList stores a session list and, when it was explicitly
@@ -1414,7 +1437,10 @@ func (m *Model) finishToolBlock(end golemclient.ToolCallEnd) {
 type replayTurn struct {
 	open         bool
 	streamedText bool
+	reasoned     bool
 	tool, args   string
+	done         *toolDone
+	retry        *retryInfo
 }
 
 // replayHistory rebuilds the transcript from a history event batch.
@@ -1462,15 +1488,21 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 			m.appendToAssistant(e.Delta)
 
 			live.streamedText = true
+		case golemclient.ThinkingDelta:
+			live.reasoned = true
+		case golemclient.Retry:
+			live.retry = &retryInfo{Attempt: e.Attempt, Retries: e.Retries, DelayMs: e.DelayMs}
 		case golemclient.ToolCallStart:
 			m.blocks = append(m.blocks, block{
 				kind: blockTool, callID: e.CallID, tool: e.Tool, args: string(e.Args),
 			})
 
 			live.tool, live.args = e.Tool, string(e.Args)
+			live.done = nil
 		case golemclient.ToolCallEnd:
 			m.finishToolBlock(e)
 
+			live.done = &toolDone{Tool: live.tool, OK: e.OK}
 			live.tool, live.args = "", ""
 		case golemclient.ErrorEvent:
 			m.blocks = append(m.blocks, block{kind: blockError, text: e.Message})
@@ -1495,7 +1527,10 @@ func (m *Model) replayHistory(hist golemclient.History) tea.Cmd {
 
 	m.turnActive = true
 	m.streamedText = live.streamedText
+	m.reasoned = live.reasoned
 	m.activeTool, m.activeArgs = live.tool, live.args
+	m.synthDone = live.done
+	m.retryState = live.retry
 
 	return nil
 }
@@ -1594,15 +1629,30 @@ func padScreen(body string) string {
 // statusLine renders the agent-state strip: what the turn is doing (or
 // the model and last usage while idle). The interrupt hint lives on the
 // key itself, not in the strip.
+//
+// States, in priority order: a live retry outranks everything (its stall
+// is the thing needing explanation), then the in-flight tool, then
+// synthesizing (results back at the model), then reasoning, responding,
+// thinking. Reasoned-then-text shows responding — the answer has begun.
 func (m Model) statusLine() string {
 	left, token := "● idle", kit.Dim
 
 	switch {
+	case m.turnActive && m.retryState != nil:
+		left = fmt.Sprintf("↻ retrying %d/%d · %s",
+			m.retryState.Attempt, m.retryState.Retries, shortDur(m.retryState.DelayMs))
+		token = kit.Warn
 	case m.turnActive && m.activeTool != "":
 		left = "◆ " + m.activeTool + " — " + argSummary(m.activeTool, m.activeArgs)
 		token = kit.Tool
+	case m.turnActive && m.synthDone != nil:
+		left = "◆ " + synthMark(m.synthDone) + " · working"
+		token = kit.Accent
 	case m.turnActive && m.streamedText:
 		left = "● responding"
+		token = kit.Accent
+	case m.turnActive && m.reasoned:
+		left = "◐ reasoning"
 		token = kit.Accent
 	case m.turnActive:
 		left = "● thinking"
@@ -1615,6 +1665,38 @@ func (m Model) statusLine() string {
 	}
 
 	return m.kit.StatusBar(m.vp.Width, left, token)
+}
+
+// retryInfo snapshots one announced provider retry.
+type retryInfo struct {
+	Attempt, Retries, DelayMs int
+}
+
+// toolDone remembers the last ToolCallEnd while the turn waits for the
+// model's follow-up — the synthesizing state's summary line.
+type toolDone struct {
+	Tool string
+	OK   bool
+}
+
+// synthMark renders the synthesizing summary: the finished tool's outcome
+// glyph and name.
+func synthMark(d *toolDone) string {
+	mark := "✓"
+	if !d.OK {
+		mark = "✗"
+	}
+
+	return mark + " " + d.Tool
+}
+
+// shortDur renders a backoff milliseconds count compactly (4s, 1.5s).
+func shortDur(ms int) string {
+	if ms%1000 == 0 {
+		return fmt.Sprintf("%ds", ms/1000)
+	}
+
+	return fmt.Sprintf("%.1fs", float64(ms)/1000)
 }
 
 // usageSummary renders the last turn's token counts, or "" before the

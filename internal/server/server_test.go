@@ -1020,3 +1020,55 @@ func TestServer_DeleteSessionCancelsRunningTurn(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// llm.Retrying emits EventRetry before each backoff sleep; the server must
+// forward it as a wire `retry` event so a connected client can render a
+// retrying state instead of a frozen thinking one.
+func TestServer_RetryEventReachesClient(t *testing.T) {
+	t.Parallel()
+
+	inner := &scriptedProvider{rounds: [][]llm.Event{
+		{
+			{Type: llm.EventError, Err: llm.MarkTransient(errors.New("429 rate limited"))},
+		},
+		{
+			{Type: llm.EventTextDelta, Delta: "recovered"},
+			{Type: llm.EventUsage, InputTokens: 7, OutputTokens: 3},
+		},
+	}}
+
+	// Sleep short-circuits so the test never waits the real backoff.
+	policy := llm.DefaultRetryPolicy()
+	policy.Sleep = func(ctx context.Context, d time.Duration) bool { return true }
+
+	h := newHarness(t, llm.Retrying(inner, policy))
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "hi",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	if _, ok := h.expectType(golemclient.TypeTurnStart).(golemclient.TurnStart); !ok {
+		t.Fatal("expected turn_start")
+	}
+
+	retry, ok := h.expectType(golemclient.TypeRetry).(golemclient.Retry)
+	if !ok {
+		t.Fatal("expected a retry event before the retried attempt")
+	}
+
+	if retry.Attempt != 1 || retry.Retries != 6 || retry.DelayMs != 1000 {
+		t.Errorf("retry = %+v, want attempt 1/6 delay 1000ms", retry)
+	}
+
+	delta := h.expectType(golemclient.TypeTextDelta).(golemclient.TextDelta)
+	if delta.Delta != "recovered" {
+		t.Errorf("text_delta = %+v, want the retried round's stream", delta)
+	}
+
+	if _, ok := h.expectType(golemclient.TypeTurnEnd).(golemclient.TurnEnd); !ok {
+		t.Fatal("expected turn_end")
+	}
+}

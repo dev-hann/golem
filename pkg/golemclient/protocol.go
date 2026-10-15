@@ -29,6 +29,8 @@ const (
 	TypeSessionList      = "session_list"
 	TypeTurnStart        = "turn_start"
 	TypeTextDelta        = "text_delta"
+	TypeThinkingDelta    = "thinking_delta"
+	TypeRetry            = "retry"
 	TypeToolCallStart    = "tool_call_start"
 	TypeToolCallEnd      = "tool_call_end"
 	TypeError            = "error"
@@ -134,6 +136,29 @@ type TextDelta struct {
 	Session string `json:"session"`
 	Turn    string `json:"turn"`
 	Delta   string `json:"delta"`
+}
+
+// ThinkingDelta reports that the model is reasoning (extended thinking).
+// The content is intentionally empty on the wire: the event exists to let
+// clients render a distinct reasoning state; reasoning text is never
+// streamed, stored, or replayed.
+type ThinkingDelta struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Turn    string `json:"turn"`
+}
+
+// Retry announces an upcoming provider retry: which retry runs, the policy
+// cap, and the backoff the server is about to sleep. Emitted before the
+// wait so clients can render a retrying state instead of a frozen one
+// (the pre-content retry ladder can stall for ~61s).
+type Retry struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+	Turn    string `json:"turn"`
+	Attempt int    `json:"attempt"`
+	Retries int    `json:"retries"`
+	DelayMs int    `json:"delay_ms"`
 }
 
 // ToolCallStart announces a tool invocation.
@@ -277,6 +302,8 @@ var decoders = map[string]decoder{ //nolint:lll // one line per type
 	TypeSessionList:      typed[SessionList],
 	TypeTurnStart:        typed[TurnStart],
 	TypeTextDelta:        typed[TextDelta],
+	TypeThinkingDelta:    typed[ThinkingDelta],
+	TypeRetry:            typed[Retry],
 	TypeToolCallStart:    typed[ToolCallStart],
 	TypeToolCallEnd:      typed[ToolCallEnd],
 	TypeError:            typed[ErrorEvent],

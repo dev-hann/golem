@@ -508,6 +508,15 @@ func (s *Server) wireEvent(sessionID, turnID, model string, event agent.Event) a
 		return golemclient.TextDelta{
 			Type: golemclient.TypeTextDelta, Session: sessionID, Turn: turnID, Delta: event.Delta,
 		}
+	case agent.EventThinkingDelta:
+		return golemclient.ThinkingDelta{
+			Type: golemclient.TypeThinkingDelta, Session: sessionID, Turn: turnID,
+		}
+	case agent.EventRetry:
+		return golemclient.Retry{
+			Type: golemclient.TypeRetry, Session: sessionID, Turn: turnID,
+			Attempt: event.Attempt, Retries: event.Retries, DelayMs: event.DelayMs,
+		}
 	case agent.EventToolCallStart:
 		return golemclient.ToolCallStart{
 			Type: golemclient.TypeToolCallStart, Session: sessionID, Turn: turnID,

@@ -7,6 +7,37 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — status line detail states: reasoning, synthesizing, retrying (2026-10-15)
+
+- The agent status line now distinguishes five in-turn states instead of
+  three. Two additive wire events drive the new ones; everything is
+  forward-compatible (unknown types are skipped per PROTOCOL.md).
+  - `thinking` — first token pending, as before (`turn_start`).
+  - `◐ reasoning` — the model streams extended thinking
+    (`thinking_delta`, new; anthropic adapter forwards its
+    `thinking_delta` SSE kind as the event — content-free by design:
+    reasoning text is never streamed, stored, or replayed).
+  - `responding` — assistant text streaming (`text_delta`), as before.
+    Reasoning followed by text shows responding — the answer began.
+  - `◆ tool — arg` — tool running (`tool_call_start`), as before.
+  - `◆ ✓/✗ tool · working` — synthesizing: the last tool finished
+    (outcome mark) and the results are back at the model
+    (`tool_call_end` until the next delta or start). Previously this
+    window rendered a lying `responding`.
+  - `↻ retrying n/N · wait` — the provider call failed transiently and
+    the server announced an upcoming retry (`retry`, new:
+    `attempt`/`retries`/`delay_ms`). The pre-content retry ladder can
+    stall for ~61s; until now that whole window rendered a frozen
+    `thinking`. A live retry outranks every other state while it runs;
+    the next content event clears it.
+- A busy session resumed mid-turn restores the detailed state from the
+  replay: a trailing `tool_call_end` resumes as synthesizing, a trailing
+  `thinking_delta` as reasoning (the fold skips both event types, so
+  conversation state is unaffected).
+- `internal/llm`: `Event` grows `Attempt`/`Retries`/`DelayMs` and a
+  content-free `thinking_delta` type; `Retrying` emits `EventRetry`
+  before each backoff sleep.
+
 ### Changed — status line drops the elapsed-seconds counter (2026-10-15)
 
 - The active-turn status no longer shows a turn timer. The count reset to

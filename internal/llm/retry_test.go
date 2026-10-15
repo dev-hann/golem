@@ -118,8 +118,22 @@ func TestRetrying_PreContentFailuresAreRetried(t *testing.T) {
 		t.Fatalf("transient pre-content failures must be retried: %+v", events)
 	}
 
-	if len(events) != 2 || events[0].Delta != "hello" {
-		t.Errorf("events = %+v, want the successful round's stream", events)
+	// Each retry announces itself before sleeping: 2 failures → 2 retry
+	// events, then the successful round's stream.
+	if len(events) != 4 {
+		t.Fatalf("events = %+v, want 2 retry announcements + text + usage", events)
+	}
+
+	for i, want := range []int{1, 2} {
+		ev := events[i]
+		if ev.Type != llm.EventRetry || ev.Attempt != want || ev.Retries != 6 ||
+			ev.DelayMs != want*1000 {
+			t.Errorf("events[%d] = %+v, want retry attempt %d (cap 6, %dms)", i, ev, want, want*1000)
+		}
+	}
+
+	if events[2].Delta != "hello" {
+		t.Errorf("events = %+v, want the successful round's stream after the retries", events)
 	}
 
 	want := []time.Duration{time.Second, 2 * time.Second}

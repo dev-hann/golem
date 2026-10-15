@@ -116,6 +116,17 @@ func (r *retryingProvider) loop(ctx context.Context, req Request, out chan<- Eve
 	for attempt := 0; ; attempt++ {
 		if attempt > 0 {
 			delay := min(r.policy.Backoff<<(attempt-1), r.policy.MaxBackoff)
+
+			// Announce the wait so clients can render a retrying state
+			// instead of a frozen one (the pre-content window can reach
+			// ~61s; a silent stall reads as a hang).
+			if !send(Event{
+				Type: EventRetry, Attempt: attempt, Retries: r.policy.Retries,
+				DelayMs: int(delay / time.Millisecond),
+			}) {
+				return
+			}
+
 			if !r.policy.Sleep(ctx, delay) {
 				send(Event{Type: EventError, Err: fmt.Errorf("retry wait: %w", ctx.Err())})
 
