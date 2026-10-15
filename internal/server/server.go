@@ -163,6 +163,8 @@ func (s *Server) dispatch(_ net.Conn, writer *connWriter, event any) bool {
 		s.handleDeleteSession(writer, ev)
 	case golemclient.CompactSession:
 		s.handleCompact(writer, ev)
+	case golemclient.ForkSession:
+		s.handleForkSession(writer, ev)
 	case golemclient.VersionQuery:
 		writer.send(golemclient.ServerHello{
 			Type: golemclient.TypeServerHello, Version: s.cfg.Version,

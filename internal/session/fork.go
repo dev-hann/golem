@@ -263,17 +263,7 @@ func (s *Store) writeForkChild(
 		return nil
 	}
 
-	if err := emit(map[string]any{
-		"type": "session_meta", "session": childID,
-		"cwd": cwd, "created": ulidTime(childID).UTC().Format(time.RFC3339),
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := emit(map[string]any{
-		"type": "session_forked", "session": childID,
-		"parent": parentID, "through_turn": throughTurn,
-	}); err != nil {
+	if err := forkHeaders(emit, childID, parentID, throughTurn, cwd); err != nil {
 		return nil, err
 	}
 
@@ -299,10 +289,38 @@ func (s *Store) writeForkChild(
 
 	committed = true
 
-	s.cache[childID] = &cacheEntry{fold: fold, lastUsed: time.Now()}
+	// ADR-0029 contract: the entry's frontier must sit at the file's end
+	// so the next Get folds only new lines — every written line is
+	// already folded into the live folder.
+	info, err := os.Stat(childPath)
+	if err != nil {
+		return nil, fmt.Errorf("session: stating %s: %w", childPath, err)
+	}
+
+	s.cache[childID] = &cacheEntry{fold: fold, offset: info.Size(), lastUsed: time.Now()}
 	s.evictLocked()
 
 	return sessionFromFolder(childID, fold), nil
+}
+
+// forkHeaders emits the child's two leading records: its own meta
+// header (fresh id, the parent's cwd) and the session_forked lineage
+// record naming the parent and the boundary turn.
+func forkHeaders(
+	emit func(map[string]any) error,
+	childID, parentID, throughTurn, cwd string,
+) error {
+	if err := emit(map[string]any{
+		"type": "session_meta", "session": childID,
+		"cwd": cwd, "created": ulidTime(childID).UTC().Format(time.RFC3339),
+	}); err != nil {
+		return err
+	}
+
+	return emit(map[string]any{
+		"type": "session_forked", "session": childID,
+		"parent": parentID, "through_turn": throughTurn,
+	})
 }
 
 // copyForkLines streams the parent's lines 0..boundary to the child,
