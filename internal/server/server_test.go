@@ -21,14 +21,16 @@ import (
 // scriptedProvider streams queued rounds; streamFn overrides per-round
 // behavior (used for hang/gate scenarios). Title side calls get a canned
 // stream without consuming a round — titleEvents overrides that stream
-// (failure scenarios), and titleFailures fails the first N title calls
-// before that override applies (retry scenarios).
+// (failure scenarios), titleFailures fails the first N title calls
+// before that override applies (retry scenarios), and titleGate holds a
+// title stream closed until released (latency scenarios).
 type scriptedProvider struct {
 	next          int
 	rounds        [][]llm.Event
 	titleEvents   []llm.Event
 	titleFailures int
 	titleCalls    int
+	titleGate     chan struct{}
 	streamFn      func(ctx context.Context, round int) <-chan llm.Event
 }
 
@@ -39,6 +41,18 @@ func (p *scriptedProvider) Stream(
 	if req.SystemPrompt == server.TitleSystemPrompt {
 		call := p.titleCalls
 		p.titleCalls++
+
+		if p.titleGate != nil {
+			select {
+			case <-p.titleGate:
+			case <-ctx.Done():
+				out := make(chan llm.Event, 1)
+				out <- llm.Event{Type: llm.EventError, Err: ctx.Err()}
+				close(out)
+
+				return out, nil
+			}
+		}
 
 		if call < p.titleFailures {
 			out := make(chan llm.Event, 1)
@@ -753,8 +767,38 @@ func TestServer_FirstTurnGeneratesTitleOnce(t *testing.T) {
 		t.Fatalf("send: %v", err)
 	}
 
-	h.expectType(golemclient.TypeTurnStart)
-	h.expectType(golemclient.TypeTurnEnd)
+	// ADR-0031: the title is generated (and pushed) from a side call
+	// fired at turn start; the wire does not order session_title against
+	// turn events, so collect until the title arrives regardless of
+	// where the turn's own events sit.
+	var titleEvent *golemclient.SessionTitle
+	sawTurnEnd := false
+
+	for titleEvent == nil {
+		ev, got, err := h.client.ReceiveWithTimeout(5 * time.Second)
+		if err != nil || !got {
+			h.t.Fatalf("waiting for the generated title: got=%v err=%v", got, err)
+		}
+
+		switch e := ev.(type) {
+		case golemclient.SessionTitle:
+			titleEvent = &e
+		case golemclient.TurnEnd:
+			sawTurnEnd = true
+		case golemclient.ErrorEvent:
+			h.t.Fatalf("unexpected error event: %+v", e)
+		default:
+			// turn_start / streaming events may interleave in any order
+		}
+	}
+
+	if titleEvent.Title != "Test title" || titleEvent.Session != sess {
+		t.Errorf("title event = %+v, want %q for the session", titleEvent, "Test title")
+	}
+
+	if !sawTurnEnd {
+		h.expectType(golemclient.TypeTurnEnd)
+	}
 
 	// The title lands asynchronously; poll the store for the record.
 	deadline := time.Now().Add(2 * time.Second)
@@ -869,6 +913,86 @@ func TestServer_VersionQueryAnswersHello(t *testing.T) {
 	}
 }
 
+func TestServer_TitleGeneratedDuringTurn(t *testing.T) {
+	t.Parallel()
+
+	// The turn is gated open mid-stream; the title side call has its own
+	// ungated stream. ADR-0031 fires generation at turn start, so the
+	// pushed session_title must arrive while the turn is still running.
+	gate := make(chan struct{})
+
+	provider := &scriptedProvider{rounds: [][]llm.Event{
+		{{Type: llm.EventTextDelta, Delta: "working"}, {Type: llm.EventUsage}},
+		{{Type: llm.EventTextDelta, Delta: "second"}, {Type: llm.EventUsage}},
+	}}
+	provider.streamFn = func(_ context.Context, _ int) <-chan llm.Event {
+		out := make(chan llm.Event, 2)
+		out <- llm.Event{Type: llm.EventTextDelta, Delta: "working"}
+		go func() {
+			defer close(out)
+			<-gate
+			out <- llm.Event{Type: llm.EventUsage, InputTokens: 1, OutputTokens: 1}
+		}()
+
+		return out
+	}
+	h := newHarness(t, provider)
+	sess := h.createSession()
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: sess, Text: "long task",
+	}); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+
+	// The gate holds turn_end back, so any order of arrival still proves
+	// the title landed mid-turn. Collect without discarding: the title
+	// push may interleave before, between, or after the turn's events.
+	var (
+		title                 golemclient.SessionTitle
+		sawTurnStart, sawText bool
+	)
+
+	for title.Title == "" || !sawTurnStart || !sawText {
+		ev, got, err := h.client.ReceiveWithTimeout(5 * time.Second)
+		if err != nil || !got {
+			t.Fatalf("waiting for turn events: got=%v err=%v", got, err)
+		}
+
+		switch e := ev.(type) {
+		case golemclient.SessionTitle:
+			title = e
+		case golemclient.TurnStart:
+			sawTurnStart = true
+		case golemclient.TextDelta:
+			sawText = true
+		case golemclient.TurnEnd:
+			t.Fatal("turn ended while the gate was closed")
+		case golemclient.ErrorEvent:
+			t.Fatalf("unexpected error event: %+v", e)
+		default:
+			// retry / thinking events may interleave too
+		}
+	}
+
+	if title.Title != "Test title" || title.Session != sess {
+		t.Errorf("title event = %+v, want %q for the session", title, "Test title")
+	}
+
+	// The turn is still open here — release it and drain the tail.
+	close(gate)
+	h.expectType(golemclient.TypeTurnEnd)
+
+	summaries, err := h.store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+
+	if len(summaries) != 1 || summaries[0].Title != "Test title" {
+		t.Errorf("summaries = %+v, want the generated title persisted", summaries)
+	}
+}
+
 func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 	t.Parallel()
 
@@ -902,8 +1026,6 @@ func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 		t.Errorf("failed title generation must not persist a record:\n%s", raw)
 	}
 
-	// The failed side call schedules a retry: the next turn's completion
-	// must attempt generation again (the session is still untitled).
 	if err := h.client.Send(golemclient.UserMessage{
 		Type: golemclient.TypeUserMessage, Session: sess, Text: "second turn",
 	}); err != nil {
@@ -911,6 +1033,11 @@ func TestServer_TitleFailureLeavesNoRecord(t *testing.T) {
 	}
 
 	h.expectType(golemclient.TypeTurnStart)
+
+	// The failed side call schedules a retry: the next turn must attempt
+	// generation again (the session is still untitled). The retried title
+	// may arrive anywhere around this turn's events (ADR-0031 fires the
+	// side call at turn start), so drain the turn without discarding.
 	h.expectType(golemclient.TypeTurnEnd)
 
 	// Poll for the retried title. The scripted provider fails only the

@@ -49,6 +49,10 @@ type Server struct {
 	mu             sync.Mutex
 	turns          map[string]*turnState
 	modelOverrides map[string]string // session → model override (SetModel)
+	// titleRuns marks sessions with an in-flight title side call, so
+	// overlapping turns of an untitled session cannot double-fire
+	// generation (ADR-0031).
+	titleRuns map[string]struct{}
 
 	closeOnce sync.Once
 	closed    chan struct{}
@@ -78,6 +82,7 @@ func New(cfg Config) (*Server, error) {
 		registry:       registry,
 		turns:          make(map[string]*turnState),
 		modelOverrides: make(map[string]string),
+		titleRuns:      make(map[string]struct{}),
 		closed:         make(chan struct{}),
 	}, nil
 }
@@ -531,6 +536,28 @@ func newTurnID() string {
 	return ulid.Make().String()
 }
 
+// beginTitleRun reserves the session's title side call; false when one
+// is already in flight (ADR-0031's overlap guard).
+func (s *Server) beginTitleRun(sessionID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, running := s.titleRuns[sessionID]; running {
+		return false
+	}
+
+	s.titleRuns[sessionID] = struct{}{}
+
+	return true
+}
+
+// endTitleRun releases the title side call reservation.
+func (s *Server) endTitleRun(sessionID string) {
+	s.mu.Lock()
+	delete(s.titleRuns, sessionID)
+	s.mu.Unlock()
+}
+
 // runTurn executes the agent loop, persisting then emitting each event.
 func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclient.UserMessage) {
 	defer s.endTurn(msg.Session)
@@ -554,12 +581,21 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 
 	// The title side call retries on later turns until one lands: every
 	// turn of an untitled session gets a chance (the first user message
-	// names the task regardless of which turn succeeds).
+	// names the task regardless of which turn succeeds). ADR-0031 fires
+	// it alongside the turn instead of after turn_end — the first user
+	// message is known the moment the turn starts, so the title lands
+	// while the agent works, and it is pushed to the requesting client
+	// on completion (no waiting for the next session_list).
 	needTitle := sess.Title == ""
 
 	titleText := sess.FirstUserText
 	if firstTurn {
 		titleText = msg.Text
+	}
+
+	if needTitle && titleText != "" && s.beginTitleRun(msg.Session) {
+		//nolint:gosec // the title side call must outlive the request-scoped turn context
+		go s.generateTitle(writer, msg.Session, titleText, model)
 	}
 
 	for event := range ag.Run(ctx, sess.Messages, msg.Text) {
@@ -583,11 +619,6 @@ func (s *Server) runTurn(ctx context.Context, writer *connWriter, msg golemclien
 		}
 
 		writer.send(wire)
-	}
-
-	if needTitle && titleText != "" {
-		//nolint:gosec // the title side call must outlive the request-scoped turn context
-		go s.generateTitle(msg.Session, titleText, model)
 	}
 }
 

@@ -7,6 +7,10 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — session titles generate during the turn and arrive as they land (2026-10-16)
+
+- The title side call now fires when a turn of an untitled session *starts* (ADR-0031) instead of after `turn_end`: the first user message already names the task, so the title is generated while the agent works — minutes-long tool loops no longer delay it. On success the server pushes the persisted `session_title` event to the connection that started the turn, so the TUI header (and any client folding session records) updates within one side call instead of waiting for the next `session_list` (previously: the picker had to be reopened to see the title). The event may interleave anywhere among the turn's events; a per-session guard prevents double generation when turns overlap on an untitled session. Failure behavior is unchanged (logged, no record, retried next turn).
+
 ### Changed — status line animates while a turn runs (2026-10-15)
 
 - The agent status strip's leading glyph is now the animated braille
