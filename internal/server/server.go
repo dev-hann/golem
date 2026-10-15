@@ -266,22 +266,43 @@ func (s *Server) handleUserMessage(writer *connWriter, ev golemclient.UserMessag
 
 		return
 	}
-	// Persist the user message before any turn events reference it.
-	// ADR-0025: the auto-compaction trigger runs first, so any barrier
-	// lands before this line and the fresh question always survives the
-	// fold. The turn is already reserved (beginTurn), so interrupts
-	// cancel the summary side call, and manual /compact sees the session
-	// busy — one compaction at a time.
+	// The whole turn pipeline — auto-compaction, the user-message append,
+	// and the agent loop — runs in the turn goroutine. Only the
+	// beginTurn check is synchronous: running the compaction inline would
+	// stall this connection's read loop for up to compactTimeout while
+	// the summary side call streams, and an interrupt queued behind it
+	// could not cancel the compaction it is meant to stop.
+	//
+	// ADR-0025: the trigger runs first, so any barrier lands before the
+	// user message and the fresh question always survives the fold. The
+	// turn is already reserved (beginTurn), so interrupts cancel the
+	// summary side call, and manual /compact sees the session busy — one
+	// compaction at a time.
+	go s.startTurn(turnCtx, cancel, writer, ev)
+}
+
+// startTurn runs one reserved turn: ADR-0025 auto-compaction (bounded by
+// the turn context, so interrupts reach an in-flight summary call), the
+// user-message append, then the agent loop.
+func (s *Server) startTurn(
+	turnCtx context.Context,
+	cancel context.CancelFunc,
+	writer *connWriter,
+	ev golemclient.UserMessage,
+) {
+	defer cancel()
+
 	s.autoCompact(turnCtx, writer, ev.Session)
 
+	// Persist the user message before any turn events reference it.
 	if err := s.cfg.Store.Append(ev.Session, ev); err != nil {
-		cancel()
 		s.endTurn(ev.Session)
 		writer.send(errorOf(ev.Session, "", "internal", err))
 
 		return
 	}
-	go s.runTurn(turnCtx, writer, ev)
+
+	s.runTurn(turnCtx, writer, ev)
 }
 
 // handleInterrupt cancels the active turn for the session.

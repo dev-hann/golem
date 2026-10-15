@@ -22,6 +22,9 @@ type compactProvider struct {
 	summaryEvents []llm.Event
 	summaryErr    bool
 	sawSummary    bool
+	// summaryOverride replaces the canned summary stream (interrupt and
+	// hang scenarios drive the side call from the test).
+	summaryOverride func(ctx context.Context) (<-chan llm.Event, error)
 }
 
 func (p *compactProvider) Stream(
@@ -30,6 +33,10 @@ func (p *compactProvider) Stream(
 ) (<-chan llm.Event, error) {
 	if req.SystemPrompt == server.CompactSystemPrompt {
 		p.sawSummary = true
+
+		if p.summaryOverride != nil {
+			return p.summaryOverride(ctx)
+		}
 
 		if p.summaryErr {
 			out := make(chan llm.Event, 1)

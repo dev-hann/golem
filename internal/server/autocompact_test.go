@@ -1,9 +1,11 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dev-hann/golem/internal/llm"
 	"github.com/dev-hann/golem/internal/server"
@@ -204,4 +206,90 @@ func appendWire(t *testing.T, h *harness, id string, lines []string) {
 	}
 
 	h.store.Invalidate(id)
+}
+
+// TestAutoCompact_InterruptCancelsSummarySideCall reproduces the read-loop
+// stall (A1): autoCompact ran synchronously on the connection's scanner
+// loop, so an interrupt arriving behind a slow summary side call was not
+// read until the call finished (up to compactTimeout) — and the summary
+// call built its context from Background, so nothing cancelled it. The
+// turn pipeline (barrier + user message + agent loop) must run in the
+// turn goroutine, and the summary call must derive from the turn context.
+func TestAutoCompact_InterruptCancelsSummarySideCall(t *testing.T) {
+	t.Parallel()
+
+	summaryStarted := make(chan struct{})
+	summaryCtx := make(chan context.Context, 1)
+	provider := &compactProvider{
+		scriptedProvider: scriptedProvider{rounds: [][]llm.Event{compactTurnEvents}},
+	}
+	provider.summaryOverride = func(ctx context.Context) (<-chan llm.Event, error) {
+		select {
+		case summaryStarted <- struct{}{}:
+		default:
+		}
+		summaryCtx <- ctx
+
+		out := make(chan llm.Event, 1)
+		go func() {
+			defer close(out)
+			<-ctx.Done()
+			out <- llm.Event{Type: llm.EventError, Err: ctx.Err()}
+		}()
+
+		return out, nil
+	}
+
+	h := newHarnessWithConfig(t, provider, server.Config{
+		AutoCompactBytes: server.DefaultAutoCompactBytes,
+	})
+	id := h.createSessionTracked()
+
+	appendWire(t, h, id, []string{
+		`{"type":"user_message","text":"` + giantText("q") + `"}`,
+		`{"type":"text_delta","delta":"` + giantText("a") + `"}`,
+		`{"type":"turn_end","usage":{"input_tokens":1,"output_tokens":1}}`,
+	})
+
+	if err := h.client.Send(golemclient.UserMessage{
+		Type: golemclient.TypeUserMessage, Session: id, Text: "one more",
+	}); err != nil {
+		t.Fatalf("send user_message: %v", err)
+	}
+
+	select {
+	case <-summaryStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("summary side call never started")
+	}
+
+	// The interrupt must reach the turn while the summary call is still
+	// in flight: it is queued behind nothing but the read loop.
+	if err := h.client.Send(golemclient.Interrupt{
+		Type: golemclient.TypeInterrupt, Session: id,
+	}); err != nil {
+		t.Fatalf("send interrupt: %v", err)
+	}
+
+	// Cancellation must kill the summary side call within the test's
+	// patience, not compactTimeout (60s).
+	select {
+	case ctx := <-summaryCtx:
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("summary side call context was never cancelled by the interrupt")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("summary side call context never handed over")
+	}
+
+	// The killed side call surfaces as compact_failed (ADR-0025: a failed
+	// compaction never blocks the turn), and the cancelled turn's tail
+	// error follows without the connection stalling.
+	if failed, ok := h.expectTypeTolerant(golemclient.TypeCompactFailed).(golemclient.CompactFailed); ok {
+		if failed.Session != id {
+			t.Errorf("compact_failed session = %q, want %q", failed.Session, id)
+		}
+	}
 }

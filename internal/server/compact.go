@@ -65,7 +65,7 @@ func (s *Server) handleCompact(writer *connWriter, ev golemclient.CompactSession
 		return
 	}
 
-	record, err := s.compactSession(ev.Session, sess)
+	record, err := s.compactSession(context.Background(), ev.Session, sess)
 	if err != nil {
 		// The session is untouched — no barrier record was appended.
 		writer.send(golemclient.CompactFailed{
@@ -108,7 +108,7 @@ func (s *Server) autoCompact(ctx context.Context, writer *connWriter, sessionID 
 		return
 	}
 
-	record, err := s.compactSession(sessionID, sess)
+	record, err := s.compactSession(ctx, sessionID, sess)
 	if err != nil {
 		writer.send(golemclient.CompactFailed{
 			Type: golemclient.TypeCompactFailed, Session: sessionID,
@@ -123,13 +123,16 @@ func (s *Server) autoCompact(ctx context.Context, writer *connWriter, sessionID 
 
 // compactSession summarizes a session's folded history and appends the
 // session_compacted barrier record (the shared body of the manual and
-// automatic paths, ADR-0022/ADR-0025). The cache is invalidated so the
-// next Get folds from disk.
+// automatic paths, ADR-0022/ADR-0025). ctx bounds the side call — for the
+// automatic path it is the turn context, so an interrupt cancels an
+// in-flight summary; the manual path passes Background. The cache is
+// invalidated so the next Get folds from disk.
 func (s *Server) compactSession(
+	ctx context.Context,
 	sessionID string,
 	sess *session.Session,
 ) (golemclient.SessionCompacted, error) {
-	summary, err := s.summarizeForCompact(sessionID, sess)
+	summary, err := s.summarizeForCompact(ctx, sessionID, sess)
 	if err != nil {
 		return golemclient.SessionCompacted{}, err
 	}
@@ -147,9 +150,16 @@ func (s *Server) compactSession(
 }
 
 // summarizeForCompact runs the bounded summary side call over a
-// session's folded history and returns the trimmed result.
-func (s *Server) summarizeForCompact(sessionID string, sess *session.Session) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), compactTimeout)
+// session's folded history and returns the trimmed result. The deadline
+// derives from the caller's context: the automatic path passes the turn
+// context (an interrupt kills the summary with the turn, ADR-0025), the
+// manual path passes Background with the compactTimeout cap.
+func (s *Server) summarizeForCompact(
+	ctx context.Context,
+	sessionID string,
+	sess *session.Session,
+) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, compactTimeout)
 	defer cancel()
 
 	stream, err := s.cfg.Provider.Stream(ctx, llm.Request{
