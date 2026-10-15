@@ -195,13 +195,41 @@ Status: implemented — parser, renderer, and streaming rules extended; `make al
 
 ## Phase 4 — Session management polish
 
-### Deliverable
+Status: `/new` and `/resume` (session picker) implemented. Added 2026-10-16: session fork (ADR-0032) — v1 fork through the last completed turn from the command palette; a transcript turn-picking UI is the v2 candidate.
+
+### Deliverables
 
 - `/new`, `/resume` commands. *(The approval UX originally planned here was cancelled — the approval gate was removed entirely; see ADR-0016.)*
+- Session fork (ADR-0032): `Store.Fork` (raw-line copy through a turn boundary), `fork_session`/`session_forked` protocol, palette entry + child load in the TUI.
 
 ### Acceptance criteria
 
 1. `/new` starts a fresh session from the TUI; `/resume` restores a prior one.
+2. Forking a session yields a loadable child whose folded messages and turns equal the parent's prefix through the boundary; the parent file is byte-identical before and after.
+3. Refusals are explicit: busy session, no completed turn, unknown turn id → `invalid_request`; unknown session → `session_not_found`.
+4. The TUI's fork command switches to the child (fresh load, history replay); with no current session it is a no-op (ADR-0018 lazy creation).
+
+### Test list
+
+**internal/session**
+- `TestFork_CopiesRawEventsThroughLastCompleteTurn`
+- `TestFork_ThroughSpecificTurn_TruncatesAtTurnEnd`
+- `TestFork_ChildFoldsIdenticallyToParentPrefix`
+- `TestFork_InheritsCompactionBarrier`
+- `TestFork_EmptyParentFails`
+- `TestFork_UnknownTurnFails`
+- `TestFork_ParentKeptIntact`
+- `TestFork_TitleIncrementsForkSuffix`
+
+**internal/server**
+- `TestServer_ForkSession_RepliesAndChildLoads`
+- `TestServer_ForkSession_BusyParentRefused`
+- `TestServer_ForkSession_EmptyParentRefused`
+- `TestServer_ForkChildTurnsRunIndependently`
+
+**internal/tui**
+- `TestForkCommand_SwitchesToForkedSession`
+- `TestForkCommand_NoSessionIsNoOp`
 
 ---
 

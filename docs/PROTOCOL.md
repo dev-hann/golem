@@ -49,7 +49,7 @@ Override the model this session uses for subsequent turns (same provider; switch
 
 ### `create_session` / `list_sessions` / `load_session`
 
-Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. When an untitled session runs a turn, the server fires a title-generation side call alongside it (ADR-0032) and pushes the persisted `session_title` to the connection that started the turn. `delete_session` → the server cancels a running turn in that session (opencode-style), waits for it to drain, removes the session's file, and confirms with `session_deleted`; a deleted session refuses appends permanently — late writers get an error, never a resurrected file. `compact_session` → server summarizes the folded history (bounded 60s side call, 16 KiB summary cap — ADR-0022), appends a `session_compacted` barrier record, and confirms with a `session_compacted` event; on failure it emits `compact_failed` and the history is untouched. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
+Session management. `create_session` → server emits `session_meta`. `list_sessions` → server emits `session_list`. `load_session` → server emits `session_meta` followed by a `history` replay batch for that client. `rename_session` → server sanitizes the title, persists the newest `session_title` record, and confirms with a `session_title` event. When an untitled session runs a turn, the server fires a title-generation side call alongside it (ADR-0032) and pushes the persisted `session_title` to the connection that started the turn. `delete_session` → the server cancels a running turn in that session (opencode-style), waits for it to drain, removes the session's file, and confirms with `session_deleted`; a deleted session refuses appends permanently — late writers get an error, never a resurrected file. `fork_session` → the server copies the session's stored lines through a turn boundary into a new child session and confirms with `session_forked` (ADR-0034); the parent file is untouched. `compact_session` → server summarizes the folded history (bounded 60s side call, 16 KiB summary cap — ADR-0022), appends a `session_compacted` barrier record, and confirms with a `session_compacted` event; on failure it emits `compact_failed` and the history is untouched. `version_query` → server emits `server_hello` (build handshake for launcher freshness checks).
 
 Clients create their session lazily (ADR-0018): no session is minted until the first submitted message — an abandoned launch must leave nothing behind. A client may connect, `list_sessions`, and `load_session` without ever sending `create_session`.
 
@@ -58,6 +58,8 @@ Clients create their session lazily (ADR-0018): no session is minted until the f
 {"type":"list_sessions"}
 {"type":"delete_session","session":"01J..."}
 {"type":"load_session","session":"01J..."}
+{"type":"fork_session","session":"01J..."}
+{"type":"fork_session","session":"01J...","turn":"01J..."}
 ```
 
 | Field | Type | Description |
@@ -107,6 +109,18 @@ Confirmation that a `delete_session` completed: the session's stored file is gon
 ```json
 {"type":"session_deleted","session":"01J..."}
 ```
+### `session_forked`
+
+Confirmation that a `fork_session` completed: the child session exists and holds the copied prefix. Emitted to the requesting client only (the `session_deleted` pattern); other clients see the child on their next `list_sessions`. The parent file is never touched. `title` is the fork title and is present when the parent was titled; an untitled parent yields an untitled child (the child's title generation follows the normal rules once it runs a turn).
+
+```json
+{"type":"session_forked","session":"01K...","parent":"01J...","title":"Fix auth middleware (fork #1)"}
+```
+
+The boundary is turn-granular (ADR-0032): `fork_session`'s optional `turn` names the turn to fork through (its `turn_end` inclusive); omitted, the boundary is the last completed turn. The child file is written once: `session_meta` (fresh id, parent's cwd), a `session_forked` lineage record (`{"parent":"...","through_turn":"..."}`, skipped by the fold as an unknown type — old servers replay child files), then the parent's raw lines through the boundary with the `session` field rewritten to the child id. Refused with `invalid_request` when the session is busy (appends would race the copy), has no completed turn, or the turn id is unknown.
+
+Fork titles follow opencode's rule: `"X (fork #N)"`, N = 1 + the max suffix among existing siblings with the same base; a parent already carrying a suffix forks as the next number of the same base. Copied lines include any `session_compacted` barriers, so compaction context rules (ADR-0022/0025/0030) apply to the child unchanged.
+
 ### `session_compacted` / `compact_failed`
 
 Compaction (ADR-0022 manual, ADR-0025 automatic). `compact_session` asks the server to fold the session's history into a summary; the server runs a bounded provider side call, appends a `session_compacted` barrier record (append-only storage — never a rewrite), and confirms:
@@ -169,7 +183,7 @@ Examples:
 
 ## Session persistence mirror
 
-Every event in this protocol (except `interrupt` and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format. Sessions recorded before the approval gate's removal may still contain legacy `approval_request` lines; replay skips unknown event types. Deletion (`delete_session`) removes the whole file (ADR-0019); appends to a deleted session fail permanently — the file can never resurrect.
+Every event in this protocol (except `interrupt` and session management requests) is appended to the session's JSONL file as-is before it is emitted to clients. The JSONL file therefore *is* the transcript and replay source; there is no separate storage format. Sessions recorded before the approval gate's removal may still contain legacy `approval_request` lines; replay skips unknown event types. Deletion (`delete_session`) removes the whole file (ADR-0019); appends to a deleted session fail permanently — the file can never resurrect. A fork (`fork_session`, ADR-0032) writes a new file: a `session_meta` header, a `session_forked` lineage record (skipped by the fold as an unknown type), and the parent's copied lines with the `session` field rewritten to the child id. The lineage record is the only new stored type; replay of parent files written before it is unaffected.
 
 ## Versioning
 
