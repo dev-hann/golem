@@ -1902,31 +1902,26 @@ func tokenCount(n int64) string {
 	}
 }
 
-// stickyText returns the question governing the visible region — the
-// latest user message whose block starts above the viewport's bottom
-// line, i.e. the question the content on screen is answering — or ""
-// when that question is already fully visible (or none exists).
+// stickyText returns the latest user message pushed above the rendered
+// window's top row — the question whose bar sits directly above what
+// the transcript shows — or "" when every question's bar is inside the
+// window (or none exists). A newly submitted question does not take
+// the pin while its bar is on screen: the pin cedes only when streamed
+// content pushes the newer bar past the top (ADR-0028, push-out).
 func (m Model) stickyText() string {
-	bottom := m.vp.YOffset + m.vp.Height
+	top, _ := m.renderedWindow()
 
-	governing := -1
+	latest := ""
 
-	for i, span := range m.userSpans {
-		if span.start < bottom {
-			governing = i
+	for _, span := range m.userSpans {
+		if span.start >= top {
+			break // spans ascend: nothing later is pushed out either
 		}
+
+		latest = span.text
 	}
 
-	if governing < 0 {
-		return ""
-	}
-
-	span := m.userSpans[governing]
-	if span.start >= m.vp.YOffset && span.end <= bottom {
-		return "" // fully visible: the transcript itself shows it
-	}
-
-	return span.text
+	return latest
 }
 
 // shrunkViewport renders the transcript window under a pinned sticky
