@@ -48,6 +48,8 @@ type Model struct {
 	toolSpans       []toolSpan
 	leaderArmed     bool
 	leaderGen       int
+	exitArmed       bool // ctrl+c once on an idle empty composer — awaiting the confirm press
+	exitGen         int  // exit-confirm generation (stale-tick guard)
 	cmdQuery        string
 	cmdCursor       int
 	sessions        []golemclient.SessionSummary
@@ -214,6 +216,11 @@ func (m Model) spinTick(msg spinTickMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// exitTimeoutMsg disarms an exit confirmation whose window elapsed; gen
+// identifies which arm it belongs to so a stale tick cannot disarm a
+// newer confirmation.
+type exitTimeoutMsg struct{ gen int }
+
 // leaderTimeout bounds how long a ctrl+x sequence waits for its key.
 const leaderTimeout = 2 * time.Second
 
@@ -250,11 +257,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 		cmd := m.applyEvent(msg.ev)
 		return m, cmd
 	case leaderTimeoutMsg:
-		if m.leaderArmed && m.leaderGen == msg.gen {
-			m.setLeader(false)
-		}
-
-		return m, nil
+		return m.timeoutLeader(msg)
+	case exitTimeoutMsg:
+		return m.timeoutExit(msg)
 	case spinTickMsg:
 		return m.spinTick(msg)
 	case tea.MouseMsg:
@@ -271,6 +276,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:revive // int
 	default:
 		return m, nil
 	}
+}
+
+// timeoutLeader disarms a leader sequence whose window elapsed; a stale
+// generation (a newer arm) leaves the mode alone.
+func (m Model) timeoutLeader(msg leaderTimeoutMsg) (tea.Model, tea.Cmd) {
+	if m.leaderArmed && m.leaderGen == msg.gen {
+		m.setLeader(false)
+	}
+
+	return m, nil
+}
+
+// timeoutExit disarms an exit confirmation whose window elapsed; a
+// stale generation (a newer arm) leaves the hint alone.
+func (m Model) timeoutExit(msg exitTimeoutMsg) (tea.Model, tea.Cmd) {
+	if m.exitArmed && m.exitGen == msg.gen {
+		m.setExit(false)
+	}
+
+	return m, nil
 }
 
 // handleKey dispatches key input by mode.
@@ -293,8 +318,35 @@ func (m Model) handleKey(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-// ctrlC mirrors opencode's exit ladder: an active turn interrupts, then
-// the composer clears, and only an empty composer quits.
+// exitConfirmTimeout bounds how long a lone ctrl+c stays a quit request.
+const exitConfirmTimeout = 3 * time.Second
+
+// armExitConfirm arms the quit confirmation: the placeholder swaps to the
+// confirm hint for the window's duration.
+func armExitConfirm(gen int) tea.Cmd {
+	return tea.Tick(exitConfirmTimeout, func(time.Time) tea.Msg {
+		return exitTimeoutMsg{gen: gen}
+	})
+}
+
+// setExit arms or disarms the ctrl+c quit confirmation, keeping the
+// composer hint in sync — the placeholder only prints while the input is
+// empty, which the arming path guarantees (ctrl+c armed only on empty).
+func (m *Model) setExit(armed bool) {
+	m.exitArmed = armed
+
+	if armed {
+		m.input.Placeholder = exitPlaceholder
+
+		return
+	}
+
+	m.input.Placeholder = chatPlaceholder
+}
+
+// ctrlC mirrors opencode's exit ladder: a live selection copies first,
+// an active turn interrupts, then the composer clears, and only a second
+// ctrl+c on an already-empty composer quits — the first press asks.
 func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 	// A live selection makes ctrl+c copy first; the exit ladder resumes
 	// once the selection is gone (opencode's split).
@@ -318,7 +370,15 @@ func (m Model) ctrlC() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	return m.quitCmd()
+	// Empty idle composer: the first press asks, the second quits.
+	if m.exitArmed {
+		return m.quitCmd()
+	}
+
+	m.setExit(true)
+	m.exitGen++
+
+	return m, armExitConfirm(m.exitGen)
 }
 
 // quitCmd flags the quit and returns the terminal quit command.
@@ -332,6 +392,12 @@ func (m Model) quitCmd() (tea.Model, tea.Cmd) {
 func (m Model) updateChat(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.leaderArmed {
 		return m.leaderKey(key)
+	}
+
+	// A pending quit confirmation dies on the next key of any kind — the
+	// ladder must not swallow typing (ctrl+c itself already handled).
+	if m.exitArmed && key.Type != tea.KeyCtrlC {
+		m.setExit(false)
 	}
 
 	if m.scrollKey(key) {
@@ -390,10 +456,12 @@ func (m *Model) insertNewline() {
 }
 
 // Composer hint texts: the idle hint explains the input keys, the armed
-// hint points at the key-list reference while a ctrl+x sequence pends.
+// hint points at the key-list reference while a ctrl+x sequence pends,
+// and the exit hint demands the confirming press.
 const (
 	chatPlaceholder   = "message… (enter send · alt+enter newline · ctrl+p commands)"
 	leaderPlaceholder = "shortcut mode — n new · l sessions · m model · q quit · esc cancels"
+	exitPlaceholder   = "quit? press ctrl+c again to exit · any key cancels"
 )
 
 // setLeader arms or disarms the ctrl+x prefix mode, keeping the composer's

@@ -198,10 +198,16 @@ func TestModel_CtrlC_CopiesSelectionThenLadder(t *testing.T) {
 		t.Error("highlight must clear after copying")
 	}
 
-	// The ladder resumes: an idle empty composer quits.
+	// The ladder resumes: an idle empty composer asks first, then quits.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC}) // arm the confirm
+
+	if m.quitting {
+		t.Fatal("the first post-copy ctrl+c must ask, not quit")
+	}
+
 	_, quitCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if quitCmd == nil {
-		t.Error("ctrl+c after copy should fall through to quit")
+		t.Error("ctrl+c after copy should fall through to the exit ladder")
 	}
 }
 

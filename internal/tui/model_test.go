@@ -101,6 +101,13 @@ func tick(m Model, gen int) Model {
 	return next.(Model)
 }
 
+// exitTick delivers the exit-confirmation timeout for the given generation.
+func exitTick(t *testing.T, m Model, gen int) Model {
+	t.Helper()
+	next, _ := m.Update(exitTimeoutMsg{gen: gen})
+	return next.(Model)
+}
+
 // rkey presses a single printable key.
 func rkey(s rune) tea.KeyMsg {
 	return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{s}}

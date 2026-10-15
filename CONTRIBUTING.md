@@ -36,6 +36,16 @@ A PR is mergeable only when **all** of the following hold:
 - No `init()`, no global mutable state; constructor injection everywhere.
 - New dependencies require an ADR in docs/DECISIONS.md explaining why stdlib or existing deps can't do it.
 
+## Driving the TUI (E2E checks)
+
+For pty-level checks of the TUI, use the unified runner instead of writing ad-hoc pty scripts:
+
+```bash
+printf 'sleep 3\nkeys \x03\n' | scripts/tui-drive.py   # boot, ctrl+c once, dump the screen
+```
+
+The runner bakes in isolation and cleanup: a fresh temp dir per run (`XDG_DATA_HOME`/`XDG_RUNTIME_DIR`), a fresh `go build` into it, SIGTERM of the spawned `golem serve` via the isolated pidfile, and temp-dir removal. This is load-bearing: the launcher restarts any server whose version differs (`internal/cli/launch.go`), so an ad-hoc script that runs a second build against the default socket will SIGTERM the production server and EOF every live TUI session — exactly the incident this runner replaced. Known fidelity artifact: under a driven pty the ctrl+c exit ladder absorbs one extra press (see the runner's docstring).
+
 ## Commits
 
 Conventional Commits (`feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`, `perf:`). One logical change per commit, including its tests and doc updates.

@@ -128,6 +128,126 @@ func TestKey_CtrlD_Quits(t *testing.T) {
 	}
 }
 
+// RED first: the exit-confirmation ladder. First ctrl+c on an idle empty
+// composer must ASK, not quit; a second press within the window quits.
+func TestKey_CtrlC_ConfirmExitLadder(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if m.quitting {
+		t.Fatal("first ctrl+c on an empty composer must not quit — it must ask")
+	}
+
+	if !m.exitArmed {
+		t.Error("first ctrl+c must arm the exit confirmation")
+	}
+
+	if !strings.Contains(m.input.Placeholder, "ctrl+c") {
+		t.Errorf("the composer must show the quit hint: %q", m.input.Placeholder)
+	}
+
+	// Any other key disarms it (an arrow moves the cursor, types nothing).
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyUp})
+
+	if m.exitArmed {
+		t.Error("typing must disarm the exit confirmation")
+	}
+
+	// Arm again, let the window lapse.
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = exitTick(t, m, m.exitGen)
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyUp})
+
+	if m.quitting {
+		t.Error("an expired confirmation must not quit on the next key")
+	}
+
+	if m.exitArmed {
+		t.Error("an expired confirmation must disarm")
+	}
+
+	// Arm again; the second press within the window quits.
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if !m.quitting {
+		t.Error("second ctrl+c within the window must quit")
+	}
+}
+
+// pressKey drives one key press WITHOUT running the resulting cmd — the
+// exit arm returns a tea.Tick that would stall the test for the window.
+func pressKey(t *testing.T, m Model, k tea.KeyMsg) Model {
+	t.Helper()
+	next, _ := m.Update(k)
+	return next.(Model)
+}
+
+// The armed state must reset when the world changes under it: a submit
+// (turn starting) or a draft appearing.
+func TestKey_CtrlC_ArmedStateResetsOnSubmit(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = deliver(t, m, golemclient.SessionMeta{Type: golemclient.TypeSessionMeta, Session: "s1"})
+	m = resize(m, 100, 40)
+
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if !m.exitArmed {
+		t.Fatal("precondition: exit armed")
+	}
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEnter})
+
+	if m.exitArmed {
+		t.Error("submitting must disarm the exit confirmation")
+	}
+
+	if len(fc.sent) != 0 {
+		t.Errorf("submit with an empty composer must send nothing: %+v", fc.sent)
+	}
+}
+
+func TestKey_CtrlC_EscDisarms(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+
+	if m.exitArmed {
+		t.Error("esc must disarm the exit confirmation")
+	}
+}
+
+func TestKey_CtrlC_LadderOrderUnchanged(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = deliver(t, m, golemclient.TurnStart{Type: golemclient.TypeTurnStart, Session: "s1"})
+
+	// A running turn outranks the exit arm: ctrl+c interrupts first.
+	m = pressKey(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	next, sendCmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = next.(Model)
+	if sendCmd != nil {
+		_ = sendCmd()
+	}
+
+	if _, ok := lastSent(t, fc).(golemclient.Interrupt); !ok {
+		t.Fatalf("ctrl+c during a turn must interrupt, sent=%v", fc.sent)
+	}
+
+	if m.exitArmed {
+		t.Error("an interrupting press must not arm the exit confirmation")
+	}
+}
+
 func TestKey_CtrlC_ClearsInputBeforeQuitting(t *testing.T) {
 	t.Parallel()
 
@@ -148,10 +268,16 @@ func TestKey_CtrlC_ClearsInputBeforeQuitting(t *testing.T) {
 		t.Errorf("ctrl+c clearing input sent events: %+v", fc.sent)
 	}
 
-	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC}) // first press arms the confirm…
+
+	if m.quitting {
+		t.Error("first ctrl+c on an empty composer must ask, not quit")
+	}
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlC}) // …the second quits
 
 	if !m.quitting {
-		t.Error("ctrl+c on an empty composer must quit")
+		t.Error("ctrl+c on an empty composer must quit after the confirm")
 	}
 }
 
