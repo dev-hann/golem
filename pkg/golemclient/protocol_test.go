@@ -18,6 +18,8 @@ func TestRoundTrip_AllClientEvents(t *testing.T) {
 		golemclient.CreateSession{Type: golemclient.TypeCreateSession, Cwd: "/tmp"},
 		golemclient.ListSessions{Type: golemclient.TypeListSessions},
 		golemclient.LoadSession{Type: golemclient.TypeLoadSession, Session: "s1"},
+		golemclient.RenameSession{Type: golemclient.TypeRenameSession, Session: "s1", Title: "t"},
+		golemclient.DeleteSession{Type: golemclient.TypeDeleteSession, Session: "s1"},
 	}
 	for _, ev := range events {
 		t.Run(jsonTypeName(t, ev), func(t *testing.T) {
@@ -63,6 +65,7 @@ func TestRoundTrip_AllServerEvents(t *testing.T) {
 			Type: golemclient.TypeTurnEnd, Session: "s1", Turn: "t1",
 			Usage: golemclient.Usage{InputTokens: 5, OutputTokens: 2},
 		},
+		golemclient.SessionDeleted{Type: golemclient.TypeSessionDeleted, Session: "s1"},
 	}
 	for _, ev := range events {
 		t.Run(jsonTypeName(t, ev), func(t *testing.T) {

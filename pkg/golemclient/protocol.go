@@ -17,6 +17,7 @@ const (
 	TypeListSessions  = "list_sessions"
 	TypeLoadSession   = "load_session"
 	TypeRenameSession = "rename_session"
+	TypeDeleteSession = "delete_session"
 	TypeVersionQuery  = "version_query"
 )
 
@@ -29,10 +30,12 @@ const (
 	TypeTextDelta     = "text_delta"
 	TypeToolCallStart = "tool_call_start"
 	TypeToolCallEnd   = "tool_call_end"
-	TypeError         = "error"
-	TypeTurnEnd       = "turn_end"
-	TypeSessionTitle  = "session_title"
-	TypeServerHello   = "server_hello"
+	//nolint:lll // aligned const block
+	TypeError          = "error"
+	TypeTurnEnd        = "turn_end"
+	TypeSessionTitle   = "session_title"
+	TypeSessionDeleted = "session_deleted"
+	TypeServerHello    = "server_hello"
 )
 
 // Envelope is the minimal shape every message shares. Unknown types must be
@@ -190,6 +193,14 @@ type RenameSession struct {
 	Title   string `json:"title"`
 }
 
+// DeleteSession asks the server to remove a session. A running turn in
+// the session is cancelled first (opencode-style), then the stored file
+// is deleted.
+type DeleteSession struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
+}
+
 // VersionQuery asks the server to identify its build (ServerHello).
 type VersionQuery struct {
 	Type string `json:"type"`
@@ -199,6 +210,14 @@ type VersionQuery struct {
 type ServerHello struct {
 	Type    string `json:"type"`
 	Version string `json:"version"`
+}
+
+// SessionDeleted confirms DeleteSession: the session's stored file is
+// gone; further events for it (a cancelled turn's tail) carry no
+// forward meaning and clients drop them.
+type SessionDeleted struct {
+	Type    string `json:"type"`
+	Session string `json:"session"`
 }
 
 // TypeSetModel labels a client set_model event.
@@ -216,26 +235,28 @@ type decoder func([]byte) (any, error)
 
 // decoders maps every known event type to its typed decoder. Unknown types
 // fall through to the Envelope (forward compatibility per PROTOCOL.md).
-var decoders = map[string]decoder{
-	TypeUserMessage:   typed[UserMessage],
-	TypeSetModel:      typed[SetModel],
-	TypeInterrupt:     typed[Interrupt],
-	TypeCreateSession: typed[CreateSession],
-	TypeListSessions:  typed[ListSessions],
-	TypeLoadSession:   typed[LoadSession],
-	TypeSessionMeta:   typed[SessionMeta],
-	TypeHistory:       typed[History],
-	TypeSessionList:   typed[SessionList],
-	TypeTurnStart:     typed[TurnStart],
-	TypeTextDelta:     typed[TextDelta],
-	TypeToolCallStart: typed[ToolCallStart],
-	TypeToolCallEnd:   typed[ToolCallEnd],
-	TypeError:         typed[ErrorEvent],
-	TypeTurnEnd:       typed[TurnEnd],
-	TypeSessionTitle:  typed[SessionTitle],
-	TypeServerHello:   typed[ServerHello],
-	TypeRenameSession: typed[RenameSession],
-	TypeVersionQuery:  typed[VersionQuery],
+var decoders = map[string]decoder{ //nolint:lll // one line per type
+	TypeUserMessage:    typed[UserMessage],
+	TypeSetModel:       typed[SetModel],
+	TypeInterrupt:      typed[Interrupt],
+	TypeCreateSession:  typed[CreateSession],
+	TypeListSessions:   typed[ListSessions],
+	TypeLoadSession:    typed[LoadSession],
+	TypeSessionMeta:    typed[SessionMeta],
+	TypeHistory:        typed[History],
+	TypeSessionList:    typed[SessionList],
+	TypeTurnStart:      typed[TurnStart],
+	TypeTextDelta:      typed[TextDelta],
+	TypeToolCallStart:  typed[ToolCallStart],
+	TypeToolCallEnd:    typed[ToolCallEnd],
+	TypeError:          typed[ErrorEvent],
+	TypeTurnEnd:        typed[TurnEnd],
+	TypeSessionTitle:   typed[SessionTitle],
+	TypeSessionDeleted: typed[SessionDeleted],
+	TypeServerHello:    typed[ServerHello],
+	TypeRenameSession:  typed[RenameSession],
+	TypeDeleteSession:  typed[DeleteSession],
+	TypeVersionQuery:   typed[VersionQuery],
 }
 
 // Decode classifies one raw NDJSON line into a typed event. It returns the

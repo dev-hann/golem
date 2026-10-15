@@ -369,3 +369,52 @@ func TestStore_TitleLastRecordWins(t *testing.T) {
 		t.Errorf("summaries = %+v, want the latest title record to win", summaries)
 	}
 }
+
+func TestStore_DeleteRemovesFileAndListing(t *testing.T) {
+	t.Parallel()
+	store := newStore(t, 4)
+	keep, err := store.Create("/keep")
+	if err != nil {
+		t.Fatalf("Create keep: %v", err)
+	}
+	gone, err := store.Create("/gone")
+	if err != nil {
+		t.Fatalf("Create gone: %v", err)
+	}
+	appendEvents(t, store, gone.ID, textTurn("hi", "hello")...)
+
+	if err := store.Delete(gone.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(store.Dir(), gone.ID+".jsonl")); !os.IsNotExist(err) {
+		t.Errorf("deleted session file still on disk (stat err = %v)", err)
+	}
+
+	summaries, err := store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(summaries) != 1 || summaries[0].ID != keep.ID {
+		t.Errorf("summaries = %+v, want only %s", summaries, keep.ID)
+	}
+
+	// A Get after Delete reports the session gone, not a fold of a
+	// missing file.
+	if _, err := store.Get(gone.ID); err == nil {
+		t.Error("Get after Delete should error")
+	}
+}
+
+func TestStore_DeleteUnknownIDFails(t *testing.T) {
+	t.Parallel()
+	store := newStore(t, 2)
+
+	if err := store.Delete("01ARZ3NDEKTSV4RRFFQ69G5FAV"); err == nil {
+		t.Error("Delete of a never-created session should error")
+	}
+
+	if err := store.Delete("../escape"); err == nil {
+		t.Error("Delete of an invalid id should error")
+	}
+}

@@ -7,6 +7,21 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Added — session deletion (ctrl+d in the picker, 2026-10-15)
+
+- `delete_session` removes a session from the server, opencode-style:
+  a running turn is cancelled first and drained (bounded wait), then
+  the JSONL file is deleted and confirmed with `session_deleted`.
+  A session mid-delete refuses appends — a turn goroutine or the title
+  side call can no longer resurrect the removed file (ADR-0019).
+- The session picker binds `ctrl+d` to delete: the first press arms the
+  row (its title swaps to `ctrl+d again to confirm` in the error
+  color), the second removes it optimistically and sends the request;
+  moving, typing, or `esc` disarms. Deleting the session you stand in
+  resets to the lazy-start state — the next message creates a fresh
+  session (ADR-0018). Confirmation from the server reconciles the list
+  (another client's delete drops the row on arrival).
+
 ### Fixed — the status bar shows a running turn after switching back to its session (2026-10-14)
 
 - Switching sessions while a turn was streaming and then returning to it

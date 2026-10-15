@@ -1557,3 +1557,175 @@ func TestModel_ToolBlock_ClickLandsOnRenderedRowUnderStickyAtBottom(t *testing.T
 		t.Error("click must land on the rendered tool row, not a row ahead of it")
 	}
 }
+
+func TestModel_SessionPickerDeleteFlow(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "Fix auth middleware", Cwd: "/a"},
+			{ID: "s2", Title: "Add session tests", Cwd: "/b"},
+		},
+	})
+
+	// First ctrl+d arms; nothing sent; the row shows the confirm hint.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	if len(fc.sent) != 0 {
+		t.Fatalf("armed delete must not send yet: %+v", fc.sent)
+	}
+	if m.sessDeleteArmed != "s1" {
+		t.Errorf("sessDeleteArmed = %q, want s1", m.sessDeleteArmed)
+	}
+	if !strings.Contains(m.View(), "ctrl+d again") {
+		t.Errorf("armed row must show the confirm hint:\n%s", m.View())
+	}
+
+	// Second ctrl+d sends the delete and removes the row optimistically.
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	sent, ok := lastSent(t, fc).(golemclient.DeleteSession)
+	if !ok || sent.Session != "s1" {
+		t.Fatalf("sent = %#v, want delete s1", sent)
+	}
+	if len(m.sessions) != 1 || m.sessions[0].ID != "s2" {
+		t.Errorf("sessions after optimistic delete = %+v, want only s2", m.sessions)
+	}
+	if m.sessDeleteArmed != "" {
+		t.Errorf("sessDeleteArmed = %q, want disarmed after firing", m.sessDeleteArmed)
+	}
+	if strings.Contains(m.View(), "Fix auth middleware") {
+		t.Errorf("deleted row must leave the picker:\n%s", m.View())
+	}
+}
+
+func TestModel_SessionPickerDeleteDisarmsOnMoveAndEscape(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "Fix auth middleware", Cwd: "/a"},
+			{ID: "s2", Title: "Add session tests", Cwd: "/b"},
+		},
+	})
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})
+	if m.sessDeleteArmed != "" {
+		t.Errorf("moving the cursor must disarm: %q", m.sessDeleteArmed)
+	}
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD})
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyEscape})
+	if m.sessDeleteArmed != "" {
+		t.Errorf("esc must disarm: %q", m.sessDeleteArmed)
+	}
+
+	if len(fc.sent) != 0 {
+		t.Errorf("disarmed deletes never send: %+v", fc.sent)
+	}
+}
+
+func TestModel_SessionPickerDeleteWrongRowDoesNotFire(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "Fix auth middleware", Cwd: "/a"},
+			{ID: "s2", Title: "Add session tests", Cwd: "/b"},
+		},
+	})
+
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // arm s1
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyDown})  // disarms
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // arm s2 now
+	m = key(t, m, tea.KeyMsg{Type: tea.KeyCtrlD}) // fire on s2
+
+	sent, ok := lastSent(t, fc).(golemclient.DeleteSession)
+	if !ok || sent.Session != "s2" {
+		t.Fatalf("sent = %#v, want delete s2 (the highlighted row)", sent)
+	}
+	if len(m.sessions) != 1 || m.sessions[0].ID != "s1" {
+		t.Errorf("sessions = %+v, want only s1 left", m.sessions)
+	}
+}
+
+func TestModel_SessionDeletedEventReconcilesList(t *testing.T) {
+	t.Parallel()
+
+	m, fc := wired(t)
+	m = resize(m, 100, 40)
+	m.sessionID = "s9"
+	m = deliver(t, m, golemclient.SessionList{
+		Type: golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{
+			{ID: "s1", Title: "Fix auth middleware", Cwd: "/a"},
+			{ID: "s2", Title: "Add session tests", Cwd: "/b"},
+		},
+	})
+
+	// Server confirmation for a session this client did not delete
+	// optimistically (another client's delete).
+	m = deliver(t, m, golemclient.SessionDeleted{
+		Type: golemclient.TypeSessionDeleted, Session: "s2",
+	})
+
+	if len(m.sessions) != 1 || m.sessions[0].ID != "s1" {
+		t.Errorf("sessions = %+v, want s2 dropped on confirmation", m.sessions)
+	}
+
+	if len(fc.sent) != 0 {
+		t.Errorf("reconciliation must not send: %+v", fc.sent)
+	}
+}
+
+func TestModel_SessionDeletedCurrentSessionResetsView(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m.sessionID = "s1"
+	m.blocks = []block{{kind: blockUser, text: "hello"}}
+	m.turnActive = true
+	m.refreshView()
+
+	m = deliver(t, m, golemclient.SessionDeleted{
+		Type: golemclient.TypeSessionDeleted, Session: "s1",
+	})
+
+	if m.sessionID != "" {
+		t.Errorf("sessionID = %q, want cleared back to the lazy-start state", m.sessionID)
+	}
+	if len(m.blocks) != 0 {
+		t.Errorf("blocks = %+v, want the transcript cleared", m.blocks)
+	}
+	if m.turnActive {
+		t.Error("deleting the current session must clear the turn flag")
+	}
+}
+
+func TestModel_SessionPickerFooterMentionsDelete(t *testing.T) {
+	t.Parallel()
+
+	m, _ := wired(t)
+	m = resize(m, 100, 40)
+	m.listRequest = true
+	m = deliver(t, m, golemclient.SessionList{
+		Type:     golemclient.TypeSessionList,
+		Sessions: []golemclient.SessionSummary{{ID: "s1", Title: "Fix auth middleware", Cwd: "/a"}},
+	})
+
+	if !strings.Contains(m.View(), "ctrl+d delete") {
+		t.Errorf("picker footer must mention ctrl+d delete:\n%s", m.View())
+	}
+}
