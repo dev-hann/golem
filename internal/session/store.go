@@ -341,7 +341,9 @@ func (s *Store) summarize(id string) (Summary, error) {
 	}, nil
 }
 
-// load reads and folds a session file.
+// load reads and folds a session file in one pass: conversation state
+// and identity (cwd, from the session_meta header line) come out of the
+// same scan.
 func (s *Store) load(id string) (*Session, error) {
 	path := s.path(id)
 
@@ -351,7 +353,7 @@ func (s *Store) load(id string) (*Session, error) {
 	}
 	defer f.Close() //nolint:errcheck // read-only handle
 
-	sess := &Session{ID: id, Cwd: s.sniffCwd(id), Created: ulidTime(id)}
+	sess := &Session{ID: id, Created: ulidTime(id)}
 	fold := newFolder()
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -364,43 +366,13 @@ func (s *Store) load(id string) (*Session, error) {
 		return nil, fmt.Errorf("session: scanning %s: %w", path, err)
 	}
 
+	sess.Cwd = fold.cwd
 	sess.Messages = fold.history()
 	sess.Turns = fold.turns
 	sess.Title = fold.title
 	sess.FirstUserText = fold.firstUserText
 
 	return sess, nil
-}
-
-// sniffCwd recovers the recorded cwd. The first user_message line carries it
-// is not guaranteed, so fall back to empty and let the first line's
-// create marker win when present.
-func (s *Store) sniffCwd(id string) string {
-	path := s.path(id)
-
-	f, err := os.Open(path) //nolint:gosec // id validated
-	if err != nil {
-		return ""
-	}
-	defer f.Close() //nolint:errcheck // read-only handle
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		var meta struct {
-			Type    string `json:"type"`
-			Session string `json:"session"`
-			Cwd     string `json:"cwd"`
-		}
-		if err := json.Unmarshal(scanner.Bytes(), &meta); err != nil {
-			continue
-		}
-
-		if meta.Type == "session_meta" {
-			return meta.Cwd
-		}
-	}
-
-	return ""
 }
 
 // path is the JSONL file for a session id.

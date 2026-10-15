@@ -14,6 +14,12 @@ type folder struct {
 	title         string
 	firstUserText string
 
+	// sawMeta records that the session_meta header line was folded;
+	// cwd carries what it said (first wins — the file may grow stray
+	// meta lines; the header Create writes is authoritative).
+	sawMeta bool
+	cwd     string
+
 	// compacted flags a session_compacted barrier seen while folding:
 	// everything before it dropped from context, replaced by the
 	// summary message (ADR-0022).
@@ -84,10 +90,31 @@ func (f *folder) feed(line []byte) {
 		f.title = ev.Title
 	case "session_compacted":
 		f.feedCompacted(line)
+	case "session_meta":
+		f.feedSessionMeta(line)
 	default:
-		// session_meta / error / interrupt events do not change
-		// conversation state.
+		// error / interrupt events do not change conversation state.
 	}
+}
+
+// feedSessionMeta folds the self-describing header line: the first
+// session_meta records the session's cwd. This keeps loading to one pass
+// over the file.
+func (f *folder) feedSessionMeta(line []byte) {
+	if f.sawMeta {
+		return
+	}
+
+	f.sawMeta = true
+
+	var ev struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal(line, &ev); err != nil {
+		return
+	}
+
+	f.cwd = ev.Cwd
 }
 
 // feedTextDelta folds one text_delta line into the assistant buffer.

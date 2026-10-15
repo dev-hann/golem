@@ -471,3 +471,46 @@ func TestStore_AppendDuringDeleteNeverResurrects(t *testing.T) {
 		t.Errorf("Append after Delete = %v, want ErrDeleted", err)
 	}
 }
+
+// TestGet_CwdFoldsFromSessionMeta pins the one-pass load: the folder
+// records the cwd from the first session_meta line (first wins, like the
+// old sniffCwd), so Get folds identity and conversation from one file
+// pass.
+func TestGet_CwdFoldsFromSessionMeta(t *testing.T) {
+	t.Parallel()
+
+	store := newStore(t, 2)
+	sess, err := store.Create("/proj")
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	appendEvents(t, store, sess.ID, textTurn("hi", "hello")...)
+
+	// Force a disk reload: fresh store over the same directory.
+	reopened, err := session.NewStore(storeDir(t, store), 2)
+	if err != nil {
+		t.Fatalf("reopening: %v", err)
+	}
+
+	loaded, err := reopened.Get(sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+
+	if loaded.Cwd != "/proj" {
+		t.Errorf("cwd = %q, want /proj (folded from session_meta)", loaded.Cwd)
+	}
+	if loaded.ID != sess.ID {
+		t.Errorf("id = %q, want %q", loaded.ID, sess.ID)
+	}
+
+	// First-wins: a later session_meta must not overwrite the recorded
+	// cwd (Create writes the header once; storage stays append-only).
+	appendEvents(t, store, sess.ID,
+		map[string]any{"type": "session_meta", "session": sess.ID, "cwd": "/other", "created": "now"})
+	reopened.Invalidate(sess.ID)
+
+	if again, err := reopened.Get(sess.ID); err != nil || again.Cwd != "/proj" {
+		t.Errorf("cwd after second meta = %q (err %v), want /proj (first wins)", again.Cwd, err)
+	}
+}
