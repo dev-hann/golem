@@ -82,7 +82,7 @@ func (t GrepTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 		return "", fmt.Errorf("grep: %w", err)
 	}
 
-	matches, err := grepWalk(rx, target, a.Include, root)
+	matches, err := grepWalk(rx, target, a.Include, root, loadIgnoreSet(root))
 	if err != nil {
 		return "", fmt.Errorf("grep: %w", err)
 	}
@@ -94,9 +94,10 @@ func (t GrepTool) Execute(_ context.Context, args json.RawMessage) (string, erro
 	return strings.Join(matches, "\n"), nil
 }
 
-// grepWalk walks target collecting matches. Directories named .git are
-// skipped.
-func grepWalk(rx *regexp.Regexp, target, include, root string) ([]string, error) {
+// grepWalk walks target collecting matches. Skip-listed directories
+// (node_modules, build output, VCS internals, …) and root-.gitignore paths
+// are pruned (ADR-0033).
+func grepWalk(rx *regexp.Regexp, target, include, root string, ign *ignoreSet) ([]string, error) {
 	var matches []string
 
 	emit := func(path string, line int, text string) {
@@ -119,11 +120,21 @@ func grepWalk(rx *regexp.Regexp, target, include, root string) ([]string, error)
 			return err
 		}
 
+		rel := relPath(root, path)
+
 		if d.IsDir() {
-			if d.Name() == ".git" {
+			if path == root {
+				return nil
+			}
+
+			if walkSkipDir(d.Name(), rel, ign) {
 				return filepath.SkipDir
 			}
 
+			return nil
+		}
+
+		if walkSkipFile(rel, ign, false) {
 			return nil
 		}
 
@@ -143,7 +154,7 @@ func grepWalk(rx *regexp.Regexp, target, include, root string) ([]string, error)
 }
 
 // grepFile scans one file, invoking emit for each matching line. Binary-ish
-// content (NUL byte in the first 512 bytes) is skipped.
+// content (by content sniffing, ADR-0033) is skipped.
 func grepFile(
 	rx *regexp.Regexp,
 	path, include string,
@@ -165,7 +176,7 @@ func grepFile(
 	reader := bufio.NewReader(f)
 
 	probe, _ := reader.Peek(512)
-	if strings.ContainsRune(string(probe), 0) {
+	if isBinaryContent(probe) {
 		return nil
 	}
 

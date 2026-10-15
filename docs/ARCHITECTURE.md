@@ -137,6 +137,7 @@ Design target ≤ 150 MB RSS under normal use, enforced by `GOMEMLIMIT` (config 
 
 - No local tokenizer — token counts come from provider usage fields.
 - Grep/glob tool output is truncated to a byte budget before entering context.
+- Grep/glob walks prune dependency/build/cache directories and the root `.gitignore`; glob drops binary files by extension, read refuses binary content (ADR-0033).
 - Session cache is bounded; JSONL files stream from disk.
 
 ## Allowed dependencies

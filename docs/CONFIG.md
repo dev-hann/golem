@@ -83,6 +83,11 @@ Do not sync `~/.config/golem/` through dotfiles repos or cloud sync. The future 
 
 ### `[tools]`
 
+Built-in tool behavior (ADR-0033 for walk/binary rules):
+
+- **read** — refuses binary files (points the model at bash); `offset` (1-based line) and `limit` (line count) select a window; omitted/0 mean file start/end, negative values error.
+- **grep / glob** — walks prune dependency trees (`node_modules`, `vendor`, …), build output (`dist`, `build`, `bin`, …), caches, VCS internals, and `.worktrees/`; the workspace root `.gitignore` is honored (subset: no `!negation`, no interior `**`, no nested files); glob additionally drops binary files by extension (grep sniffs content instead).
+
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `bash_timeout_secs` | int | `120` | Per-command wall clock limit |

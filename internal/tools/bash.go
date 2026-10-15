@@ -33,7 +33,10 @@ func (t BashTool) Name() string { return "bash" }
 
 // Description implements Tool.
 func (BashTool) Description() string {
-	return "Run a shell command with bash -c and return combined stdout/stderr."
+	return "Run a shell command with bash -c and return combined stdout/stderr. " +
+		"Use it for commands with no dedicated tool (build, test, git); " +
+		"prefer read/grep/glob over cat/grep/find for file inspection. " +
+		"Chain independent checks with && into one call when possible."
 }
 
 // InputSchema implements Tool.

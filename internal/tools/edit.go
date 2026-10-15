@@ -39,7 +39,9 @@ func (t EditTool) Name() string { return "edit" }
 
 // Description implements Tool.
 func (EditTool) Description() string {
-	return "Replace an exact string in a file. old_string must be unique unless replace_all is true."
+	return "Replace an exact string in a file. old_string must be unique unless replace_all is true. " +
+		"If the string is not found or is ambiguous, read the file first and include surrounding " +
+		"context lines in old_string to make it unique. Prefer edit over write for existing files."
 }
 
 // InputSchema implements Tool.
@@ -47,8 +49,12 @@ func (EditTool) InputSchema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":       map[string]any{"type": "string", "description": "File path, relative to the workspace root."},
-			"old_string": map[string]any{"type": "string", "description": "Exact text to replace."},
+			"path": map[string]any{"type": "string", "description": "File path, relative to the workspace root."},
+			"old_string": map[string]any{
+				"type": "string",
+				"description": "Exact text to replace. " +
+					"Include surrounding context lines when the target text appears more than once.",
+			},
 			"new_string": map[string]any{"type": "string", "description": "Replacement text."},
 			"replace_all": map[string]any{
 				"type":        "boolean",

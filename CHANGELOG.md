@@ -7,6 +7,25 @@ config schema may change without notice.
 
 ## [Unreleased]
 
+### Changed — walk hygiene and read windows for built-in tools (2026-10-17, ADR-0033)
+
+- grep/glob walks no longer scan dependency trees, build output, caches, or
+  golem's own `.worktrees/` (named skip list mirroring Gemini CLI's default
+  exclusions), and both honor the workspace root's `.gitignore` (in-house
+  parser; `!negation`, interior `**`, and nested files deliberately
+  unsupported). glob additionally drops binary files by extension while grep
+  sniffs file content — switching from the NUL probe to
+  `net/http.DetectContentType`, which also fixes UTF-16 text being
+  misclassified as binary. read refuses binary files with a pointer to bash
+  (`file`, `strings`) and gains `offset` (1-based line) and `limit` (line
+  count) so the model can read windows of large files instead of pulling
+  them whole into context; numbering reflects true file lines. Tool
+  descriptions gained one sentence each: edit now says what to do on
+  not-found/ambiguous (read first, add context), bash says to prefer
+  read/grep/glob over cat/grep/find and chain independent checks with `&&`.
+  Parallel walking was evaluated and deferred — the win is latency, not
+  context, and no latency complaint exists yet.
+
 ### Changed — system prompt baseline + per-turn environment block (2026-10-16, ADR-0031)
 
 - The built-in system prompt grows from 5 to ~16 lines, adding the safety
